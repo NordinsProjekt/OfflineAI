@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/1. Domain/" />
+  <Folder Name="/2. Application/">
+    <Project Path="Factories/Factories.csproj" />
+    <Project Path="Services/Services.csproj" />
+  </Folder>
+  <Folder Name="/3. Infrastructure/" />
+  <Folder Name="/4. Presentation/">
+    <Project Path="OfflineAI/OfflineAI.csproj" />
+  </Folder>
+</Solution>
