@@ -4,7 +4,9 @@
     <Project Path="Factories/Factories.csproj" />
     <Project Path="Services/Services.csproj" />
   </Folder>
-  <Folder Name="/3. Infrastructure/" />
+  <Folder Name="/3. Infrastructure/">
+    <Project Path="MemoryLibrary/MemoryLibrary.csproj" Id="c06bc0bc-8c15-4a2f-8a93-583ed2fd4f25" />
+  </Folder>
   <Folder Name="/4. Presentation/">
     <Project Path="OfflineAI/OfflineAI.csproj" />
   </Folder>

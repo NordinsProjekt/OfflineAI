@@ -7,71 +7,29 @@ namespace OfflineAI
     {
         static async Task Main(string[] args)
         {
-            using var service = new AiChatService();
+            await RunOriginalMode();
+        }
 
-            Console.WriteLine("LLM Chat Interface");
-            Console.WriteLine("Commands:");
-            Console.WriteLine("  'stream' - Switch to streaming mode");
-            Console.WriteLine("  'normal' - Switch to normal mode");
-            Console.WriteLine("  'example' - Run streaming example");
-            Console.WriteLine("  'compare' - Compare streaming vs normal");
-            Console.WriteLine("  'exit' - Exit application");
-            Console.WriteLine("  Or just type your question\n");
+        static async Task RunOriginalMode()
+        {
+            Console.WriteLine("\n=== Original CLI Mode ===");
+            Console.WriteLine("Type your boardgames question\n");
 
-            var streamingMode = true;
-            Console.WriteLine("Current mode: streaming\n");
+            var memory = new SimpleMemory();
+            var service = new AiChatService(memory);
+
+            Console.WriteLine("Type 'exit' to quit, or ask questions:");
 
             while (true)
             {
                 Console.Write("> ");
                 var input = Console.ReadLine();
                 if (string.IsNullOrWhiteSpace(input)) continue;
+                if (input.ToLower() == "exit") break;
 
-                switch (input.ToLower())
-                {
-                    case "exit":
-                        return;
-
-                    case "stream":
-                        streamingMode = true;
-                        Console.WriteLine("Switched to streaming mode\n");
-                        continue;
-
-                    case "normal":
-                        streamingMode = false;
-                        Console.WriteLine("Switched to normal mode\n");
-                        continue;
-
-                    case "example":
-                        await StreamingExample.RunStreamingExample();
-                        Console.WriteLine();
-                        continue;
-
-                    case "compare":
-                        await StreamingExample.RunComparisonExample();
-                        Console.WriteLine();
-                        continue;
-                }
-
-                // Process as question
-                if (streamingMode)
-                {
-                    Console.Write("Response: ");
-                    await foreach (var update in service.SendMessageStreamAsync(input))
-                    {
-                        Console.Write(update);
-                        Console.Out.Flush(); // Ensure immediate display
-                    }
-
-                    Console.WriteLine(); // New line after complete response
-                }
-                else
-                {
-                    var response = await service.SendMessageAsync(input);
-                    Console.WriteLine($"Response: {response}");
-                }
-
-                Console.WriteLine(); // Extra spacing
+                Console.Write("Response: ");
+                Console.Write(await service.SendMessageStreamAsync(input));
+                Console.WriteLine("\n");
             }
         }
     }

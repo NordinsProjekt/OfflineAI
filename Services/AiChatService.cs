@@ -5,300 +5,115 @@ using System.Text;
 
 namespace Services;
 
-public class AiChatService : IDisposable
+public class AiChatService(ILlmMemory memory, string? filePath = null, string? modelPath = null, int timeoutMs = 15000)
 {
-    private readonly List<string> _conversations = [];
-    private readonly string _filePath;
-    private readonly string _modelPath;
-    private readonly int _timeoutMs;
+    private ILlmMemory Memory { get; } = memory;
+
+    private readonly string _filePath = filePath ?? @"d:\tinyllama\llama-cli.exe";
+    private readonly int _timeoutMs = timeoutMs;
+
+    //private readonly string _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-tinyQuest.gguf";
+    //private readonly string _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-boardgames-v2-f16.gguf";
+    private readonly string _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-boardgames-v2.gguf";
     private bool _disposed;
 
-    public AiChatService(string? filePath = null, string? modelPath = null, int timeoutMs = 30000)
+    public async Task<string> SendMessageStreamAsync(string question)
     {
-        _filePath = filePath ?? @"d:\tinyllama\llama-cli.exe";
-        _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-1.1b-chat-v1.0.Q5_K_M.gguf";
-        _timeoutMs = timeoutMs;
-
-        _conversations.Add(
-            "You are a anime catgirl that enjoys playing Gloomhaven and know all the rules. Use short answers because I will ask about rules and will feed rules into your memory. " +
-            "The next section will be all the conversations before remember everything. Even if you are programmed not to remember stuff.");
-    }
-
-    public async Task<string> SendMessageAsync(string question)
-    {
-        ThrowIfDisposed();
         ArgumentException.ThrowIfNullOrWhiteSpace(question);
 
-        _conversations.Add(question);
-
-        var context = string.Join(Environment.NewLine, _conversations);
-
-        using var process = CreateProcess(context, question);
-
-        var finalResponse = new StringBuilder();
-        await foreach (var update in ExecuteProcessStreamAsync(process))
-        {
-            finalResponse.Append(update);
-        }
-
-        return finalResponse.ToString();
-    }
-
-    public async IAsyncEnumerable<string> SendMessageStreamAsync(string question)
-    {
-        ThrowIfDisposed();
-        ArgumentException.ThrowIfNullOrWhiteSpace(question);
-
-        _conversations.Add(question);
-
-        var context = string.Join(Environment.NewLine, _conversations);
-
-        using var process = CreateProcess(context, question);
-
-        await foreach (var update in ExecuteProcessStreamAsync(process))
-        {
-            yield return update;
-        }
-    }
-
-    private Process CreateProcess(string context, string question)
-    {
-        var factory = LlmFactory.Create();
-        return factory.SetDefaultValues()
+        var systemPrompt = BuildSystemPrompt();
+        var process = LlmFactory.Create()
+            .SetDefaultValues()
             .SetLlmCli(_filePath)
-            .SetLlmModelFile(_modelPath)
-            .SetLlmContext(context)
+            .SetModel(_modelPath)
+            .SetLlmContext(systemPrompt)
             .SendQuestion(question)
             .Build();
+
+        return await ExecuteProcessAsync(process);
     }
 
-    private async IAsyncEnumerable<string> ExecuteProcessStreamAsync(Process process)
+    private string BuildSystemPrompt()
+    {
+        var memoryContext = Memory.ExportMemory();
+        var basePrompt = "You are a boardgame expert, you have access to a few boardgames. " +
+                         "Use short, concise answers because users will ask about rules and game mechanics. " +
+                         "Be helpful but keep responses focused and under 150 tokens.";
+
+        if (!string.IsNullOrWhiteSpace(memoryContext))
+        {
+            return $"{basePrompt}\n\nGame Knowledge:\n{memoryContext.Trim()}";
+        }
+
+        return basePrompt;
+    }
+
+
+    private async Task<string> ExecuteProcessAsync(Process process)
     {
         var output = new StringBuilder();
         var error = new StringBuilder();
-        var lastOutputLength = 0;
-        Exception? capturedException = null;
-        bool processStarted = false;
 
+        // Set up event handlers for capturing output
         process.OutputDataReceived += (_, e) =>
         {
             if (!string.IsNullOrEmpty(e.Data))
+            {
                 output.AppendLine(e.Data);
+            }
         };
 
         process.ErrorDataReceived += (_, e) =>
         {
             if (!string.IsNullOrEmpty(e.Data))
+            {
                 error.AppendLine(e.Data);
+            }
         };
 
-        // Start process outside of any yield context
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data != null) output.AppendLine(e.Data);
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data != null) error.AppendLine(e.Data);
+        };
+
         try
         {
             process.Start();
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
-            processStarted = true;
-        }
-        catch (Exception ex)
-        {
-            capturedException = ex;
-        }
 
-        if (capturedException != null)
-        {
-            yield return $"[EXCEPTION] {capturedException.Message}";
-            yield break;
-        }
+            // Wait 5 seconds for output then kill
+            Thread.Sleep(15000);
 
-        if (!processStarted)
-        {
-            yield return "[ERROR] Failed to start process";
-            yield break;
-        }
-
-        using var cts = new CancellationTokenSource(_timeoutMs);
-
-        // Main monitoring loop - no try-catch around yield returns
-        while (!process.HasExited && !cts.Token.IsCancellationRequested)
-        {
-            bool delayCompleted = false;
-            try
-            {
-                await Task.Delay(1000, cts.Token);
-                delayCompleted = true;
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-
-            if (!delayCompleted) break;
-
-            var currentOutput = output.ToString();
-
-            // If there's new output since last check - yield outside try block
-            if (currentOutput.Length > lastOutputLength)
-            {
-                var newContent = currentOutput[lastOutputLength..];
-                var parsedContent = ParseIncrementalResponse(newContent);
-
-                if (!string.IsNullOrWhiteSpace(parsedContent))
-                {
-                    yield return parsedContent;
-                }
-
-                lastOutputLength = currentOutput.Length;
-            }
-        }
-
-        // Final process handling
-        try
-        {
-            if (!cts.Token.IsCancellationRequested)
-            {
-                await process.WaitForExitAsync(cts.Token);
-            }
-            else
-            {
-                await KillProcessSafelyAsync(process);
-            }
-        }
-        catch (Exception ex)
-        {
-            capturedException = ex;
-        }
-
-        // Handle any remaining output
-        var finalOutput = output.ToString();
-        if (finalOutput.Length > lastOutputLength)
-        {
-            var remainingContent = finalOutput[lastOutputLength..];
-            var parsedContent = ParseIncrementalResponse(remainingContent);
-
-            if (!string.IsNullOrWhiteSpace(parsedContent))
-            {
-                yield return parsedContent;
-            }
-        }
-
-        // Handle errors
-        var errorOutput = error.ToString();
-        if (string.IsNullOrWhiteSpace(finalOutput) && !string.IsNullOrWhiteSpace(errorOutput))
-        {
-            yield return $"[ERROR] {errorOutput.Trim()}";
-        }
-
-        // Handle final exception
-        if (capturedException != null)
-        {
-            yield return $"[EXCEPTION] {capturedException.Message}";
-        }
-    }
-
-    private static string ParseIncrementalResponse(string newOutput)
-    {
-        if (string.IsNullOrWhiteSpace(newOutput))
-            return string.Empty;
-
-        // Look for assistant tag and extract content after it
-        const string assistantTag = "<|assistant|>";
-        var assistantIndex = newOutput.IndexOf(assistantTag, StringComparison.Ordinal);
-
-        if (assistantIndex >= 0)
-        {
-            // Return content after the assistant tag
-            var startIndex = assistantIndex + assistantTag.Length;
-            if (startIndex < newOutput.Length)
-            {
-                return newOutput[startIndex..].Trim();
-            }
-        }
-
-        // If no assistant tag found, check if this looks like assistant content
-        // (assuming we're already past the assistant tag from previous chunks)
-        var lines = newOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-        var contentLines = lines.Where(line =>
-                !line.Contains("<|") &&
-                !string.IsNullOrWhiteSpace(line.Trim()))
-            .ToArray();
-
-        return contentLines.Length > 0 ? string.Join(Environment.NewLine, contentLines) : string.Empty;
-    }
-
-    private static string ParseResponse(string output, string errorOutput)
-    {
-        if (string.IsNullOrWhiteSpace(output))
-        {
-            return string.IsNullOrWhiteSpace(errorOutput)
-                ? "[NO OUTPUT]"
-                : $"[ERROR] {errorOutput.Trim()}";
-        }
-
-        // Extract answer from <|assistant|> to the next prompt symbol or EOF
-        const string assistantTag = "<|assistant|>";
-        var start = output.IndexOf(assistantTag, StringComparison.Ordinal);
-
-        if (start < 0)
-        {
-            return $"[FAILED TO PARSE]\n{output}\n{errorOutput}";
-        }
-
-        start += assistantTag.Length;
-        var end = output.IndexOf("<|", start, StringComparison.Ordinal);
-        if (end == -1)
-            end = output.Length;
-
-        var answer = output[start..end].Trim();
-        return string.IsNullOrWhiteSpace(answer)
-            ? $"[EMPTY RESPONSE]\n{output}\n{errorOutput}"
-            : answer;
-    }
-
-    private static async Task KillProcessSafelyAsync(Process process)
-    {
-        try
-        {
             if (!process.HasExited)
             {
                 process.Kill(true);
-                await process.WaitForExitAsync(); // Wait for clean exit
             }
+
+            var fullOutput = output.ToString();
+
+            // Extract answer from <|assistant|> to the next prompt symbol or EOF
+            var assistantTag = "<|assistant|>";
+            var start = fullOutput.LastIndexOf(assistantTag);
+            if (start >= 0)
+            {
+                start += assistantTag.Length;
+                var end = fullOutput.IndexOf("<|", start); // optionally stop before next tag
+                if (end == -1) end = fullOutput.Length;
+
+                var answer = fullOutput.Substring(start, end - start).Trim();
+                return answer;
+            }
+
+            return $"[FAILED TO PARSE]\n{fullOutput}\n{error}";
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore exceptions during cleanup
-        }
-    }
-
-    public void ClearConversations()
-    {
-        ThrowIfDisposed();
-
-        // Keep the initial system message
-        var systemMessage = _conversations[0];
-        _conversations.Clear();
-        _conversations.Add(systemMessage);
-    }
-
-    public IReadOnlyList<string> GetConversationHistory()
-    {
-        ThrowIfDisposed();
-        return _conversations.AsReadOnly();
-    }
-
-    private void ThrowIfDisposed()
-    {
-        if (_disposed)
-            throw new ObjectDisposedException(nameof(AiChatService));
-    }
-
-    public void Dispose()
-    {
-        if (!_disposed)
-        {
-            _conversations.Clear();
-            _disposed = true;
+            return $"[EXCEPTION] {ex.Message}";
         }
     }
 }
