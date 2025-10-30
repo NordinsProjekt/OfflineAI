@@ -2,10 +2,11 @@
 using Factories.Extensions;
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Services;
 
-public class AiChatService(ILlmMemory memory, string? filePath = null, string? modelPath = null, int timeoutMs = 15000)
+public class AiChatService(ILlmMemory memory, string? filePath = null, string? modelPath = null, int timeoutMs = 30000)
 {
     private ILlmMemory Memory { get; } = memory;
 
@@ -14,7 +15,7 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
 
     //private readonly string _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-tinyQuest.gguf";
     //private readonly string _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-boardgames-v2-f16.gguf";
-    private readonly string _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-boardgames-v2.gguf";
+    private readonly string _modelPath = modelPath ?? @"d:\tinyllama\TreasureHuntLLM.gguf";
     private bool _disposed;
 
     public async Task<string> SendMessageStreamAsync(string question)
@@ -27,7 +28,8 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
             .SetLlmCli(_filePath)
             .SetModel(_modelPath)
             .SetLlmContext(systemPrompt)
-            .SendQuestion(question)
+            .SetBoardGameSampling(maxTokens: 150, temperature: 0.3f, topK: 20, topP: 0.8f)
+            .SetPrompt(question)
             .Build();
 
         return await ExecuteProcessAsync(process);
@@ -36,13 +38,13 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
     private string BuildSystemPrompt()
     {
         var memoryContext = Memory.ExportMemory();
-        var basePrompt = "You are a boardgame expert, you have access to a few boardgames. " +
-                         "Use short, concise answers because users will ask about rules and game mechanics. " +
-                         "Be helpful but keep responses focused and under 150 tokens.";
+        var basePrompt = "You are a boardgame expert with access to boardgame rules. " +
+                         "CRITICAL: Answer in 1-2 SHORT sentences ONLY. Maximum 30 words. " +
+                         "Be direct and concise. Stop after answering the specific question. You will only answer question about Munchkin Treasure Hunt";
 
         if (!string.IsNullOrWhiteSpace(memoryContext))
         {
-            return $"{basePrompt}\n\nGame Knowledge:\n{memoryContext.Trim()}";
+            return $"{basePrompt}\n\nGame Knowledge:\n{memoryContext}";
         }
 
         return basePrompt;
@@ -71,23 +73,13 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
             }
         };
 
-        process.OutputDataReceived += (_, e) =>
-        {
-            if (e.Data != null) output.AppendLine(e.Data);
-        };
-        process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data != null) error.AppendLine(e.Data);
-        };
-
         try
         {
             process.Start();
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
-            // Wait 5 seconds for output then kill
-            Thread.Sleep(15000);
+            await Task.Delay(10000);
 
             if (!process.HasExited)
             {
@@ -96,9 +88,9 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
 
             var fullOutput = output.ToString();
 
-            // Extract answer from <|assistant|> to the next prompt symbol or EOF
+            //Extract answer from <| assistant |> to the next prompt symbol or EOF
             var assistantTag = "<|assistant|>";
-            var start = fullOutput.LastIndexOf(assistantTag);
+            var start = fullOutput.IndexOf(assistantTag);
             if (start >= 0)
             {
                 start += assistantTag.Length;
@@ -106,10 +98,13 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
                 if (end == -1) end = fullOutput.Length;
 
                 var answer = fullOutput.Substring(start, end - start).Trim();
-                return answer;
-            }
 
+                return $"\n{answer}\n\n";
+            }
             return $"[FAILED TO PARSE]\n{fullOutput}\n{error}";
+
+
+            return "";
         }
         catch (Exception ex)
         {
