@@ -15,7 +15,7 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
 
     //private readonly string _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-tinyQuest.gguf";
     //private readonly string _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-boardgames-v2-f16.gguf";
-    private readonly string _modelPath = modelPath ?? @"d:\tinyllama\TreasureHuntLLM.gguf";
+    private readonly string _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-TreasureHuntAndPanic-f16.gguf";
     private bool _disposed;
 
     public async Task<string> SendMessageStreamAsync(string question)
@@ -38,9 +38,8 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
     private string BuildSystemPrompt()
     {
         var memoryContext = Memory.ExportMemory();
-        var basePrompt = "You are a boardgame expert with access to boardgame rules. " +
-                         "CRITICAL: Answer in 1-2 SHORT sentences ONLY. Maximum 30 words. " +
-                         "Be direct and concise. Stop after answering the specific question. You will only answer question about Munchkin Treasure Hunt";
+        var basePrompt = "You are a boardgame expert with access to only boardgame rules. " +
+                         "CRITICAL: Answer in 1-2 SHORT sentences ONLY. Maximum 30 words. ";
 
         if (!string.IsNullOrWhiteSpace(memoryContext))
         {
@@ -79,7 +78,7 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
-            await Task.Delay(10000);
+            await Task.Delay(18000);
 
             if (!process.HasExited)
             {
