@@ -6,11 +6,11 @@ using System.Text.RegularExpressions;
 
 namespace Services;
 
-public class AiChatService(ILlmMemory memory, string? filePath = null, string? modelPath = null, int timeoutMs = 30000)
+public class AiChatService(ILlmMemory memory, string? filePath = null, string? modelPath = null, int timeoutMs = 6000)
 {
     private ILlmMemory Memory { get; } = memory;
 
-    private readonly string _filePath = filePath ?? @"d:\tinyllama\llama-cli.exe";
+    private readonly string _filePath = filePath ?? @"c:\llm\llama-cli.exe";
     private readonly int _timeoutMs = timeoutMs;
 
     //private readonly string _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-tinyQuest.gguf";
@@ -38,12 +38,13 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
     private string BuildSystemPrompt()
     {
         var memoryContext = Memory.ExportMemory();
-        var basePrompt = "You are a boardgame expert with access to only boardgame rules. " +
-                         "CRITICAL: Answer in 1-2 SHORT sentences ONLY. Maximum 30 words. ";
+        var basePrompt = "You are a boardgame expert with access to boardgame rules. " +
+                         "CRITICAL: Answer in 1-2 SHORT sentences ONLY. Maximum 30 words. " +
+                         "Be direct and concise. Stop after answering the specific question. You will only answer question about Munchkin Treasure Hunt";
 
         if (!string.IsNullOrWhiteSpace(memoryContext))
         {
-            return $"{basePrompt}\n\nGame Knowledge:\n{memoryContext}";
+            return $"{basePrompt}\n\nContext Knowledge:\n{memoryContext}";
         }
 
         return basePrompt;
@@ -78,7 +79,7 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
-            await Task.Delay(18000);
+            await Task.Delay(_timeoutMs);
 
             if (!process.HasExited)
             {
@@ -101,9 +102,6 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
                 return $"\n{answer}\n\n";
             }
             return $"[FAILED TO PARSE]\n{fullOutput}\n{error}";
-
-
-            return "";
         }
         catch (Exception ex)
         {

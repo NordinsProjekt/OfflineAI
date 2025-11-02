@@ -5,15 +5,20 @@ namespace OfflineAI;
 
 public class SimpleMemory : ILlmMemory
 {
-    private readonly StringBuilder _memory = new();
-
-    public string ExportMemory() => _memory.ToString();
-
-    public void ImportMemory(string section)
+    private List<IMemoryFragment> _memory = new List<IMemoryFragment>();
+    
+    public void ImportMemory(IMemoryFragment section)
     {
-        if (!string.IsNullOrWhiteSpace(section))
+        _memory.Add(section);
+    }
+    
+    public override string ToString()
+    {
+        var sb = new StringBuilder();
+        foreach (var fragment in _memory)
         {
-            _memory.AppendLine(section);
+            sb.AppendLine(fragment.ToString());
         }
+        return sb.ToString();
     }
 }

@@ -1,4 +1,5 @@
 ﻿using Services;
+using MemoryLibrary.Models;
 
 namespace OfflineAI
 {
@@ -15,6 +16,7 @@ namespace OfflineAI
             Console.WriteLine("Type your boardgames question\n");
 
             var memory = new SimpleMemory();
+            memory.ImportMemory(new MemoryFragment("note", "Now SELECT is changed to SELAACT according to the new SQL update"));
             var service = new AiChatService(memory);
 
             Console.WriteLine("Type 'exit' to quit, or ask questions:");
