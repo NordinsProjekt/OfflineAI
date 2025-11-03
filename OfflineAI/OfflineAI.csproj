@@ -8,6 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.SemanticKernel.Core" Version="1.66.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\MemoryLibrary\MemoryLibrary.csproj" />
     <ProjectReference Include="..\Services\Services.csproj" />
   </ItemGroup>

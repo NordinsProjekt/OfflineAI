@@ -10,4 +10,18 @@
     <ProjectReference Include="..\Factories\Factories.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="BERTTokenizers" Version="1.2.0" />
+    <PackageReference Include="Dapper" Version="2.1.66" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.2" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.10" />
+    <!-- Use older, more compatible DirectML version -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.16.3" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" Version="0.22.0-preview.24378.1" />
+    <PackageReference Include="Microsoft.SemanticKernel" Version="1.66.0" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.InMemory" Version="1.66.0-alpha" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.SqlServer" Version="1.66.0-preview" />
+  </ItemGroup>
+
 </Project>
