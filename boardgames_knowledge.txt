@@ -1,0 +1,19 @@
+# Gloomhaven
+Gloomhaven is a cooperative game of battling monsters and advancing a player's own individual goals. The game is meant for 1 to 4 players and takes approximately 30 minutes per player.
+
+Players will take on the role of a wandering mercenary with their own special set of skills and their own reasons for traveling to this remote corner of the world.
+
+# Catan
+Catan, previously known as The Settlers of Catan, is a multiplayer board game designed by Klaus Teuber. Players take on the roles of settlers, each attempting to build and develop holdings while trading and acquiring resources.
+
+The game is won by reaching a certain number of victory points, which are earned by building settlements, cities, and roads, as well as by holding certain cards.
+
+# Ticket to Ride
+Ticket to Ride is a railway-themed German-style board game designed by Alan R. Moon. The object of the game is to score the highest number of points.
+
+Players collect cards of various types of train cars that enable them to claim railway routes connecting cities in various countries around the world.
+
+# Pandemic
+Pandemic is a cooperative board game designed by Matt Leacock. The game accommodates two to four players and requires them to work together to treat infections while researching cures.
+
+As members of an elite disease control team, players must keep four deadly diseases at bay while discovering their cures.

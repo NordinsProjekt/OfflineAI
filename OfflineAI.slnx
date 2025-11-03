@@ -10,5 +10,7 @@
   <Folder Name="/4. Presentation/">
     <Project Path="OfflineAI/OfflineAI.csproj" />
   </Folder>
-  <Project Path="BenchmarkSuite1/BenchmarkSuite1.csproj" />
+  <Folder Name="/98. Benchmarks/">
+    <Project Path="BenchmarkSuite1/MemoryLibraryBenchmarks.csproj" />
+  </Folder>
 </Solution>

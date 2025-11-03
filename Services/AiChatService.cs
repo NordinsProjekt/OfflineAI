@@ -2,33 +2,33 @@
 using Factories.Extensions;
 using System.Diagnostics;
 using System.Text;
-using System.Text.RegularExpressions;
+using MemoryLibrary.Models;
 
 namespace Services;
 
-public class AiChatService(ILlmMemory memory, string? filePath = null, string? modelPath = null, int timeoutMs = 6000)
+public class AiChatService(
+    ILlmMemory memory,
+    ILlmMemory conversationMemory,
+    string filePath,
+    string modelPath,
+    int timeoutMs = 30000)
 {
     private ILlmMemory Memory { get; } = memory;
-
-    private readonly string _filePath = filePath ?? @"c:\llm\llama-cli.exe";
-    private readonly int _timeoutMs = timeoutMs;
-
-    //private readonly string _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-tinyQuest.gguf";
-    //private readonly string _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-boardgames-v2-f16.gguf";
-    private readonly string _modelPath = modelPath ?? @"d:\tinyllama\tinyllama-TreasureHuntAndPanic-f16.gguf";
+    private ILlmMemory ConversationHistory { get; } = conversationMemory;
     private bool _disposed;
 
     public async Task<string> SendMessageStreamAsync(string question)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(question);
+        ConversationHistory.ImportMemory(new MemoryFragment("User", question));
 
         var systemPrompt = BuildSystemPrompt();
         var process = LlmFactory.Create()
             .SetDefaultValues()
-            .SetLlmCli(_filePath)
-            .SetModel(_modelPath)
+            .SetLlmCli(filePath)
+            .SetModel(modelPath)
             .SetLlmContext(systemPrompt)
-            .SetBoardGameSampling(maxTokens: 150, temperature: 0.3f, topK: 20, topP: 0.8f)
+            .SetBoardGameSampling(maxTokens: 1000, temperature: 0.3f, topK: 20, topP: 0.8f)
             .SetPrompt(question)
             .Build();
 
@@ -37,17 +37,22 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
 
     private string BuildSystemPrompt()
     {
-        var memoryContext = Memory.ExportMemory();
-        var basePrompt = "You are a boardgame expert with access to boardgame rules. " +
-                         "CRITICAL: Answer in 1-2 SHORT sentences ONLY. Maximum 30 words. " +
-                         "Be direct and concise. Stop after answering the specific question. You will only answer question about Munchkin Treasure Hunt";
+        const string basePrompt =
+            "You are a helpful AI assistant. Answer questions accurately and concisely based on the provided context.";
 
-        if (!string.IsNullOrWhiteSpace(memoryContext))
-        {
-            return $"{basePrompt}\n\nContext Knowledge:\n{memoryContext}";
-        }
+        var prompt = new StringBuilder(basePrompt);
 
-        return basePrompt;
+        prompt.AppendLine("\n\nContext:");
+        prompt.AppendLine(Memory.ToString());
+
+        // Include conversation history if it exists
+        var conversationHistoryText = ConversationHistory.ToString();
+        if (string.IsNullOrWhiteSpace(conversationHistoryText)) return prompt.ToString();
+
+        prompt.AppendLine("\n\nRecent conversation:");
+        prompt.AppendLine(conversationHistoryText);
+
+        return prompt.ToString();
     }
 
 
@@ -55,13 +60,42 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
     {
         var output = new StringBuilder();
         var error = new StringBuilder();
+        var lastOutputTime = DateTime.UtcNow;
+        var assistantStartFound = false;
+        var assistantTag = "<|assistant|>";
+        var streamingOutput = new StringBuilder();
+
+        var outputLock = new object();
 
         // Set up event handlers for capturing output
         process.OutputDataReceived += (_, e) =>
         {
-            if (!string.IsNullOrEmpty(e.Data))
+            if (string.IsNullOrEmpty(e.Data)) return;
+
+            lock (outputLock)
             {
                 output.AppendLine(e.Data);
+                lastOutputTime = DateTime.UtcNow;
+
+                // Check if we've found the assistant tag and start streaming from there
+                var fullText = output.ToString();
+                if (!assistantStartFound)
+                {
+                    var assistantIndex = fullText.IndexOf(assistantTag);
+                    if (assistantIndex < 0) return;
+
+                    assistantStartFound = true;
+                    var startIndex = assistantIndex + assistantTag.Length;
+                    var textToStream = fullText.Substring(startIndex);
+                    streamingOutput.Append(textToStream);
+                    Console.Write($"\n{textToStream}");
+                }
+                else
+                {
+                    // Already found assistant tag, stream new content
+                    Console.Write(e.Data + Environment.NewLine);
+                    streamingOutput.AppendLine(e.Data);
+                }
             }
         };
 
@@ -73,39 +107,65 @@ public class AiChatService(ILlmMemory memory, string? filePath = null, string? m
             }
         };
 
+        Console.Write("Loading: ");
         try
         {
             process.Start();
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
-            await Task.Delay(_timeoutMs);
+            // Monitor for 2 seconds of inactivity
+            while (!process.HasExited)
+            {
+                await Task.Delay(1000); // Check every 100ms
+                if (!assistantStartFound) Console.Write(".");
+
+                TimeSpan timeSinceLastOutput;
+                lock (outputLock)
+                {
+                    timeSinceLastOutput = DateTime.UtcNow - lastOutputTime;
+                }
+
+                if (assistantStartFound && timeSinceLastOutput.TotalSeconds >= 3)
+                {
+                    break;
+                }
+
+                // Also respect the overall timeout
+                if (timeSinceLastOutput.TotalMilliseconds >= timeoutMs)
+                {
+                    break;
+                }
+            }
 
             if (!process.HasExited)
             {
                 process.Kill(true);
             }
 
-            var fullOutput = output.ToString();
+            // Extract clean answer from streaming output
+            var cleanAnswer = streamingOutput.ToString();
 
-            //Extract answer from <| assistant |> to the next prompt symbol or EOF
-            var assistantTag = "<|assistant|>";
-            var start = fullOutput.IndexOf(assistantTag);
-            if (start >= 0)
+            // Remove any trailing tags or prompt symbols
+            var endTagIndex = cleanAnswer.IndexOf("<|");
+            if (endTagIndex >= 0)
             {
-                start += assistantTag.Length;
-                var end = fullOutput.IndexOf("<|", start); // optionally stop before next tag
-                if (end == -1) end = fullOutput.Length;
-
-                var answer = fullOutput.Substring(start, end - start).Trim();
-
-                return $"\n{answer}\n\n";
+                cleanAnswer = cleanAnswer.Substring(0, endTagIndex);
             }
-            return $"[FAILED TO PARSE]\n{fullOutput}\n{error}";
+
+            cleanAnswer = cleanAnswer.Trim();
+
+            // Store only the clean answer in conversation history
+            if (!string.IsNullOrWhiteSpace(cleanAnswer))
+            {
+                ConversationHistory.ImportMemory(new MemoryFragment("AI", cleanAnswer));
+            }
         }
         catch (Exception ex)
         {
             return $"[EXCEPTION] {ex.Message}";
         }
+
+        return "Conversation ended";
     }
 }

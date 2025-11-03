@@ -7,15 +7,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="NewFolder\**" />
+    <EmbeddedResource Remove="NewFolder\**" />
+    <None Remove="NewFolder\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Remove="EntropiaUniverse.cs~RFbfacfa72.TMP" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Services\Services.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="NewFolder\" />
   </ItemGroup>
 
 </Project>
