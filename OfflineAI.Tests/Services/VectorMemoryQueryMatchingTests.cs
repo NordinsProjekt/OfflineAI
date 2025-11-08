@@ -1,9 +1,10 @@
 using Xunit;
-using Services;
-using MemoryLibrary.Models;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
+using Entities;
+using Services.AI.Embeddings;
+using Services.Memory;
 
 namespace OfflineAI.Tests.Services;
 

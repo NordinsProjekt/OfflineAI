@@ -12,7 +12,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\MemoryLibrary\MemoryLibrary.csproj" />
     <ProjectReference Include="..\Services\Services.csproj" />
   </ItemGroup>
 

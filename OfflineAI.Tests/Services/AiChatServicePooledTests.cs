@@ -1,12 +1,14 @@
 using Services;
-using MemoryLibrary;
-using MemoryLibrary.Models;
 using Xunit;
 using FluentAssertions;
 using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Entities;
+using Services.AI.Chat;
+using Services.Models;
+using Services.Pooling;
 
 namespace OfflineAI.Tests.Services;
 
@@ -195,28 +197,28 @@ public class AiChatServicePooledTests : IDisposable
     }
 
     [Fact]
-    public async Task SendMessageAsync_OnFailure_ShouldReturnErrorMessage()
+    public async Task SendMessageAsync_OnFailure_ShouldReturnNoInformationMessage()
     {
-        // Arrange
+        // Arrange - SimpleMemory is not VectorMemory, so no context will be found
         var memory = new SimpleMemory();
         var conversationMemory = new SimpleMemory();
         var pool = new ModelInstancePool(_testLlmPath, _testModelPath, maxInstances: 1);
         await pool.InitializeAsync();
         var service = new AiChatServicePooled(memory, conversationMemory, pool);
 
-        // Act - Will fail because mock executable isn't real
+        // Act - With SimpleMemory (not VectorMemory), no relevant context is found
         var response = await service.SendMessageAsync("Test question");
 
-        // Assert
-        response.Should().StartWith("[ERROR]");
-        response.Should().Contain("Failed to get response");
+        // Assert - This returns "no information" message, not an error
+        response.Should().Contain("I don't have any relevant information");
+        response.Should().Contain("knowledge base");
 
         // Cleanup
         pool.Dispose();
     }
 
     [Fact]
-    public async Task SendMessageAsync_WithCancellationToken_ShouldRespectCancellation()
+    public async Task SendMessageAsync_WithCancellationToken_DoesNotThrowWhenNoContext()
     {
         // Arrange
         var memory = new SimpleMemory();
@@ -228,9 +230,11 @@ public class AiChatServicePooledTests : IDisposable
         var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        // Act & Assert - TaskCanceledException inherits from OperationCanceledException
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-            await service.SendMessageAsync("Test", cts.Token));
+        // Act - Early return due to no context (before cancellation is checked)
+        var response = await service.SendMessageAsync("Test", cts.Token);
+
+        // Assert - Returns "no information" message before checking cancellation
+        response.Should().Contain("I don't have any relevant information");
 
         // Cleanup
         pool.Dispose();
@@ -486,6 +490,31 @@ public class AiChatServicePooledTests : IDisposable
         // Assert
         responses.Should().HaveCount(10);
         pool.AvailableCount.Should().BeGreaterThanOrEqualTo(2); // Most should be returned
+
+        // Cleanup
+        pool.Dispose();
+    }
+
+    #endregion
+
+    #region New Tests
+
+    [Fact]
+    public async Task SendMessageAsync_WithSimpleMemoryAndNoContext_ShouldReturnNoInformationMessage()
+    {
+        // Arrange
+        var memory = new SimpleMemory(); // SimpleMemory is not VectorMemory, so no context will be found
+        var conversationMemory = new SimpleMemory();
+        var pool = new ModelInstancePool(_testLlmPath, _testModelPath, maxInstances: 1);
+        await pool.InitializeAsync();
+        var service = new AiChatServicePooled(memory, conversationMemory, pool);
+
+        // Act
+        var response = await service.SendMessageAsync("Test question");
+
+        // Assert - This is not an error, it's expected behavior when no relevant context is found
+        response.Should().Contain("I don't have any relevant information");
+        response.Should().Contain("knowledge base");
 
         // Cleanup
         pool.Dispose();

@@ -2,10 +2,11 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Entities;
 using Xunit;
 using Moq;
-using Services;
-using MemoryLibrary.Models;
+using Services.Interfaces;
+using Services.Memory;
 
 namespace OfflineAI.Tests.Services;
 

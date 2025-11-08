@@ -1,6 +1,7 @@
 using Services;
 using System;
 using System.Threading.Tasks;
+using Services.AI.Embeddings;
 
 namespace OfflineAI.Diagnostics;
 

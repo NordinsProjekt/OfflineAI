@@ -4,8 +4,8 @@ using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using Dapper;
+using Entities;
 using Microsoft.Data.SqlClient;
-using Services.Models;
 
 namespace Services.Repositories;
 
@@ -23,10 +23,15 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     }
     
     /// <summary>
-    /// Initialize database schema. Call this once during setup.
+    /// Initialize database schema. Creates database if it doesn't exist, then creates tables.
+    /// Call this once during setup.
     /// </summary>
     public async Task InitializeDatabaseAsync()
     {
+        // Step 1: Ensure the database exists
+        await EnsureDatabaseExistsAsync();
+        
+        // Step 2: Create tables if they don't exist
         const string createTableSql = @"
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'MemoryFragments')
             BEGIN
@@ -35,6 +40,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
                     CollectionName NVARCHAR(255) NOT NULL,
                     Category NVARCHAR(500) NOT NULL,
                     Content NVARCHAR(MAX) NOT NULL,
+                    ContentLength INT NOT NULL DEFAULT 0,
                     Embedding VARBINARY(MAX) NULL,
                     EmbeddingDimension INT NULL,
                     CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
@@ -46,10 +52,99 @@ public class VectorMemoryRepository : IVectorMemoryRepository
                 CREATE INDEX IX_MemoryFragments_CollectionName ON MemoryFragments(CollectionName);
                 CREATE INDEX IX_MemoryFragments_Category ON MemoryFragments(Category);
                 CREATE INDEX IX_MemoryFragments_CreatedAt ON MemoryFragments(CreatedAt);
+                CREATE INDEX IX_MemoryFragments_ContentLength ON MemoryFragments(ContentLength);
+            END
+            ELSE
+            BEGIN
+                -- Add ContentLength column if it doesn't exist (migration for existing databases)
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('MemoryFragments') AND name = 'ContentLength')
+                BEGIN
+                    ALTER TABLE MemoryFragments ADD ContentLength INT NOT NULL DEFAULT 0;
+                    
+                    -- Update existing rows with calculated length
+                    UPDATE MemoryFragments SET ContentLength = LEN(Content);
+                    
+                    -- Create index on the new column
+                    CREATE INDEX IX_MemoryFragments_ContentLength ON MemoryFragments(ContentLength);
+                END;
             END";
         
         using var connection = new SqlConnection(_connectionString);
         await connection.ExecuteAsync(createTableSql);
+    }
+    
+    /// <summary>
+    /// Ensures the database exists. Creates it if it doesn't and grants access to current user.
+    /// </summary>
+    private async Task EnsureDatabaseExistsAsync()
+    {
+        // Parse database name from connection string
+        var builder = new SqlConnectionStringBuilder(_connectionString);
+        var databaseName = builder.InitialCatalog;
+        
+        if (string.IsNullOrWhiteSpace(databaseName))
+        {
+            throw new InvalidOperationException("Connection string must specify a database name (Initial Catalog or Database).");
+        }
+        
+        // Connect to master database to check if our database exists
+        builder.InitialCatalog = "master";
+        var masterConnectionString = builder.ConnectionString;
+        
+        const string checkDatabaseSql = @"
+            SELECT COUNT(1) 
+            FROM sys.databases 
+            WHERE name = @DatabaseName";
+        
+        const string createDatabaseSql = @"
+            CREATE DATABASE [{0}]";
+        
+        // SQL to grant access to current Windows user
+        const string grantAccessSql = @"
+            USE [{0}];
+            IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = CURRENT_USER)
+            BEGIN
+                CREATE USER [CURRENT_USER] FOR LOGIN [CURRENT_USER];
+            END;
+            ALTER ROLE db_owner ADD MEMBER [CURRENT_USER];";
+        
+        using var connection = new SqlConnection(masterConnectionString);
+        await connection.OpenAsync();
+        
+        var exists = await connection.ExecuteScalarAsync<int>(checkDatabaseSql, new { DatabaseName = databaseName });
+        
+        if (exists == 0)
+        {
+            Console.WriteLine($"[*] Database '{databaseName}' does not exist. Creating it...");
+            
+            // Create the database
+            await connection.ExecuteAsync(string.Format(createDatabaseSql, databaseName));
+            
+            // Grant access to current user
+            try
+            {
+                // Get current Windows user
+                var currentUser = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+                
+                var grantSql = $@"
+                    USE [{databaseName}];
+                    IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = '{currentUser}')
+                    BEGIN
+                        CREATE USER [{currentUser}] FOR LOGIN [{currentUser}];
+                    END;
+                    ALTER ROLE db_owner ADD MEMBER [{currentUser}];";
+                
+                await connection.ExecuteAsync(grantSql);
+                Console.WriteLine($"[+] Granted access to user '{currentUser}'");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[!] Warning: Could not grant explicit permissions: {ex.Message}");
+                Console.WriteLine($"[*] The database was created and should use Windows Authentication by default.");
+            }
+            
+            Console.WriteLine($"[+] Database '{databaseName}' created successfully!");
+        }
     }
     
     /// <summary>
@@ -59,10 +154,10 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     {
         const string sql = @"
             INSERT INTO MemoryFragments 
-                (Id, CollectionName, Category, Content, Embedding, EmbeddingDimension, 
+                (Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension, 
                  CreatedAt, UpdatedAt, SourceFile, ChunkIndex)
             VALUES 
-                (@Id, @CollectionName, @Category, @Content, @Embedding, @EmbeddingDimension,
+                (@Id, @CollectionName, @Category, @Content, @ContentLength, @Embedding, @EmbeddingDimension,
                  @CreatedAt, @UpdatedAt, @SourceFile, @ChunkIndex)";
         
         using var connection = new SqlConnection(_connectionString);
@@ -79,10 +174,10 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     {
         const string sql = @"
             INSERT INTO MemoryFragments 
-                (Id, CollectionName, Category, Content, Embedding, EmbeddingDimension, 
+                (Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension, 
                  CreatedAt, UpdatedAt, SourceFile, ChunkIndex)
             VALUES 
-                (@Id, @CollectionName, @Category, @Content, @Embedding, @EmbeddingDimension,
+                (@Id, @CollectionName, @Category, @Content, @ContentLength, @Embedding, @EmbeddingDimension,
                  @CreatedAt, @UpdatedAt, @SourceFile, @ChunkIndex)";
         
         using var connection = new SqlConnection(_connectionString);
@@ -95,7 +190,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     public async Task<List<MemoryFragmentEntity>> LoadByCollectionAsync(string collectionName)
     {
         const string sql = @"
-            SELECT Id, CollectionName, Category, Content, Embedding, EmbeddingDimension,
+            SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension,
                    CreatedAt, UpdatedAt, SourceFile, ChunkIndex
             FROM MemoryFragments
             WHERE CollectionName = @CollectionName
@@ -116,7 +211,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         int pageSize)
     {
         const string sql = @"
-            SELECT Id, CollectionName, Category, Content, Embedding, EmbeddingDimension,
+            SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension,
                    CreatedAt, UpdatedAt, SourceFile, ChunkIndex
             FROM MemoryFragments
             WHERE CollectionName = @CollectionName
@@ -232,4 +327,76 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         
         return count > 0;
     }
+    
+    /// <summary>
+    /// Get content length statistics for a collection.
+    /// </summary>
+    public async Task<ContentLengthStats> GetContentLengthStatsAsync(string collectionName)
+    {
+        const string sql = @"
+            SELECT 
+                COUNT(*) as TotalFragments,
+                AVG(CAST(ContentLength AS FLOAT)) as AverageLength,
+                MIN(ContentLength) as MinLength,
+                MAX(ContentLength) as MaxLength,
+                SUM(CASE WHEN ContentLength > 1000 THEN 1 ELSE 0 END) as LongFragments,
+                SUM(CASE WHEN ContentLength < 200 THEN 1 ELSE 0 END) as ShortFragments
+            FROM MemoryFragments
+            WHERE CollectionName = @CollectionName";
+        
+        using var connection = new SqlConnection(_connectionString);
+        var stats = await connection.QuerySingleOrDefaultAsync<ContentLengthStats>(
+            sql, 
+            new { CollectionName = collectionName });
+        
+        return stats ?? new ContentLengthStats();
+    }
+    
+    /// <summary>
+    /// Get fragments grouped by length buckets.
+    /// </summary>
+    public async Task<Dictionary<string, int>> GetLengthDistributionAsync(string collectionName)
+    {
+        const string sql = @"
+            SELECT 
+                CASE 
+                    WHEN ContentLength <= 200 THEN '0-200'
+                    WHEN ContentLength <= 500 THEN '201-500'
+                    WHEN ContentLength <= 1000 THEN '501-1000'
+                    WHEN ContentLength <= 1500 THEN '1001-1500'
+                    ELSE '1500+'
+                END as LengthBucket,
+                COUNT(*) as Count
+            FROM MemoryFragments
+            WHERE CollectionName = @CollectionName
+            GROUP BY 
+                CASE 
+                    WHEN ContentLength <= 200 THEN '0-200'
+                    WHEN ContentLength <= 500 THEN '201-500'
+                    WHEN ContentLength <= 1000 THEN '501-1000'
+                    WHEN ContentLength <= 1500 THEN '1001-1500'
+                    ELSE '1500+'
+                END
+            ORDER BY LengthBucket";
+        
+        using var connection = new SqlConnection(_connectionString);
+        var results = await connection.QueryAsync<(string LengthBucket, int Count)>(
+            sql, 
+            new { CollectionName = collectionName });
+        
+        return results.ToDictionary(r => r.LengthBucket, r => r.Count);
+    }
+}
+
+/// <summary>
+/// Statistics about content lengths in a collection.
+/// </summary>
+public record ContentLengthStats
+{
+    public int TotalFragments { get; init; }
+    public double AverageLength { get; init; }
+    public int MinLength { get; init; }
+    public int MaxLength { get; init; }
+    public int LongFragments { get; init; }  // > 1000 chars
+    public int ShortFragments { get; init; }  // < 200 chars
 }

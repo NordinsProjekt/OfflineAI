@@ -1,6 +1,6 @@
 using System;
 
-namespace BenchmarkSuite1;
+namespace MemoryLibraryBenchmarks;
 
 public class Program
 {

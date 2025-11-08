@@ -1,6 +1,4 @@
-﻿using MemoryLibrary;
-using MemoryLibrary.Models;
-using Services;
+﻿using Services.Interfaces;
 using Services.Configuration;
 using Services.Repositories;
 using Services.UI;
@@ -8,6 +6,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Entities;
+using Services.AI.Chat;
+using Services.AI.Embeddings;
+using Services.Models;
+using Services.Memory;
+using Services.Pooling;
 
 namespace OfflineAI.Modes;
 
@@ -70,19 +74,19 @@ internal static class RunVectorMemoryWithDatabaseMode
         
         if (newFiles.Any())
         {
-            DisplayService.WriteLine($"\n📁 Found {newFiles.Count} new file(s) in inbox:");
+            DisplayService.WriteLine($"\n[*] Found {newFiles.Count} new file(s) in inbox:");
             foreach (var file in newFiles.Keys)
             {
-                DisplayService.WriteLine($"   • {file}.txt");
+                DisplayService.WriteLine($"    - {file}.txt");
             }
             
-            DisplayService.WriteLine("\n🔄 Processing and vectorizing new files...");
+            DisplayService.WriteLine("\n[*] Processing and vectorizing new files...");
             await ProcessNewFilesAsync(newFiles, persistenceService, fileWatcher);
         }
         else
         {
-            DisplayService.WriteLine($"\n✓ No new files in inbox folder: {inboxFolder}");
-            DisplayService.WriteLine("  Place .txt files there to auto-process them!");
+            DisplayService.WriteLine($"\n[+] No new files in inbox folder: {inboxFolder}");
+            DisplayService.WriteLine("    Place .txt files there to auto-process them!");
         }
 
         // Check what collections exist
@@ -100,7 +104,7 @@ internal static class RunVectorMemoryWithDatabaseMode
         
         if (await persistenceService.CollectionExistsAsync(collectionName))
         {
-            DisplayService.WriteLine($"\n✓ Loading existing collection: {collectionName}");
+            DisplayService.WriteLine($"\n[+] Loading existing collection: {collectionName}");
             vectorMemory = await persistenceService.LoadVectorMemoryAsync(collectionName);
         }
         else
@@ -124,7 +128,7 @@ internal static class RunVectorMemoryWithDatabaseMode
             DisplayService.WriteLine($"Loading instance {current}/{total}...");
         });
         
-        DisplayService.WriteLine($"\n✓ Model pool ready with {modelPool.AvailableCount} instances");
+        DisplayService.WriteLine($"\n[+] Model pool ready with {modelPool.AvailableCount} instances");
         DisplayService.WriteLine("Memory usage: ~3-5 GB (model stays loaded)");
 
         var conversationMemory = new SimpleMemory();
@@ -137,8 +141,10 @@ internal static class RunVectorMemoryWithDatabaseMode
 
         DisplayService.ShowVectorMemoryInitialized(vectorMemory.Count);
         DisplayService.ShowAvailableCommands();
-        DisplayService.WriteLine($"\n💡 Inbox folder: {inboxFolder}");
-        DisplayService.WriteLine($"📦 Archive folder: {archiveFolder}");
+        DisplayService.ShowConfigurationInfo(inboxFolder, archiveFolder);
+        
+        // Show system is ready for input
+        DisplayService.ShowSystemReady();
 
         while (true)
         {
@@ -156,12 +162,12 @@ internal static class RunVectorMemoryWithDatabaseMode
                 {
                     DisplayService.ShowRelevantMemoryHeader();
                     var relevantMemory =
-                        await vectorMemory.SearchRelevantMemoryAsync(query, topK: 5, minRelevanceScore: 0.5);
+                        await vectorMemory.SearchRelevantMemoryAsync(query, topK: 5, minRelevanceScore: 0.4);
                     
                     if (relevantMemory == null)
                     {
-                        DisplayService.WriteLine("⚠️ No relevant fragments found with relevance >= 0.5");
-                        DisplayService.WriteLine("The query does not match any content in the knowledge base.");
+                        DisplayService.WriteLine("[!] No relevant fragments found with relevance >= 0.35");
+                        DisplayService.WriteLine("    The query does not match any content in the knowledge base.");
                     }
                     else
                     {
@@ -182,6 +188,68 @@ internal static class RunVectorMemoryWithDatabaseMode
                     vectorMemory.Count);
                 continue;
             }
+            
+            if (input.StartsWith("/lengths", StringComparison.OrdinalIgnoreCase))
+            {
+                DisplayService.WriteLine("\n╔════════════════════════════════════════════════════════════╗");
+                DisplayService.WriteLine("║  Fragment Length Analysis                                  ║");
+                DisplayService.WriteLine("╚════════════════════════════════════════════════════════════╝\n");
+                
+                var fragments = vectorMemory.GetAllFragments();
+                var sortedFragments = fragments
+                    .Select(f => new { Fragment = f, Length = (f as MemoryFragment)?.ContentLength ?? f.Content.Length })
+                    .OrderByDescending(x => x.Length)
+                    .ToList();
+                
+                // Statistics
+                var avgLength = sortedFragments.Average(x => x.Length);
+                var maxLength = sortedFragments.Max(x => x.Length);
+                var minLength = sortedFragments.Min(x => x.Length);
+                var longFragments = sortedFragments.Count(x => x.Length > 1000);
+                var shortFragments = sortedFragments.Count(x => x.Length < 200);
+                
+                DisplayService.WriteLine($"Total fragments: {sortedFragments.Count}");
+                DisplayService.WriteLine($"Average length: {avgLength:F0} chars");
+                DisplayService.WriteLine($"Longest: {maxLength} chars");
+                DisplayService.WriteLine($"Shortest: {minLength} chars");
+                DisplayService.WriteLine($"Long (>1000): {longFragments} fragments");
+                DisplayService.WriteLine($"Short (<200): {shortFragments} fragments");
+                DisplayService.WriteLine();
+                
+                // Show top 10 longest fragments
+                DisplayService.WriteLine("Top 10 Longest Fragments:");
+                DisplayService.WriteLine("═══════════════════════════════════════════════════════════");
+                foreach (var item in sortedFragments.Take(10))
+                {
+                    var category = item.Fragment.Category;
+                    var truncatedCategory = category.Length > 50 ? category.Substring(0, 47) + "..." : category;
+                    DisplayService.WriteLine($"{item.Length,5} chars - {truncatedCategory}");
+                }
+                DisplayService.WriteLine();
+                
+                // Show fragments by length bucket
+                DisplayService.WriteLine("Distribution by Length:");
+                DisplayService.WriteLine("═══════════════════════════════════════════════════════════");
+                var buckets = new[]
+                {
+                    (Range: "0-200", Min: 0, Max: 200),
+                    (Range: "201-500", Min: 201, Max: 500),
+                    (Range: "501-1000", Min: 501, Max: 1000),
+                    (Range: "1001-1500", Min: 1001, Max: 1500),
+                    (Range: "1500+", Min: 1501, Max: int.MaxValue)
+                };
+                
+                foreach (var bucket in buckets)
+                {
+                    var count = sortedFragments.Count(x => x.Length >= bucket.Min && x.Length <= bucket.Max);
+                    var barWidth = (int)((count / (double)sortedFragments.Count) * 40);
+                    var bar = new string('█', barWidth);
+                    DisplayService.WriteLine($"{bucket.Range,12}: {bar} {count,3} ({count * 100.0 / sortedFragments.Count:F1}%)");
+                }
+                
+                DisplayService.WriteLine();
+                continue;
+            }
 
             if (input.StartsWith("/collections", StringComparison.OrdinalIgnoreCase))
             {
@@ -198,29 +266,29 @@ internal static class RunVectorMemoryWithDatabaseMode
 
             if (input.StartsWith("/pool", StringComparison.OrdinalIgnoreCase))
             {
-                DisplayService.WriteLine($"\n📊 Pool Status:");
-                DisplayService.WriteLine($"   Available: {modelPool.AvailableCount}/{modelPool.MaxInstances}");
-                DisplayService.WriteLine($"   In Use: {modelPool.MaxInstances - modelPool.AvailableCount}");
+                DisplayService.WriteLine($"\n[*] Pool Status:");
+                DisplayService.WriteLine($"    Available: {modelPool.AvailableCount}/{modelPool.MaxInstances}");
+                DisplayService.WriteLine($"    In Use: {modelPool.MaxInstances - modelPool.AvailableCount}");
                 continue;
             }
 
             if (input.StartsWith("/reload", StringComparison.OrdinalIgnoreCase))
             {
-                DisplayService.WriteLine("\n🔄 Checking for new files...");
+                DisplayService.WriteLine("\n[*] Checking for new files...");
                 var newInboxFiles = await fileWatcher.DiscoverNewFilesAsync();
                 
                 if (newInboxFiles.Any())
                 {
-                    DisplayService.WriteLine($"📁 Found {newInboxFiles.Count} new file(s)!");
+                    DisplayService.WriteLine($"[*] Found {newInboxFiles.Count} new file(s)!");
                     await ProcessNewFilesAsync(newInboxFiles, persistenceService, fileWatcher);
                     
                     // Reload vector memory
                     vectorMemory = await persistenceService.LoadVectorMemoryAsync(collectionName);
-                    DisplayService.WriteLine($"✓ Reloaded collection with {vectorMemory.Count} fragments");
+                    DisplayService.WriteLine($"[+] Reloaded collection with {vectorMemory.Count} fragments");
                 }
                 else
                 {
-                    DisplayService.WriteLine("✓ No new files found in inbox");
+                    DisplayService.WriteLine("[+] No new files found in inbox");
                 }
                 continue;
             }
@@ -232,7 +300,7 @@ internal static class RunVectorMemoryWithDatabaseMode
 
         // Clean up the pool
         modelPool.Dispose();
-        DisplayService.WriteLine("\n✓ Model pool disposed");
+        DisplayService.WriteLine("\n[+] Model pool disposed");
     }
 
     /// <summary>
@@ -264,12 +332,12 @@ internal static class RunVectorMemoryWithDatabaseMode
             replaceExisting: false); // Don't replace, append new knowledge
 
         // Archive processed files
-        DisplayService.WriteLine("\n📦 Archiving processed files...");
+        DisplayService.WriteLine("\n[*] Archiving processed files...");
         foreach (var filePath in newFiles.Values)
         {
             await fileWatcher.ArchiveFileAsync(filePath);
         }
 
-        DisplayService.WriteLine($"\n✓ Successfully processed and archived {newFiles.Count} file(s)");
+        DisplayService.WriteLine($"\n[+] Successfully processed and archived {newFiles.Count} file(s)");
     }
 }

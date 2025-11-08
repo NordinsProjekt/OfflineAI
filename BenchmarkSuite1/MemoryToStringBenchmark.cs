@@ -1,12 +1,11 @@
 ﻿using System;
 using System.Diagnostics;
 using System.Text;
-using BenchmarkSuite1.TestMemoryModels;
-using MemoryLibrary.Models;
+using Entities;
 using MemoryLibraryBenchmarks.TestMemoryModels;
 using Services;
 
-namespace BenchmarkSuite1;
+namespace MemoryLibraryBenchmarks;
 
 public class MemoryToStringBenchmark
 {

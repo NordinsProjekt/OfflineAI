@@ -1,12 +1,12 @@
 <Solution>
-  <Folder Name="/1. Domain/" />
+  <Folder Name="/1. Domain/">
+    <Project Path="Entities/Entities.csproj" Id="179e4a29-6336-4ef4-8dba-fdeddd799797" />
+  </Folder>
   <Folder Name="/2. Application/">
     <Project Path="Factories/Factories.csproj" />
     <Project Path="Services/Services.csproj" />
   </Folder>
-  <Folder Name="/3. Infrastructure/">
-    <Project Path="MemoryLibrary/MemoryLibrary.csproj" Id="c06bc0bc-8c15-4a2f-8a93-583ed2fd4f25" />
-  </Folder>
+  <Folder Name="/3. Infrastructure/" />
   <Folder Name="/4. Presentation/">
     <Project Path="OfflineAI/OfflineAI.csproj" />
   </Folder>

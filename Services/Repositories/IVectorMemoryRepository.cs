@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Services.Models;
+using Entities;
+
 
 namespace Services.Repositories;
 
@@ -74,4 +75,14 @@ public interface IVectorMemoryRepository
     /// Check if a collection exists.
     /// </summary>
     Task<bool> CollectionExistsAsync(string collectionName);
+    
+    /// <summary>
+    /// Get content length statistics for a collection.
+    /// </summary>
+    Task<ContentLengthStats> GetContentLengthStatsAsync(string collectionName);
+    
+    /// <summary>
+    /// Get fragments grouped by length buckets.
+    /// </summary>
+    Task<Dictionary<string, int>> GetLengthDistributionAsync(string collectionName);
 }

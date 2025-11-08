@@ -11,18 +11,30 @@ public static class DatabaseConnectionTester
 {
     /// <summary>
     /// Test if we can connect to the database server.
+    /// Tests connection to 'master' database to verify SQL Server is accessible.
     /// </summary>
     public static async Task<bool> TestConnectionAsync(string connectionString)
     {
         try
         {
-            using var connection = new SqlConnection(connectionString);
+            // Parse connection string and connect to master database first
+            // This avoids errors if the target database doesn't exist yet
+            var builder = new SqlConnectionStringBuilder(connectionString);
+            var targetDatabase = builder.InitialCatalog;
+            builder.InitialCatalog = "master";
+            
+            using var connection = new SqlConnection(builder.ConnectionString);
             await connection.OpenAsync();
-            Console.WriteLine("? Successfully connected to database server!");
+            Console.WriteLine("? Successfully connected to SQL Server!");
             
             // Get server version
             var version = connection.ServerVersion;
             Console.WriteLine($"  Server version: {version}");
+            
+            if (!string.IsNullOrWhiteSpace(targetDatabase))
+            {
+                Console.WriteLine($"  Target database: {targetDatabase}");
+            }
             
             return true;
         }
@@ -44,6 +56,7 @@ public static class DatabaseConnectionTester
             {
                 Console.WriteLine("  - Check connection string authentication");
                 Console.WriteLine("  - Verify Windows Authentication is enabled");
+                Console.WriteLine("  - For LocalDB, ensure you're using: Integrated Security=true");
             }
             
             Console.WriteLine();

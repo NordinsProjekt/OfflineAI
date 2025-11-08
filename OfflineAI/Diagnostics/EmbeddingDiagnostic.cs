@@ -1,6 +1,6 @@
 using System;
 using System.Linq;
-using Services;
+using Services.AI.Embeddings;
 
 namespace OfflineAI.Diagnostics;
 

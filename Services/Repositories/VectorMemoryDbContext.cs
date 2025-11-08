@@ -1,6 +1,6 @@
 using System;
+using Entities;
 using Microsoft.EntityFrameworkCore;
-using Services.Models;
 
 namespace Services.Repositories;
 

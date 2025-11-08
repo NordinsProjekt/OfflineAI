@@ -23,7 +23,6 @@
   <ItemGroup>
     <ProjectReference Include="..\OfflineAI\OfflineAI.csproj" />
     <ProjectReference Include="..\Services\Services.csproj" />
-    <ProjectReference Include="..\MemoryLibrary\MemoryLibrary.csproj" />
     <ProjectReference Include="..\Factories\Factories.csproj" />
   </ItemGroup>
 

@@ -2,11 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using MemoryLibrary.Models;
+using Entities;
 using Microsoft.SemanticKernel.Embeddings;
-using Services;
-using Services.Models;
 using OfflineAI.Tests.Mocks;
+using Services.Memory;
 
 namespace OfflineAI.Tests.Mocks;
 

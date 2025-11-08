@@ -22,6 +22,27 @@ namespace OfflineAI
                 return;
             }
             
+            // Check for Section 24 tokenization diagnostic
+            if (args.Length > 0 && args[0] == "--diagnose-section24")
+            {
+                await Section24TokenizationDiagnostic.RunAsync();
+                return;
+            }
+            
+            // Check for multiple pattern tests
+            if (args.Length > 0 && args[0] == "--test-patterns")
+            {
+                await Section24TokenizationDiagnostic.RunMultiplePatternTestsAsync();
+                return;
+            }
+            
+            // Check for 2000+ character section test
+            if (args.Length > 0 && args[0] == "--test-2000char")
+            {
+                await Section24TokenizationDiagnostic.Test2000CharacterSectionAsync();
+                return;
+            }
+            
             DisplayService.ShowVectorMemoryDatabaseHeader();
             DisplayService.WriteLine("\n🚀 Starting OfflineAI with BERT Embeddings + SQL Database...\n");
             

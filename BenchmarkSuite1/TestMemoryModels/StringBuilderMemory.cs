@@ -1,8 +1,9 @@
 using System.Collections.Generic;
 using System.Text;
-using Services;
+using Entities;
+using Services.Interfaces;
 
-namespace BenchmarkSuite1.TestMemoryModels;
+namespace MemoryLibraryBenchmarks.TestMemoryModels;
 
 /// <summary>
 /// Test implementation using StringBuilder for concatenation.

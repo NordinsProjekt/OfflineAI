@@ -1,9 +1,9 @@
-using Services;
 using Xunit;
 using FluentAssertions;
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using Services.AI.Processing;
 
 namespace OfflineAI.Tests.Services;
 

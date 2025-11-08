@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Entities;
 using Microsoft.EntityFrameworkCore;
-using Services.Models;
 
 namespace Services.Repositories;
 
@@ -11,15 +11,10 @@ namespace Services.Repositories;
 /// Entity Framework Core implementation of vector memory repository.
 /// Handles CRUD operations and bulk inserts for vector embeddings.
 /// </summary>
-public class VectorMemoryRepositoryEF : IVectorMemoryRepository
+public class VectorMemoryRepositoryEF(VectorMemoryDbContext context) : IVectorMemoryRepository
 {
-    private readonly VectorMemoryDbContext _context;
-    
-    public VectorMemoryRepositoryEF(VectorMemoryDbContext context)
-    {
-        _context = context ?? throw new ArgumentNullException(nameof(context));
-    }
-    
+    private readonly VectorMemoryDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
+
     /// <summary>
     /// Initialize database schema. Call this once during setup.
     /// </summary>
@@ -156,5 +151,53 @@ public class VectorMemoryRepositoryEF : IVectorMemoryRepository
     {
         return await _context.MemoryFragments
             .AnyAsync(f => f.CollectionName == collectionName);
+    }
+    
+    /// <summary>
+    /// Get content length statistics for a collection.
+    /// </summary>
+    public async Task<ContentLengthStats> GetContentLengthStatsAsync(string collectionName)
+    {
+        var fragments = await _context.MemoryFragments
+            .Where(f => f.CollectionName == collectionName)
+            .Select(f => f.ContentLength)
+            .ToListAsync();
+        
+        if (!fragments.Any())
+        {
+            return new ContentLengthStats();
+        }
+        
+        return new ContentLengthStats
+        {
+            TotalFragments = fragments.Count,
+            AverageLength = fragments.Average(),
+            MinLength = fragments.Min(),
+            MaxLength = fragments.Max(),
+            LongFragments = fragments.Count(l => l > 1000),
+            ShortFragments = fragments.Count(l => l < 200)
+        };
+    }
+    
+    /// <summary>
+    /// Get fragments grouped by length buckets.
+    /// </summary>
+    public async Task<Dictionary<string, int>> GetLengthDistributionAsync(string collectionName)
+    {
+        var fragments = await _context.MemoryFragments
+            .Where(f => f.CollectionName == collectionName)
+            .Select(f => f.ContentLength)
+            .ToListAsync();
+        
+        var distribution = new Dictionary<string, int>
+        {
+            ["0-200"] = fragments.Count(l => l <= 200),
+            ["201-500"] = fragments.Count(l => l > 200 && l <= 500),
+            ["501-1000"] = fragments.Count(l => l > 500 && l <= 1000),
+            ["1001-1500"] = fragments.Count(l => l > 1000 && l <= 1500),
+            ["1500+"] = fragments.Count(l => l > 1500)
+        };
+        
+        return distribution;
     }
 }
