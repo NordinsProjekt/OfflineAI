@@ -4,16 +4,22 @@ using System.Linq;
 using System.Threading.Tasks;
 using Entities;
 using Microsoft.EntityFrameworkCore;
+using Services.Repositories;
 
-namespace Services.Repositories;
+namespace Infrastructure.Data.EntityFramework;
 
 /// <summary>
 /// Entity Framework Core implementation of vector memory repository.
 /// Handles CRUD operations and bulk inserts for vector embeddings.
 /// </summary>
-public class VectorMemoryRepositoryEF(VectorMemoryDbContext context) : IVectorMemoryRepository
+public class VectorMemoryRepositoryEF : IVectorMemoryRepository
 {
-    private readonly VectorMemoryDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
+    private readonly VectorMemoryDbContext _context;
+
+    public VectorMemoryRepositoryEF(VectorMemoryDbContext context)
+    {
+        _context = context ?? throw new ArgumentNullException(nameof(context));
+    }
 
     /// <summary>
     /// Initialize database schema. Call this once during setup.

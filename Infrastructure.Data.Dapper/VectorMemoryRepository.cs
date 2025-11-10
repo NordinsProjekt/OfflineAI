@@ -6,8 +6,9 @@ using System.Threading.Tasks;
 using Dapper;
 using Entities;
 using Microsoft.Data.SqlClient;
+using Services.Repositories;
 
-namespace Services.Repositories;
+namespace Infrastructure.Data.Dapper;
 
 /// <summary>
 /// Repository for managing MemoryFragments in MSSQL database using Dapper.
@@ -386,17 +387,4 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         
         return results.ToDictionary(r => r.LengthBucket, r => r.Count);
     }
-}
-
-/// <summary>
-/// Statistics about content lengths in a collection.
-/// </summary>
-public record ContentLengthStats
-{
-    public int TotalFragments { get; init; }
-    public double AverageLength { get; init; }
-    public int MinLength { get; init; }
-    public int MaxLength { get; init; }
-    public int LongFragments { get; init; }  // > 1000 chars
-    public int ShortFragments { get; init; }  // < 200 chars
 }

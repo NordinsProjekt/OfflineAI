@@ -2,7 +2,7 @@ using System;
 using Entities;
 using Microsoft.EntityFrameworkCore;
 
-namespace Services.Repositories;
+namespace Infrastructure.Data.EntityFramework;
 
 /// <summary>
 /// Entity Framework Core DbContext for vector memory storage.
@@ -41,6 +41,10 @@ public class VectorMemoryDbContext : DbContext
                 .IsRequired()
                 .HasColumnType("NVARCHAR(MAX)");
             
+            entity.Property(e => e.ContentLength)
+                .IsRequired()
+                .HasDefaultValue(0);
+            
             entity.Property(e => e.Embedding)
                 .HasColumnType("VARBINARY(MAX)");
             
@@ -68,6 +72,9 @@ public class VectorMemoryDbContext : DbContext
             
             entity.HasIndex(e => e.CreatedAt)
                 .HasDatabaseName("IX_MemoryFragments_CreatedAt");
+            
+            entity.HasIndex(e => e.ContentLength)
+                .HasDatabaseName("IX_MemoryFragments_ContentLength");
         });
     }
 }

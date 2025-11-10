@@ -12,16 +12,17 @@ using Services.AI.Embeddings;
 using Services.Models;
 using Services.Memory;
 using Services.Pooling;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace OfflineAI.Modes;
 
 internal static class RunVectorMemoryWithDatabaseMode
 {
-    internal static async Task RunAsync()
+    internal static async Task RunAsync(IServiceProvider serviceProvider)
     {
         DisplayService.ShowVectorMemoryDatabaseHeader();
 
-        // Setup paths
+        // Setup paths from configuration
         var llmPath = @"d:\tinyllama\llama-cli.exe";
         var modelPath = @"d:\tinyllama\tinyllama-1.1b-chat-v1.0.Q5_K_M.gguf";
         
@@ -29,21 +30,15 @@ internal static class RunVectorMemoryWithDatabaseMode
         var inboxFolder = @"d:\tinyllama\inbox";
         var archiveFolder = @"d:\tinyllama\archive";
 
-        // Database configuration
-        var dbConfig = new DatabaseConfig
-        {
-            ConnectionString = @"Server=(localdb)\mssqllocaldb;Database=VectorMemoryDB;Integrated Security=true;TrustServerCertificate=true;",
-            UseDatabasePersistence = true,
-            AutoInitializeDatabase = true
-        };
+        // Get services from DI container
+        var dbConfig = serviceProvider.GetRequiredService<DatabaseConfig>();
+        var embeddingService = serviceProvider.GetRequiredService<SemanticEmbeddingService>();
+        var persistenceService = serviceProvider.GetRequiredService<VectorMemoryPersistenceService>();
+        var modelPool = serviceProvider.GetRequiredService<ModelInstancePool>();
 
-        // ✅ Create BERT embedding service (superior semantic understanding)
+        // ✅ BERT embedding service (superior semantic understanding)
         DisplayService.ShowInitializingEmbeddingService();
         DisplayService.WriteLine("Using BERT embeddings for semantic search...");
-        var embeddingService = new SemanticEmbeddingService();
-        
-        var repository = new VectorMemoryRepository(dbConfig.ConnectionString);
-        var persistenceService = new VectorMemoryPersistenceService(repository, embeddingService);
 
         // Test database connection
         DisplayService.ShowTestingDatabaseConnection();
@@ -120,8 +115,6 @@ internal static class RunVectorMemoryWithDatabaseMode
         DisplayService.WriteLine("╚════════════════════════════════════════════════════════╝");
         DisplayService.WriteLine("\nThis keeps the model loaded in memory for faster responses.");
         DisplayService.WriteLine("Pool size: 3 instances (supports 3-10 concurrent users)\n");
-        
-        var modelPool = new ModelInstancePool(llmPath, modelPath, maxInstances: 3);
         
         await modelPool.InitializeAsync((current, total) =>
         {
