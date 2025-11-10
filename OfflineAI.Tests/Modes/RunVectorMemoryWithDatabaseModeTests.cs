@@ -27,7 +27,7 @@ public class RunVectorMemoryWithDatabaseModeTests
         var collectionName = "test-collection";
 
         var mockRepo = new MockVectorMemoryRepository();
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var persistenceService = new TestVectorMemoryPersistenceService(mockRepo, embeddingService);
 
         await mockRepo.InitializeDatabaseAsync();
@@ -65,7 +65,7 @@ public class RunVectorMemoryWithDatabaseModeTests
         var collectionName = "multi-game-collection";
 
         var mockRepo = new MockVectorMemoryRepository();
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var persistenceService = new TestVectorMemoryPersistenceService(mockRepo, embeddingService);
 
         await mockRepo.InitializeDatabaseAsync();
@@ -103,7 +103,7 @@ public class RunVectorMemoryWithDatabaseModeTests
         var collectionName = "header-test";
 
         var mockRepo = new MockVectorMemoryRepository();
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var persistenceService = new TestVectorMemoryPersistenceService(mockRepo, embeddingService);
 
         await mockRepo.InitializeDatabaseAsync();
@@ -140,7 +140,7 @@ public class RunVectorMemoryWithDatabaseModeTests
         var collectionName = "empty-sections-test";
 
         var mockRepo = new MockVectorMemoryRepository();
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var persistenceService = new TestVectorMemoryPersistenceService(mockRepo, embeddingService);
 
         await mockRepo.InitializeDatabaseAsync();
@@ -173,7 +173,7 @@ public class RunVectorMemoryWithDatabaseModeTests
             ["MemoryGame"] = tempFile
         };
 
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
 
         // Act
         var result = await LoadFromFilesInMemoryAsyncWrapper(
@@ -200,7 +200,7 @@ public class RunVectorMemoryWithDatabaseModeTests
         var collectionName = "rpg-rules";
 
         var mockRepo = new MockVectorMemoryRepository();
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var persistenceService = new TestVectorMemoryPersistenceService(mockRepo, embeddingService);
 
         await mockRepo.InitializeDatabaseAsync();
@@ -240,7 +240,7 @@ public class RunVectorMemoryWithDatabaseModeTests
         var collectionName = "long-header-test";
 
         var mockRepo = new MockVectorMemoryRepository();
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var persistenceService = new TestVectorMemoryPersistenceService(mockRepo, embeddingService);
 
         await mockRepo.InitializeDatabaseAsync();
@@ -276,7 +276,7 @@ public class RunVectorMemoryWithDatabaseModeTests
         var collectionName = "replace-test";
 
         var mockRepo = new MockVectorMemoryRepository();
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var persistenceService = new TestVectorMemoryPersistenceService(mockRepo, embeddingService);
 
         await mockRepo.InitializeDatabaseAsync();
@@ -310,7 +310,7 @@ public class RunVectorMemoryWithDatabaseModeTests
     {
         // Arrange
         var mockRepo = new MockVectorMemoryRepository();
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var persistenceService = new TestVectorMemoryPersistenceService(mockRepo, embeddingService);
 
         await mockRepo.InitializeDatabaseAsync();
@@ -348,7 +348,7 @@ public class RunVectorMemoryWithDatabaseModeTests
     {
         // Arrange
         var mockRepo = new MockVectorMemoryRepository();
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var persistenceService = new TestVectorMemoryPersistenceService(mockRepo, embeddingService);
 
         // Act - Create multiple collections
@@ -381,7 +381,7 @@ public class RunVectorMemoryWithDatabaseModeTests
     public async Task VectorMemory_ShouldFindRelevantFragments_WhenSearching()
     {
         // Arrange
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var vectorMemory = new VectorMemory(embeddingService, "test-collection");
 
         var fragments = new List<MemoryFragment>
@@ -414,7 +414,7 @@ public class RunVectorMemoryWithDatabaseModeTests
     public async Task VectorMemory_ShouldFilterByRelevanceScore()
     {
         // Arrange
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var vectorMemory = new VectorMemory(embeddingService, "test-collection");
 
         vectorMemory.ImportMemory(new MemoryFragment("Topic A", "Completely unrelated content about gardening."));
@@ -445,7 +445,7 @@ public class RunVectorMemoryWithDatabaseModeTests
     public async Task VectorMemory_ShowActualRelevanceScores()
     {
         // Arrange
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var vectorMemory = new VectorMemory(embeddingService, "test-collection");
 
         vectorMemory.ImportMemory(new MemoryFragment("Combat", "Roll 2 dice when attacking."));
@@ -469,7 +469,7 @@ public class RunVectorMemoryWithDatabaseModeTests
     public async Task VectorMemory_DemonstrateSemanticGap()
     {
         // Arrange - This test demonstrates why simple embeddings get low scores
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var vectorMemory = new VectorMemory(embeddingService, "test-collection");
 
         // Add fragments with semantic meaning
@@ -496,7 +496,7 @@ public class RunVectorMemoryWithDatabaseModeTests
     public async Task VectorMemory_ShowExactWordMatchScores()
     {
         // Arrange - Show difference between exact match and semantic match
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var vectorMemory = new VectorMemory(embeddingService, "test-collection");
 
         vectorMemory.ImportMemory(new MemoryFragment("A", "How to win: collect gold treasures"));
@@ -530,7 +530,7 @@ public class RunVectorMemoryWithDatabaseModeTests
         // All query words appear in the fragment, but score is still low
         
         // Arrange
-        var embeddingService = new LocalLlmEmbeddingService("mock", "mock", 384);
+        var embeddingService = new MockEmbeddingService(384);
         var vectorMemory = new VectorMemory(embeddingService, "test-collection");
 
         // Add fragments similar to your actual data
@@ -570,7 +570,7 @@ public class RunVectorMemoryWithDatabaseModeTests
     private async Task<VectorMemory> LoadFromFilesAndSaveAsyncWrapper(
         Dictionary<string, string> knowledgeFiles,
         string collectionName,
-        LocalLlmEmbeddingService embeddingService,
+        MockEmbeddingService embeddingService,
         TestVectorMemoryPersistenceService persistenceService)
     {
         // This is a copy of the private method logic for testing
@@ -628,7 +628,7 @@ public class RunVectorMemoryWithDatabaseModeTests
 
     private async Task<VectorMemory> LoadFromFilesInMemoryAsyncWrapper(
         Dictionary<string, string> knowledgeFiles,
-        LocalLlmEmbeddingService embeddingService)
+        MockEmbeddingService embeddingService)
     {
         var vectorMemory = new VectorMemory(embeddingService, "game-rules");
         var fileReader = new FileMemoryLoaderService();

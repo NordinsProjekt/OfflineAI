@@ -126,11 +126,15 @@ internal static class RunVectorMemoryWithDatabaseMode
 
         var conversationMemory = new SimpleMemory();
 
+        // Configuration: Enable debug mode to see system prompts sent to LLM
+        const bool enableDebugMode = false; // Set to true to see LLM context
+
         // Create AI service using the pool
         var service = new AiChatServicePooled(
             vectorMemory,
             conversationMemory,
-            modelPool);
+            modelPool,
+            debugMode: enableDebugMode);
 
         DisplayService.ShowVectorMemoryInitialized(vectorMemory.Count);
         DisplayService.ShowAvailableCommands();

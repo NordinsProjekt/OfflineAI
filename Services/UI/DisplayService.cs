@@ -237,6 +237,28 @@ public static class DisplayService
         Console.WriteLine($"    In-Memory Count: {inMemoryCount}");
     }
 
+    /// <summary>
+    /// Shows the system prompt that will be sent to the LLM for debugging purposes.
+    /// </summary>
+    /// <param name="relevantMemory">The relevant context being sent</param>
+    /// <param name="debug">If true, displays the debug information. Default is false.</param>
+    public static void ShowSystemPromptDebug(string relevantMemory, bool debug = false)
+    {
+        if (!debug)
+        {
+            return;
+        }
+
+        Console.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
+        Console.WriteLine("║  SYSTEM PROMPT SENT TO LLM                                   ║");
+        Console.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
+        Console.WriteLine($"Relevant Memory Length: {relevantMemory.Length} characters");
+        Console.WriteLine($"\nFirst 500 chars of context:");
+        Console.WriteLine(relevantMemory.Substring(0, Math.Min(500, relevantMemory.Length)));
+        Console.WriteLine($"\n... (total {relevantMemory.Length} chars)");
+        Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
+    }
+
     #endregion
 
     #region Loading Progress

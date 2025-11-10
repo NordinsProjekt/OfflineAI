@@ -3,6 +3,7 @@ using Entities;
 using Services.Interfaces;
 using Services.Memory;
 using Services.Pooling;
+using Services.UI;
 
 namespace Services.AI.Chat;
 
@@ -10,14 +11,24 @@ namespace Services.AI.Chat;
 /// AI Chat service that uses a pooled persistent LLM process.
 /// Designed for web scenarios where the model should stay loaded in memory.
 /// </summary>
-public class AiChatServicePooled(
-    ILlmMemory memory,
-    ILlmMemory conversationMemory,
-    ModelInstancePool modelPool)
+public class AiChatServicePooled
 {
-    private readonly ILlmMemory _memory = memory ?? throw new ArgumentNullException(nameof(memory));
-    private readonly ILlmMemory _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
-    private readonly ModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
+    private readonly ILlmMemory _memory;
+    private readonly ILlmMemory _conversationMemory;
+    private readonly ModelInstancePool _modelPool;
+    private readonly bool _debugMode;
+
+    public AiChatServicePooled(
+        ILlmMemory memory,
+        ILlmMemory conversationMemory,
+        ModelInstancePool modelPool,
+        bool debugMode = false)
+    {
+        _memory = memory ?? throw new ArgumentNullException(nameof(memory));
+        _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
+        _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
+        _debugMode = debugMode;
+    }
 
     /// <summary>
     /// Send a message and get a response using a pooled LLM instance.
@@ -70,7 +81,8 @@ public class AiChatServicePooled(
             "- DO NOT add information from your training data\n" +
             "- DO NOT infer or guess rules that aren't explicitly stated\n" +
             "- If the context doesn't contain the answer, say 'I don't have that information in the provided rules'\n" +
-            "- Keep replies short and direct\n";
+            "- Keep replies short and direct\n" +
+            "- Format the answer with newlines\n";
 
         // Use vector search if available
         string? relevantMemory = null;
@@ -87,15 +99,8 @@ public class AiChatServicePooled(
             return null;
         }
 
-        // DEBUG: Show exactly what context is being sent to the LLM
-        Console.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
-        Console.WriteLine("║  SYSTEM PROMPT SENT TO LLM                                   ║");
-        Console.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
-        Console.WriteLine($"Relevant Memory Length: {relevantMemory.Length} characters");
-        Console.WriteLine($"\nFirst 500 chars of context:");
-        Console.WriteLine(relevantMemory.Substring(0, Math.Min(500, relevantMemory.Length)));
-        Console.WriteLine($"\n... (total {relevantMemory.Length} chars)");
-        Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
+        // Show debug output if enabled
+        DisplayService.ShowSystemPromptDebug(relevantMemory, _debugMode);
 
         var prompt = new StringBuilder(basePrompt);
         prompt.AppendLine("\n=== CONTEXT (Use ONLY this information) ===");
@@ -113,25 +118,4 @@ public class AiChatServicePooled(
 
         return prompt.ToString();
     }
-
-    /// <summary>
-    /// Extracts section numbers from text (e.g., "Section 14" -> 14)
-    /// </summary>
-    private static HashSet<int> ExtractSectionNumbers(string text)
-    {
-        var sections = new HashSet<int>();
-        var regex = new System.Text.RegularExpressions.Regex(@"Section\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        var matches = regex.Matches(text);
-        
-        foreach (System.Text.RegularExpressions.Match match in matches)
-        {
-            if (int.TryParse(match.Groups[1].Value, out int sectionNum))
-            {
-                sections.Add(sectionNum);
-            }
-        }
-        
-        return sections;
-    }
 }
-    
