@@ -1,7 +1,7 @@
 using BERTTokenizers;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
-namespace Services.Utilities;
+namespace Application.AI.Utilities;
 
 /// <summary>
 /// Helper class for BERT tokenization operations.

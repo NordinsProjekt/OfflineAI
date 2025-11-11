@@ -1,7 +1,7 @@
-using Services.AI.Processing;
+using Application.AI.Processing;
 using System.Collections.Concurrent;
 
-namespace Services.Pooling;
+namespace Application.AI.Pooling;
 
 /// <summary>
 /// Manages a pool of pre-loaded LLM process instances to handle concurrent requests
@@ -208,3 +208,4 @@ public class ModelInstancePool : IDisposable
         }
     }
 }
+

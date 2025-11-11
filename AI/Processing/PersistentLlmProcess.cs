@@ -3,7 +3,7 @@ using System.Text;
 using Factories;
 using Factories.Extensions;
 
-namespace Services.AI.Processing;
+namespace Application.AI.Processing;
 
 /// <summary>
 /// Manages a persistent LLM process that stays loaded in memory and can handle multiple requests.
@@ -207,3 +207,4 @@ public class PersistentLlmProcess : IDisposable
         _requestLock?.Dispose();
     }
 }
+

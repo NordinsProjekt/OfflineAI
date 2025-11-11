@@ -1,8 +1,8 @@
-﻿using System.Text;
+using System.Text;
 using Entities;
 using Services.Interfaces;
 
-namespace Services.Models;
+namespace Application.AI.Models;
 
 public class SimpleMemory : ILlmMemory
 {

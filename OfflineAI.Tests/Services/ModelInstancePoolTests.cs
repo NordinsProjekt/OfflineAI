@@ -6,7 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections.Generic;
-using Services.Pooling;
+using Application.AI.Pooling;
 
 namespace OfflineAI.Tests.Services;
 
@@ -573,3 +573,4 @@ public class ModelInstancePoolTests : IDisposable
 
     #endregion
 }
+

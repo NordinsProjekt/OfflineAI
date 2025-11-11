@@ -1,15 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using Entities;
-using Xunit;
-using Moq;
-using Services.Configuration;
-using Services.Repositories;
 using OfflineAI.Tests.Mocks;
 using Services.Memory;
-using Services.AI.Embeddings;
 
 namespace OfflineAI.Tests.Modes;
 

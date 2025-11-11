@@ -1,5 +1,5 @@
 using BERTTokenizers;
-using Services.Utilities;
+using Application.AI.Utilities;
 using System.Diagnostics;
 
 namespace OfflineAI.Diagnostics;

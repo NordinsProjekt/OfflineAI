@@ -3,7 +3,7 @@ using FluentAssertions;
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using Services.AI.Processing;
+using Application.AI.Processing;
 
 namespace OfflineAI.Tests.Services;
 
@@ -179,3 +179,4 @@ public class PersistentLlmProcessTests
         process.Dispose();
     }
 }
+

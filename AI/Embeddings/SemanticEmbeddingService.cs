@@ -3,10 +3,10 @@ using Microsoft.SemanticKernel.Embeddings;
 using Microsoft.ML.OnnxRuntime;
 using BERTTokenizers;
 using Services.UI;
-using Services.Utilities;
-using Services.Extensions;
+using Application.AI.Utilities;
+using Application.AI.Extensions;
 
-namespace Services.AI.Embeddings;
+namespace Application.AI.Embeddings;
 
 /// <summary>
 /// REAL BERT-based embedding service using ONNX Runtime for actual semantic understanding.
@@ -197,3 +197,4 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
         }
     }
 }
+

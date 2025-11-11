@@ -3,6 +3,7 @@
     <Project Path="Entities/Entities.csproj" Id="179e4a29-6336-4ef4-8dba-fdeddd799797" />
   </Folder>
   <Folder Name="/2. Application/">
+    <Project Path="AI/AI.csproj" Id="92289308-2ae0-4c05-b3d7-44ae55221e1f" />
     <Project Path="Factories/Factories.csproj" />
     <Project Path="Services/Services.csproj" />
   </Folder>

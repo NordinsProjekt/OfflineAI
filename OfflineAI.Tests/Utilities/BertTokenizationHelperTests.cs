@@ -1,7 +1,10 @@
 using BERTTokenizers;
+using Application.AI.Utilities;
 using Services.Utilities;
+using Application.AI.Utilities;
 using Xunit;
 
+using Application.AI.Utilities;
 namespace OfflineAI.Tests.Utilities;
 
 /// <summary>
@@ -258,3 +261,4 @@ public class BertTokenizationHelperTests
         Assert.True(result.ActualTokenCount > 0);
     }
 }
+

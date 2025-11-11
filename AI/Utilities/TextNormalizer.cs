@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Services.Utilities;
+namespace Application.AI.Utilities;
 
 /// <summary>
 /// Utility class for normalizing text to handle special Unicode characters.
@@ -11,7 +11,7 @@ public static class TextNormalizer
 {
     /// <summary>
     /// Normalizes text to handle special Unicode characters that might cause tokenizer issues.
-    /// Converts smart quotes, curly apostrophes, and other problematic characters to ASCII equivalents.
+    /// Converts smart quotes, curly apostrophes, backticks, and other problematic characters to ASCII equivalents.
     /// </summary>
     /// <param name="text">The text to normalize</param>
     /// <returns>Normalized text with ASCII equivalents for special Unicode characters</returns>
@@ -20,15 +20,22 @@ public static class TextNormalizer
         if (string.IsNullOrEmpty(text))
             return text;
         
+        // Replace backticks and grave accents (these can cause tokenizer issues)
+        text = text.Replace('`', '\''); // Backtick to single quote
+        text = text.Replace('´', '\''); // Acute accent to single quote
+        text = text.Replace('?', '\''); // Modifier letter grave accent to single quote
+        
         // Replace smart/curly quotes with straight quotes
         text = text.Replace('\u201C', '"'); // " (left double quotation mark)
         text = text.Replace('\u201D', '"'); // " (right double quotation mark)
         text = text.Replace('\u2018', '\''); // ' (left single quotation mark)
         text = text.Replace('\u2019', '\''); // ' (right single quotation mark)
+        text = text.Replace('\u201B', '\''); // ? (single high-reversed-9 quotation mark)
         
         // Replace em dash and en dash with regular dash
         text = text.Replace('\u2013', '-'); // – (en dash)
         text = text.Replace('\u2014', '-'); // — (em dash)
+        text = text.Replace('\u2212', '-'); // ? (minus sign)
         
         // Replace ellipsis (multi-char replacement needs string version)
         text = text.Replace("\u2026", "..."); // … (horizontal ellipsis)
@@ -36,6 +43,15 @@ public static class TextNormalizer
         // Remove or replace other problematic Unicode characters
         text = text.Replace('\u00A0', ' '); // Non-breaking space
         text = text.Replace("\u200B", ""); // Zero-width space
+        text = text.Replace("\u200C", ""); // Zero-width non-joiner
+        text = text.Replace("\u200D", ""); // Zero-width joiner
+        text = text.Replace("\uFEFF", ""); // Zero-width no-break space (BOM)
+        
+        // Replace other quotation-like characters
+        text = text.Replace('«', '"'); // Left-pointing double angle quotation mark
+        text = text.Replace('»', '"'); // Right-pointing double angle quotation mark
+        text = text.Replace('‹', '\''); // Single left-pointing angle quotation mark
+        text = text.Replace('›', '\''); // Single right-pointing angle quotation mark
         
         // Remove control characters except common whitespace
         var normalized = new StringBuilder(text.Length);
@@ -56,7 +72,7 @@ public static class TextNormalizer
     }
     
     /// <summary>
-    /// Normalizes text with length limits.
+    /// Normalizes text with length limits and additional safety checks.
     /// </summary>
     /// <param name="text">The text to normalize</param>
     /// <param name="maxLength">Maximum allowed length (text will be truncated if longer)</param>
@@ -109,7 +125,7 @@ public static class TextNormalizer
     }
     
     /// <summary>
-    /// Replaces Unicode quotation marks with ASCII equivalents.
+    /// Replaces Unicode quotation marks and backticks with ASCII equivalents.
     /// </summary>
     /// <param name="text">The text containing Unicode quotes</param>
     /// <returns>Text with ASCII quotes</returns>
@@ -119,10 +135,17 @@ public static class TextNormalizer
             return text;
         
         return text
+            .Replace('`', '\'')      // Backtick
+            .Replace('´', '\'')      // Acute accent
             .Replace('\u201C', '"')  // " (left double quotation mark)
             .Replace('\u201D', '"')  // " (right double quotation mark)
             .Replace('\u2018', '\'') // ' (left single quotation mark)
-            .Replace('\u2019', '\''); // ' (right single quotation mark)
+            .Replace('\u2019', '\'') // ' (right single quotation mark)
+            .Replace('\u201B', '\'') // ? (single high-reversed-9 quotation mark)
+            .Replace('«', '"')       // Left angle quote
+            .Replace('»', '"')       // Right angle quote
+            .Replace('‹', '\'')      // Single left angle quote
+            .Replace('›', '\'');     // Single right angle quote
     }
     
     /// <summary>
@@ -137,7 +160,8 @@ public static class TextNormalizer
         
         return text
             .Replace('\u2013', '-')  // – (en dash)
-            .Replace('\u2014', '-'); // — (em dash)
+            .Replace('\u2014', '-')  // — (em dash)
+            .Replace('\u2212', '-'); // ? (minus sign)
     }
     
     /// <summary>
@@ -151,8 +175,11 @@ public static class TextNormalizer
             return text;
         
         return text
-            .Replace('\u00A0', ' ')  // Non-breaking space
-            .Replace("\u200B", "")   // Zero-width space
+            .Replace('\u00A0', ' ')   // Non-breaking space
+            .Replace("\u200B", "")    // Zero-width space
+            .Replace("\u200C", "")    // Zero-width non-joiner
+            .Replace("\u200D", "")    // Zero-width joiner
+            .Replace("\uFEFF", "")    // Zero-width no-break space
             .Replace("\u2026", "..."); // … (horizontal ellipsis)
     }
 }

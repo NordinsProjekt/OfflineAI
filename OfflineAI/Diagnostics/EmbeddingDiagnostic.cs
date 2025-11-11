@@ -1,6 +1,6 @@
 using System;
 using System.Linq;
-using Services.AI.Embeddings;
+using Application.AI.Embeddings;
 
 namespace OfflineAI.Diagnostics;
 
@@ -178,3 +178,4 @@ public class EmbeddingDiagnostic
         return dotProduct / (magnitude1 * magnitude2);
     }
 }
+

@@ -1,11 +1,10 @@
-﻿using System.Text;
+using System.Text;
 using Entities;
 using Services.Interfaces;
 using Services.Memory;
-using Services.Pooling;
 using Services.UI;
 
-namespace Services.AI.Chat;
+namespace Application.AI.Chat;
 
 /// <summary>
 /// AI Chat service that uses a pooled persistent LLM process.
@@ -15,13 +14,13 @@ public class AiChatServicePooled
 {
     private readonly ILlmMemory _memory;
     private readonly ILlmMemory _conversationMemory;
-    private readonly ModelInstancePool _modelPool;
+    private readonly Application.AI.Pooling.ModelInstancePool _modelPool;
     private readonly bool _debugMode;
 
     public AiChatServicePooled(
         ILlmMemory memory,
         ILlmMemory conversationMemory,
-        ModelInstancePool modelPool,
+        Application.AI.Pooling.ModelInstancePool modelPool,
         bool debugMode = false)
     {
         _memory = memory ?? throw new ArgumentNullException(nameof(memory));

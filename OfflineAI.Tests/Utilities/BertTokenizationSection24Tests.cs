@@ -1,6 +1,8 @@
 using Services.Utilities;
+using Application.AI.Utilities;
 using Xunit;
 
+using Application.AI.Utilities;
 namespace OfflineAI.Tests.Utilities;
 
 /// <summary>
@@ -148,3 +150,4 @@ Move each Monster 1 space closer to the Castle or 1 space clockwise if inside  t
         Assert.True(result.ActualTokenCount > 0);
     }
 }
+

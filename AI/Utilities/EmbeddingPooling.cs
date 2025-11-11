@@ -1,4 +1,4 @@
-namespace Services.Utilities;
+namespace Application.AI.Utilities;
 
 /// <summary>
 /// Helper class for pooling and normalizing embeddings from transformer models.

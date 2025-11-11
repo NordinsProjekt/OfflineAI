@@ -1,4 +1,4 @@
-namespace Services.Extensions;
+namespace Application.AI.Extensions;
 
 /// <summary>
 /// Extension methods for working with embedding vectors stored as ReadOnlyMemory&lt;float&gt;.

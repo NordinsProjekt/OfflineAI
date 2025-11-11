@@ -6,9 +6,9 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Entities;
-using Services.AI.Chat;
-using Services.Models;
-using Services.Pooling;
+using Application.AI.Chat;
+using Application.AI.Models;
+using Application.AI.Pooling;
 
 namespace OfflineAI.Tests.Services;
 
@@ -522,3 +522,4 @@ public class AiChatServicePooledTests : IDisposable
 
     #endregion
 }
+

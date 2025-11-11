@@ -1,6 +1,8 @@
 using Services.Utilities;
+using Application.AI.Utilities;
 using Xunit;
 
+using Application.AI.Utilities;
 namespace OfflineAI.Tests.Utilities;
 
 public class TextNormalizerTests
@@ -235,3 +237,4 @@ public class TextNormalizerTests
         Assert.Equal(expected, result);
     }
 }
+

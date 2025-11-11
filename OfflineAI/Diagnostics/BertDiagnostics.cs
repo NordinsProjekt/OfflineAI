@@ -1,7 +1,7 @@
 using Services;
 using System;
 using System.Threading.Tasks;
-using Services.AI.Embeddings;
+using Application.AI.Embeddings;
 
 namespace OfflineAI.Diagnostics;
 
@@ -76,3 +76,4 @@ public class BertDiagnostics
         return dotProduct / (mag1 * mag2);
     }
 }
+

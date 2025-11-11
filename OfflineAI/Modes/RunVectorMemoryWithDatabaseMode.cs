@@ -1,4 +1,4 @@
-﻿using Services.Interfaces;
+using Services.Interfaces;
 using Services.Configuration;
 using Services.Repositories;
 using Services.UI;
@@ -7,11 +7,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Entities;
-using Services.AI.Chat;
-using Services.AI.Embeddings;
-using Services.Models;
+using Application.AI.Chat;
+using Application.AI.Embeddings;
+using Application.AI.Models;
 using Services.Memory;
-using Services.Pooling;
+using Application.AI.Pooling;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace OfflineAI.Modes;
@@ -36,7 +36,7 @@ internal static class RunVectorMemoryWithDatabaseMode
         var persistenceService = serviceProvider.GetRequiredService<VectorMemoryPersistenceService>();
         var modelPool = serviceProvider.GetRequiredService<ModelInstancePool>();
 
-        // ✅ BERT embedding service (superior semantic understanding)
+        // ? BERT embedding service (superior semantic understanding)
         DisplayService.ShowInitializingEmbeddingService();
         DisplayService.WriteLine("Using BERT embeddings for semantic search...");
 
@@ -59,10 +59,10 @@ internal static class RunVectorMemoryWithDatabaseMode
             DisplayService.ShowDatabaseSchemaReady();
         }
 
-        // ✅ Smart file auto-processing
-        DisplayService.WriteLine("\n╔════════════════════════════════════════════════════════╗");
-        DisplayService.WriteLine("║           Smart File Auto-Processing                   ║");
-        DisplayService.WriteLine("╚════════════════════════════════════════════════════════╝");
+        // ? Smart file auto-processing
+        DisplayService.WriteLine("\n+--------------------------------------------------------+");
+        DisplayService.WriteLine("�           Smart File Auto-Processing                   �");
+        DisplayService.WriteLine("+--------------------------------------------------------+");
         
         var fileWatcher = new KnowledgeFileWatcher(inboxFolder, archiveFolder);
         var newFiles = await fileWatcher.DiscoverNewFilesAsync();
@@ -110,9 +110,9 @@ internal static class RunVectorMemoryWithDatabaseMode
         }
 
         // Initialize Model Instance Pool (keeps models loaded in memory)
-        DisplayService.WriteLine("\n╔════════════════════════════════════════════════════════╗");
-        DisplayService.WriteLine("║         Initializing Model Instance Pool...            ║");
-        DisplayService.WriteLine("╚════════════════════════════════════════════════════════╝");
+        DisplayService.WriteLine("\n+--------------------------------------------------------+");
+        DisplayService.WriteLine("�         Initializing Model Instance Pool...            �");
+        DisplayService.WriteLine("+--------------------------------------------------------+");
         DisplayService.WriteLine("\nThis keeps the model loaded in memory for faster responses.");
         DisplayService.WriteLine("Pool size: 3 instances (supports 3-10 concurrent users)\n");
         
@@ -188,9 +188,9 @@ internal static class RunVectorMemoryWithDatabaseMode
             
             if (input.StartsWith("/lengths", StringComparison.OrdinalIgnoreCase))
             {
-                DisplayService.WriteLine("\n╔════════════════════════════════════════════════════════════╗");
-                DisplayService.WriteLine("║  Fragment Length Analysis                                  ║");
-                DisplayService.WriteLine("╚════════════════════════════════════════════════════════════╝\n");
+                DisplayService.WriteLine("\n+------------------------------------------------------------+");
+                DisplayService.WriteLine("�  Fragment Length Analysis                                  �");
+                DisplayService.WriteLine("+------------------------------------------------------------+\n");
                 
                 var fragments = vectorMemory.GetAllFragments();
                 var sortedFragments = fragments
@@ -215,7 +215,7 @@ internal static class RunVectorMemoryWithDatabaseMode
                 
                 // Show top 10 longest fragments
                 DisplayService.WriteLine("Top 10 Longest Fragments:");
-                DisplayService.WriteLine("═══════════════════════════════════════════════════════════");
+                DisplayService.WriteLine("-----------------------------------------------------------");
                 foreach (var item in sortedFragments.Take(10))
                 {
                     var category = item.Fragment.Category;
@@ -226,7 +226,7 @@ internal static class RunVectorMemoryWithDatabaseMode
                 
                 // Show fragments by length bucket
                 DisplayService.WriteLine("Distribution by Length:");
-                DisplayService.WriteLine("═══════════════════════════════════════════════════════════");
+                DisplayService.WriteLine("-----------------------------------------------------------");
                 var buckets = new[]
                 {
                     (Range: "0-200", Min: 0, Max: 200),
@@ -240,7 +240,7 @@ internal static class RunVectorMemoryWithDatabaseMode
                 {
                     var count = sortedFragments.Count(x => x.Length >= bucket.Min && x.Length <= bucket.Max);
                     var barWidth = (int)((count / (double)sortedFragments.Count) * 40);
-                    var bar = new string('█', barWidth);
+                    var bar = new string('�', barWidth);
                     DisplayService.WriteLine($"{bucket.Range,12}: {bar} {count,3} ({count * 100.0 / sortedFragments.Count:F1}%)");
                 }
                 
@@ -338,3 +338,4 @@ internal static class RunVectorMemoryWithDatabaseMode
         DisplayService.WriteLine($"\n[+] Successfully processed and archived {newFiles.Count} file(s)");
     }
 }
+
