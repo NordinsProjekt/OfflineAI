@@ -100,7 +100,9 @@ public class VectorMemoryPersistenceService
             Console.Write($"  ?? Generating embedding... ");
             
             var embeddingStart = DateTime.Now;
-            var embedding = await _embeddingService.GenerateEmbeddingAsync(fragment.Content);
+            // Include both category (title) and content for better semantic matching
+            var textToEmbed = $"{fragment.Category}\n\n{fragment.Content}";
+            var embedding = await _embeddingService.GenerateEmbeddingAsync(textToEmbed);
             embeddings.Add(embedding);
             var embeddingTime = (DateTime.Now - embeddingStart).TotalSeconds;
             

@@ -7,6 +7,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="AI\**" />
+    <EmbeddedResource Remove="AI\**" />
+    <None Remove="AI\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Entities\Entities.csproj" />
     <ProjectReference Include="..\Factories\Factories.csproj" />
   </ItemGroup>
@@ -19,9 +25,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="AI\Embeddings\" />
-    <Folder Include="AI\Chat\" />
-    <Folder Include="AI\Processing\" />
     <Folder Include="Memory\" />
   </ItemGroup>
 

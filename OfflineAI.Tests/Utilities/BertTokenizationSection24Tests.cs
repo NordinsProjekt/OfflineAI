@@ -1,13 +1,12 @@
-using Services.Utilities;
 using Application.AI.Utilities;
 using Xunit;
 
-using Application.AI.Utilities;
 namespace OfflineAI.Tests.Utilities;
 
 /// <summary>
 /// Tests for Section 24 "Move Monsters" text that was causing tokenization errors.
 /// This verifies the fix handles real-world rulebook text properly.
+/// NOTE: Uses custom simplified tokenizer (no BERTTokenizers dependency).
 /// </summary>
 public class BertTokenizationSection24Tests
 {
@@ -32,14 +31,10 @@ Move each Monster 1 space closer to the Castle or 1 space clockwise if inside  t
     public void Section24Text_TokenizesSuccessfully()
     {
         // Arrange
-        var tokenizer = new BERTTokenizers.BertUncasedLargeTokenizer();
         var normalized = TextNormalizer.NormalizeWithLimits(Section24Text, maxLength: 5000);
 
         // Act
-        var result = BertTokenizationHelper.TokenizeWithFallback(
-            tokenizer,
-            normalized,
-            maxSequenceLength: 256);
+        var result = BertTokenizationHelper.TokenizeWithFallback(normalized, 256);
 
         // Assert
         Assert.NotNull(result);
@@ -55,12 +50,8 @@ Move each Monster 1 space closer to the Castle or 1 space clockwise if inside  t
     public void Section24Text_CreatesTensorsSuccessfully()
     {
         // Arrange
-        var tokenizer = new BERTTokenizers.BertUncasedLargeTokenizer();
         var normalized = TextNormalizer.NormalizeWithLimits(Section24Text, maxLength: 5000);
-        var tokenization = BertTokenizationHelper.TokenizeWithFallback(
-            tokenizer,
-            normalized,
-            maxSequenceLength: 256);
+        var tokenization = BertTokenizationHelper.TokenizeWithFallback(normalized, 256);
 
         // Act
         var tensors = BertTokenizationHelper.CreateInputTensors(tokenization);
@@ -82,13 +73,9 @@ Move each Monster 1 space closer to the Castle or 1 space clockwise if inside  t
     {
         // Arrange - Text with multiple spaces between words
         var textWithMultipleSpaces = "inside  the Castle";
-        var tokenizer = new BERTTokenizers.BertUncasedLargeTokenizer();
 
         // Act
-        var result = BertTokenizationHelper.TokenizeWithFallback(
-            tokenizer,
-            textWithMultipleSpaces,
-            maxSequenceLength: 128);
+        var result = BertTokenizationHelper.TokenizeWithFallback(textWithMultipleSpaces, 128);
 
         // Assert
         Assert.NotNull(result);
@@ -100,13 +87,9 @@ Move each Monster 1 space closer to the Castle or 1 space clockwise if inside  t
     {
         // Arrange - Text with numbers, dashes, and punctuation
         var textWithSpecialChars = "4- and 5-point Monsters. (p. 9)";
-        var tokenizer = new BERTTokenizers.BertUncasedLargeTokenizer();
 
         // Act
-        var result = BertTokenizationHelper.TokenizeWithFallback(
-            tokenizer,
-            textWithSpecialChars,
-            maxSequenceLength: 128);
+        var result = BertTokenizationHelper.TokenizeWithFallback(textWithSpecialChars, 128);
 
         // Assert
         Assert.NotNull(result);
@@ -117,15 +100,11 @@ Move each Monster 1 space closer to the Castle or 1 space clockwise if inside  t
     public void EmptyString_AfterNormalization_UsesFallback()
     {
         // Arrange
-        var tokenizer = new BERTTokenizers.BertUncasedLargeTokenizer();
         var emptyText = "   \t\n   "; // Whitespace only
 
         // Act
         var normalized = TextNormalizer.NormalizeWithLimits(emptyText, maxLength: 5000, fallbackText: "[empty]");
-        var result = BertTokenizationHelper.TokenizeWithFallback(
-            tokenizer,
-            normalized,
-            maxSequenceLength: 128);
+        var result = BertTokenizationHelper.TokenizeWithFallback(normalized, 128);
 
         // Assert
         Assert.NotNull(result);
@@ -137,13 +116,9 @@ Move each Monster 1 space closer to the Castle or 1 space clockwise if inside  t
     {
         // Arrange - Text with various line break patterns
         var textWithLineBreaks = "Move Monsters\nMove each Monster\n\nNew paragraph";
-        var tokenizer = new BERTTokenizers.BertUncasedLargeTokenizer();
 
         // Act
-        var result = BertTokenizationHelper.TokenizeWithFallback(
-            tokenizer,
-            textWithLineBreaks,
-            maxSequenceLength: 128);
+        var result = BertTokenizationHelper.TokenizeWithFallback(textWithLineBreaks, 128);
 
         // Assert
         Assert.NotNull(result);

@@ -17,6 +17,7 @@
     <PackageReference Include="BERTTokenizers" Version="1.2.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.10" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.16.3" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.66.0" />
   </ItemGroup>
 

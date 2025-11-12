@@ -13,6 +13,7 @@
   </Folder>
   <Folder Name="/4. Presentation/">
     <Project Path="OfflineAI/OfflineAI.csproj" />
+    <Project Path="RAGTesting/RAGTesting.csproj" />
   </Folder>
   <Folder Name="/98. Benchmarks/">
     <Project Path="BenchmarkSuite1/MemoryLibraryBenchmarks.csproj" />

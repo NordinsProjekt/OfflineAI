@@ -57,6 +57,7 @@ public static class TextNormalizer
     
     /// <summary>
     /// Normalizes text with length limits.
+    /// OPTIMIZED: Truncates text BEFORE normalization to avoid processing huge strings.
     /// </summary>
     /// <param name="text">The text to normalize</param>
     /// <param name="maxLength">Maximum allowed length (text will be truncated if longer)</param>
@@ -64,19 +65,21 @@ public static class TextNormalizer
     /// <returns>Normalized text within length limits</returns>
     public static string NormalizeWithLimits(string text, int maxLength = 5000, string fallbackText = "[empty text]")
     {
-        // Normalize first
+        // OPTIMIZATION: Truncate BEFORE normalization to avoid processing huge texts
+        // This prevents memory issues when importing large text files
+        if (text != null && text.Length > maxLength)
+        {
+            Console.WriteLine($"[DEBUG] Truncating text from {text.Length} to {maxLength} chars before normalization");
+            text = text.Substring(0, maxLength);
+        }
+        
+        // Normalize after truncation
         text = Normalize(text);
         
         // Safety check: ensure we have valid text after normalization
         if (string.IsNullOrWhiteSpace(text))
         {
             return fallbackText;
-        }
-        
-        // Ensure text is not too long
-        if (text.Length > maxLength)
-        {
-            text = text.Substring(0, maxLength);
         }
         
         return text;

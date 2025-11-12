@@ -2,6 +2,7 @@ using Microsoft.SemanticKernel.Embeddings;
 using System.Text;
 using Entities;
 using Services.Interfaces;
+using Services.Utilities;
 
 namespace Services.Memory;
 
@@ -59,14 +60,24 @@ public class VectorMemory : ILlmMemory
     }
 
     /// <summary>
-    /// Retrieves the most relevant memory fragments based on semantic similarity to the query.
+    /// Retrieves the most relevant memory fragments based on semantic similarity to the query,
+    /// optionally filtering by game name.
     /// Returns null if no fragments meet the minimum relevance threshold.
     /// </summary>
     /// <param name="query">The search query</param>
     /// <param name="topK">Number of top results to return</param>
     /// <param name="minRelevanceScore">Minimum similarity score (0-1)</param>
+    /// <param name="gameFilter">List of game IDs to filter by (null = no filtering)</param>
+    /// <param name="maxCharsPerFragment">Maximum characters per fragment (default: no limit)</param>
+    /// <param name="includeMetadata">Include relevance scores and categories in output (for debug)</param>
     /// <returns>String containing the most relevant memory fragments, or null if none found</returns>
-    public async Task<string?> SearchRelevantMemoryAsync(string query, int topK = 5, double minRelevanceScore = 0.5)
+    public async Task<string?> SearchRelevantMemoryAsync(
+        string query, 
+        int topK = 5, 
+        double minRelevanceScore = 0.5,
+        List<string>? gameFilter = null,
+        int? maxCharsPerFragment = null,
+        bool includeMetadata = true)
     {
         if (string.IsNullOrWhiteSpace(query) || _entries.Count == 0)
         {
@@ -83,9 +94,9 @@ public class VectorMemory : ILlmMemory
         
         if (totalToProcess > 0)
         {
-            Console.WriteLine("??????????????????????????????????????????????????????????");
+            Console.WriteLine("?????????????????????????????????????????????????????");
             Console.WriteLine($"?  Generating Embeddings for {totalToProcess} Fragments                 ?");
-            Console.WriteLine("??????????????????????????????????????????????????????????");
+            Console.WriteLine("?????????????????????????????????????????????????????");
             Console.WriteLine();
             
             var startTime = DateTime.Now;
@@ -130,7 +141,10 @@ public class VectorMemory : ILlmMemory
                             continue;
                         }
                         
-                        entry.Embedding = await _embeddingService.GenerateEmbeddingAsync(entry.Fragment.Content);
+                        // Include both category (title) and content for better semantic matching
+                        // This ensures queries like "how to win" can match sections titled "How to win"
+                        var textToEmbed = $"{entry.Fragment.Category}\n\n{entry.Fragment.Content}";
+                        entry.Embedding = await _embeddingService.GenerateEmbeddingAsync(textToEmbed);
                     }
                     catch (Exception ex)
                     {
@@ -163,6 +177,21 @@ public class VectorMemory : ILlmMemory
             .OrderByDescending(x => x.Score)
             .ToList();
 
+        // Apply game filtering if specified
+        if (gameFilter != null && gameFilter.Count > 0)
+        {
+            Console.WriteLine($"[*] Filtering by game(s): {string.Join(", ", gameFilter.Select(GameDetector.GetDisplayName))}");
+            
+            allScores = allScores
+                .Where(x => GameDetector.MatchesGame(x.Entry.Fragment.Category, gameFilter))
+                .ToList();
+                
+            if (allScores.Count == 0)
+            {
+                Console.WriteLine($"[!] No fragments found matching game filter.");
+            }
+        }
+
         // Filter by threshold
         var results = allScores
             .Where(x => x.Score >= minRelevanceScore)
@@ -175,12 +204,25 @@ public class VectorMemory : ILlmMemory
             return null;
         }
 
-        // Build result string
+        // Build result string with optional truncation
         var sb = new StringBuilder();
         foreach (var result in results)
         {
-            sb.AppendLine($"[Relevance: {result.Score:F3}]");
-            sb.AppendLine(result.Entry.Fragment.ToString());
+            var content = result.Entry.Fragment.Content;
+            
+            // Truncate individual fragments if limit specified
+            if (maxCharsPerFragment.HasValue && content.Length > maxCharsPerFragment.Value)
+            {
+                content = TruncateString(content, maxCharsPerFragment.Value);
+            }
+
+            if (includeMetadata)
+            {
+                sb.AppendLine($"[Relevance: {result.Score:F3}]");
+                sb.AppendLine($"[{result.Entry.Fragment.Category}]");
+            }
+            
+            sb.AppendLine(content);
             sb.AppendLine();
         }
 

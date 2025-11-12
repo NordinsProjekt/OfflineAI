@@ -1,7 +1,8 @@
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Embeddings;
 using Microsoft.ML.OnnxRuntime;
-using BERTTokenizers;
+using Microsoft.ML.OnnxRuntime.Tensors;
+using Microsoft.ML.Tokenizers;
 using Services.UI;
 using Application.AI.Utilities;
 using Application.AI.Extensions;
@@ -12,27 +13,54 @@ namespace Application.AI.Embeddings;
 /// REAL BERT-based embedding service using ONNX Runtime for actual semantic understanding.
 /// This implementation runs the full BERT model to generate true semantic embeddings.
 /// Memory-optimized for CPU execution (< 2GB RAM usage).
+/// Supports both BERT-style (3 inputs) and MPNet-style (2 inputs) models.
+/// NOTE: Uses Microsoft.ML.Tokenizers with proper BERT vocabulary for accurate semantic search.
 /// </summary>
 public class SemanticEmbeddingService : ITextEmbeddingGenerationService
 {
-    private readonly BertUncasedLargeTokenizer _tokenizer;
+    private readonly Tokenizer _tokenizer;
     private readonly InferenceSession _session;
-    private readonly int _maxSequenceLength = 256;  // all-MiniLM-L6-v2 uses 256 tokens, not 512
+    private readonly int _maxSequenceLength = 256;  // MPNet and MiniLM both use 256 token context window
     private readonly int _embeddingDimension;
     private readonly bool _isGpuEnabled;
+    private readonly bool _requiresTokenTypeIds;
     
     public IReadOnlyDictionary<string, object?> Attributes => new Dictionary<string, object?>();
 
     /// <summary>
     /// Creates a REAL BERT-based semantic embedding service using ONNX Runtime.
-    /// Downloads model from: https://huggingface.com/sentence-transformers/all-MiniLM-L6-v2
+    /// Supports models from: https://huggingface.com/sentence-transformers/
+    /// - all-MiniLM-L6-v2: 384 dims, fast (fallback)
+    /// - all-mpnet-base-v2: 768 dims, best quality (recommended)
     /// </summary>
-    public SemanticEmbeddingService(string modelPath = @"d:\tinyllama\models\all-MiniLM-L6-v2\model.onnx", int embeddingDimension = 384)
+    public SemanticEmbeddingService(
+        string modelPath = @"d:\tinyllama\models\all-mpnet-base-v2\onnx\model.onnx",
+        string vocabPath = @"d:\tinyllama\models\all-mpnet-base-v2\vocab.txt",
+        int embeddingDimension = 768)
     {
         _embeddingDimension = embeddingDimension;
         
-        // Use the standard uncased tokenizer (works with smaller vocabulary)
-        _tokenizer = new BertUncasedLargeTokenizer();
+        // Create PROPER tokenizer with real BERT vocabulary
+        // This replaces the problematic BERTTokenizers library
+        try
+        {
+            if (!File.Exists(vocabPath))
+            {
+                throw new FileNotFoundException($"BERT vocabulary file not found: {vocabPath}");
+            }
+            
+            // Load BERT tokenizer from vocab file
+            _tokenizer = BertTokenizer.Create(vocabPath);
+            
+            DisplayService.WriteLine($"? Loaded BERT tokenizer with vocabulary from: {Path.GetFileName(vocabPath)}");
+            DisplayService.WriteLine($"   Tokenizer: Microsoft.ML.Tokenizers (BERT)");
+        }
+        catch (Exception ex)
+        {
+            DisplayService.WriteLine($"? Failed to load tokenizer: {ex.Message}");
+            DisplayService.WriteLine($"??  Semantic search quality will be impacted!");
+            throw;
+        }
         
         // Check if model file exists
         if (!File.Exists(modelPath))
@@ -95,10 +123,19 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
         _session = new InferenceSession(modelPath, sessionOptions);
         _isGpuEnabled = gpuEnabled;
         
+        // Detect model input requirements
+        // BERT-based models (MiniLM): need input_ids, attention_mask, token_type_ids
+        // MPNet-based models: need input_ids, attention_mask only
+        var inputMetadata = _session.InputMetadata;
+        _requiresTokenTypeIds = inputMetadata.ContainsKey("token_type_ids");
+        
+        var modelType = _requiresTokenTypeIds ? "BERT-style (3 inputs)" : "MPNet-style (2 inputs)";
         DisplayService.ShowEmbeddingServiceInitialized(
             Path.GetFileName(modelPath), 
             _embeddingDimension, 
             gpuEnabled);
+        DisplayService.WriteLine($"Model type: {modelType}");
+        DisplayService.WriteLine($"Tokenizer: Microsoft.ML.Tokenizers (BERT vocabulary)");
     }
     
     public async Task<IList<ReadOnlyMemory<float>>> GenerateEmbeddingsAsync(
@@ -110,12 +147,24 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
         
         for (int i = 0; i < data.Count; i++)
         {
-            var embedding = await GenerateEmbeddingAsync(data[i], kernel, cancellationToken);
-            results.Add(embedding);
+            Console.WriteLine($"[DEBUG] Generating embedding {i + 1}/{data.Count}...");
+            
+            try
+            {
+                var embedding = await GenerateEmbeddingAsync(data[i], kernel, cancellationToken);
+                results.Add(embedding);
+                Console.WriteLine($"[DEBUG] Successfully generated embedding {i + 1}/{data.Count}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] Failed to generate embedding {i + 1}/{data.Count}: {ex.Message}");
+                throw;
+            }
             
             // Aggressive garbage collection on CPU to keep memory < 2GB
             if (!_isGpuEnabled && i % 3 == 0)
             {
+                Console.WriteLine($"[DEBUG] Running GC after embedding {i + 1}...");
                 GC.Collect(0, GCCollectionMode.Forced, blocking: true, compacting: true);
             }
         }
@@ -145,52 +194,125 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
     /// <summary>
     /// Generates a real BERT embedding using the ONNX model.
     /// Memory-optimized for CPU execution.
+    /// Supports both BERT-style (3 inputs) and MPNet-style (2 inputs) models.
+    /// OPTIMIZED: Uses proper BERT tokenization with real vocabulary for accurate semantic search.
     /// </summary>
     private ReadOnlyMemory<float> GenerateBertEmbedding(string text)
     {
         try
         {
+            Console.WriteLine($"[DEBUG] Step 1: Normalizing text (length: {text.Length})...");
+            
+            // OPTIMIZATION: For very large texts, truncate more aggressively before normalization
+            // This prevents tokenization issues with massive documents
+            int maxTextLength = 5000; // Default from TextNormalizer
+            if (text.Length > maxTextLength * 2)
+            {
+                Console.WriteLine($"[WARN] Text is very large ({text.Length} chars), truncating to {maxTextLength} chars to prevent memory issues");
+                text = text.Substring(0, maxTextLength);
+            }
+            
             // Step 1: Normalize text to handle special characters
-            text = TextNormalizer.NormalizeWithLimits(text, maxLength: 5000, fallbackText: "[empty text]");
+            text = TextNormalizer.NormalizeWithLimits(text, maxLength: maxTextLength, fallbackText: "[empty text]");
+            Console.WriteLine($"[DEBUG] Step 1 complete. Normalized length: {text.Length}");
             
-            // Step 2: Tokenize text
-            var tokenization = BertTokenizationHelper.TokenizeWithFallback(
-                _tokenizer, 
-                text, 
-                _maxSequenceLength);
+            Console.WriteLine($"[DEBUG] Step 2: Tokenizing with BERT vocabulary...");
+            // Step 2: Tokenize text using Microsoft.ML.Tokenizers with real BERT vocabulary
+            var result = _tokenizer.EncodeToTokens(text, out string? normalizedText);
             
+            // Extract token IDs and truncate to max sequence length (minus 2 for [CLS] and [SEP])
+            var tokens = result
+                .Take(_maxSequenceLength - 2)
+                .Select(t => t.Id)
+                .ToList();
+            
+            // Build input arrays with [CLS], tokens, [SEP], and padding
+            var inputIds = new List<int> { 101 }; // [CLS] token
+            inputIds.AddRange(tokens);
+            inputIds.Add(102); // [SEP] token
+            
+            // Create attention mask (1 for real tokens, 0 for padding)
+            var attentionMask = new List<int>();
+            for (int i = 0; i < inputIds.Count; i++)
+            {
+                attentionMask.Add(1);
+            }
+            
+            // Pad to maxSequenceLength
+            while (inputIds.Count < _maxSequenceLength)
+            {
+                inputIds.Add(0); // [PAD]
+                attentionMask.Add(0);
+            }
+            
+            // Create token type IDs (all 0s for single sentence)
+            var tokenTypeIds = Enumerable.Repeat(0, _maxSequenceLength).ToList();
+            
+            Console.WriteLine($"[DEBUG] Step 2 complete. Token count: {tokens.Count + 2} (including [CLS] and [SEP])");
+            
+            Console.WriteLine($"[DEBUG] Step 3: Creating input tensors...");
             // Step 3: Create input tensors for ONNX
-            var tensors = BertTokenizationHelper.CreateInputTensors(tokenization);
+            var inputIdsTensor = new DenseTensor<long>(
+                inputIds.Select(x => (long)x).ToArray(),
+                new[] { 1, _maxSequenceLength });
+            var attentionMaskTensor = new DenseTensor<long>(
+                attentionMask.Select(x => (long)x).ToArray(),
+                new[] { 1, _maxSequenceLength });
+            var tokenTypeIdsTensor = new DenseTensor<long>(
+                tokenTypeIds.Select(x => (long)x).ToArray(),
+                new[] { 1, _maxSequenceLength });
+            Console.WriteLine($"[DEBUG] Step 3 complete. Tensors created.");
             
-            // Step 4: Prepare ONNX inputs
+            Console.WriteLine($"[DEBUG] Step 4: Preparing ONNX inputs...");
+            // Step 4: Prepare ONNX inputs based on model requirements
             var inputs = new List<NamedOnnxValue>
             {
-                NamedOnnxValue.CreateFromTensor("input_ids", tensors["input_ids"]),
-                NamedOnnxValue.CreateFromTensor("attention_mask", tensors["attention_mask"]),
-                NamedOnnxValue.CreateFromTensor("token_type_ids", tensors["token_type_ids"])
+                NamedOnnxValue.CreateFromTensor("input_ids", inputIdsTensor),
+                NamedOnnxValue.CreateFromTensor("attention_mask", attentionMaskTensor)
             };
             
+            // Only add token_type_ids if the model requires it (BERT-style models)
+            // MPNet-based models don't use this input
+            if (_requiresTokenTypeIds)
+            {
+                inputs.Add(NamedOnnxValue.CreateFromTensor("token_type_ids", tokenTypeIdsTensor));
+            }
+            Console.WriteLine($"[DEBUG] Step 4 complete. Input count: {inputs.Count}");
+            
+            Console.WriteLine($"[DEBUG] Step 5: Running BERT inference (this may take a while)...");
             // Step 5: Run BERT inference
             using var results = _session.Run(inputs);
+            Console.WriteLine($"[DEBUG] Step 5 complete. Got results.");
+            
+            Console.WriteLine($"[DEBUG] Step 6: Extracting output tensor...");
             var outputTensor = results.First().AsEnumerable<float>().ToArray();
+            Console.WriteLine($"[DEBUG] Step 6 complete. Tensor size: {outputTensor.Length}");
             
-            // Step 6: Apply attention-masked mean pooling and L2 normalization
+            Console.WriteLine($"[DEBUG] Step 7: Pooling and normalizing...");
+            // Step 7: Apply attention-masked mean pooling and L2 normalization
             var embedding = EmbeddingPooling.PoolAndNormalize(
-                outputTensor, 
-                tokenization.AttentionMask, 
+                outputTensor,
+                attentionMask.Select(x => (long)x).ToArray(),
                 _embeddingDimension);
+            Console.WriteLine($"[DEBUG] Step 7 complete. Embedding dimension: {embedding.Length}");
             
-            // Step 7: Clean up temporary arrays for CPU memory optimization
+            Console.WriteLine($"[DEBUG] Step 8: Cleaning up...");
+            // Step 8: Clean up temporary arrays for CPU memory optimization
             if (!_isGpuEnabled)
             {
-                BertTokenizationHelper.CleanupArrays(tokenization);
+                inputIds.Clear();
+                attentionMask.Clear();
+                tokenTypeIds.Clear();
                 Array.Clear(outputTensor, 0, outputTensor.Length);
             }
+            Console.WriteLine($"[DEBUG] Step 8 complete. Returning embedding.");
             
             return embedding.AsReadOnlyMemory();
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"[DEBUG] EXCEPTION in GenerateBertEmbedding: {ex.GetType().Name}: {ex.Message}");
+            Console.WriteLine($"[DEBUG] Stack trace: {ex.StackTrace}");
             var errorMessage = ExceptionMessageService.EmbeddingGenerationFailed(ex.GetType().Name, ex.Message);
             DisplayService.ShowEmbeddingError(errorMessage);
             throw;

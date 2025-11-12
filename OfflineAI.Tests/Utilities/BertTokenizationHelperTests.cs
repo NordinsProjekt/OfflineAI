@@ -1,24 +1,15 @@
-using BERTTokenizers;
-using Application.AI.Utilities;
-using Services.Utilities;
 using Application.AI.Utilities;
 using Xunit;
 
-using Application.AI.Utilities;
 namespace OfflineAI.Tests.Utilities;
 
 /// <summary>
 /// Tests for BertTokenizationHelper to ensure proper tokenization and fallback handling.
+/// NOTE: These tests use the custom simplified tokenizer (no BERTTokenizers dependency).
 /// </summary>
 public class BertTokenizationHelperTests
 {
-    private readonly BertUncasedLargeTokenizer _tokenizer;
     private const int MaxSequenceLength = 128;
-
-    public BertTokenizationHelperTests()
-    {
-        _tokenizer = new BertUncasedLargeTokenizer();
-    }
 
     [Fact]
     public void TokenizeWithFallback_ValidText_ReturnsValidTokenization()
@@ -28,7 +19,6 @@ public class BertTokenizationHelperTests
 
         // Act
         var result = BertTokenizationHelper.TokenizeWithFallback(
-            _tokenizer, 
             text, 
             MaxSequenceLength);
 
@@ -42,25 +32,17 @@ public class BertTokenizationHelperTests
     }
 
     [Fact]
-    public void TokenizeWithFallback_EmptyString_ThrowsArgumentException()
+    public void TokenizeWithFallback_EmptyString_UsesMinimalTokenization()
     {
         // Arrange
         var text = "";
 
-        // Act & Assert
-        Assert.Throws<ArgumentException>(() => 
-            BertTokenizationHelper.TokenizeWithFallback(_tokenizer, text, MaxSequenceLength));
-    }
+        // Act - Should not throw, uses minimal tokenization instead
+        var result = BertTokenizationHelper.TokenizeWithFallback(text, MaxSequenceLength);
 
-    [Fact]
-    public void TokenizeWithFallback_NullTokenizer_ThrowsArgumentNullException()
-    {
-        // Arrange
-        var text = "Test text";
-
-        // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => 
-            BertTokenizationHelper.TokenizeWithFallback(null!, text, MaxSequenceLength));
+        // Assert
+        Assert.NotNull(result);
+        Assert.True(result.ActualTokenCount >= 2); // At least [CLS] and [SEP]
     }
 
     [Fact]
@@ -71,7 +53,6 @@ public class BertTokenizationHelperTests
 
         // Act
         var result = BertTokenizationHelper.TokenizeWithFallback(
-            _tokenizer, 
             longText, 
             MaxSequenceLength);
 
@@ -89,7 +70,6 @@ public class BertTokenizationHelperTests
 
         // Act
         var result = BertTokenizationHelper.TokenizeWithFallback(
-            _tokenizer, 
             text, 
             MaxSequenceLength);
 
@@ -105,7 +85,6 @@ public class BertTokenizationHelperTests
         // Arrange
         var text = "Test sentence";
         var tokenization = BertTokenizationHelper.TokenizeWithFallback(
-            _tokenizer, 
             text, 
             MaxSequenceLength);
 
@@ -147,7 +126,9 @@ public class BertTokenizationHelperTests
         };
 
         // Act
+#pragma warning disable CS0618 // Type or member is obsolete
         var result = BertTokenizationHelper.ExtractTokenArrays(encoded);
+#pragma warning restore CS0618
 
         // Assert
         Assert.NotNull(result);
@@ -164,16 +145,20 @@ public class BertTokenizationHelperTests
         var encoded = new List<(long InputIds, long AttentionMask, long TokenTypeIds)>();
 
         // Act & Assert
+#pragma warning disable CS0618 // Type or member is obsolete
         Assert.Throws<ArgumentException>(() => 
             BertTokenizationHelper.ExtractTokenArrays(encoded));
+#pragma warning restore CS0618
     }
 
     [Fact]
     public void ExtractTokenArrays_NullList_ThrowsArgumentNullException()
     {
         // Act & Assert
+#pragma warning disable CS0618 // Type or member is obsolete
         Assert.Throws<ArgumentNullException>(() => 
             BertTokenizationHelper.ExtractTokenArrays(null!));
+#pragma warning restore CS0618
     }
 
     [Fact]
@@ -182,7 +167,6 @@ public class BertTokenizationHelperTests
         // Arrange
         var text = "Test sentence";
         var result = BertTokenizationHelper.TokenizeWithFallback(
-            _tokenizer, 
             text, 
             MaxSequenceLength);
         
@@ -215,11 +199,9 @@ public class BertTokenizationHelperTests
 
         // Act
         var result1 = BertTokenizationHelper.TokenizeWithFallback(
-            _tokenizer, 
             text1, 
             MaxSequenceLength);
         var result2 = BertTokenizationHelper.TokenizeWithFallback(
-            _tokenizer, 
             text2, 
             MaxSequenceLength);
 
@@ -231,11 +213,10 @@ public class BertTokenizationHelperTests
     public void TokenizeWithFallback_HandlesUnicodeCharacters()
     {
         // Arrange
-        var text = "Unicode test: ???? ????? ??????";
+        var text = "Unicode test: ?? ????? ????";
 
         // Act
         var result = BertTokenizationHelper.TokenizeWithFallback(
-            _tokenizer, 
             text, 
             MaxSequenceLength);
 
@@ -252,7 +233,6 @@ public class BertTokenizationHelperTests
 
         // Act
         var result = BertTokenizationHelper.TokenizeWithFallback(
-            _tokenizer, 
             text, 
             MaxSequenceLength);
 

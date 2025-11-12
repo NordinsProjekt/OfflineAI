@@ -38,7 +38,7 @@ public class PersistentLlmProcess : IDisposable
     public static async Task<PersistentLlmProcess> CreateAsync(
         string llmPath, 
         string modelPath, 
-        int timeoutMs = 30000)
+        int timeoutMs = 45000)  // Increased from 30s to 45s
     {
         // Validate paths exist
         if (!File.Exists(llmPath))
@@ -75,15 +75,16 @@ public class PersistentLlmProcess : IDisposable
             var processInfo = LlmFactory.CreateForLlama(_llmPath, _modelPath)
                 .SetPrompt(fullPrompt);
             
-            // Reduce hallucination with more conservative parameters
-            processInfo.Arguments += " -n 200";           // Max 200 tokens
-            processInfo.Arguments += " --temp 0.3";       // Lower temperature = more focused (was 0.4)
-            processInfo.Arguments += " --top-p 0.85";     // More conservative sampling (was default)
+            // Optimized parameters for small models to prevent incomplete responses
+            processInfo.Arguments += " -n 256";           // Increased from 200 to allow complete answers
+            processInfo.Arguments += " --temp 0.3";       // Lower temperature = more focused
+            processInfo.Arguments += " --top-p 0.85";     // More conservative sampling
             processInfo.Arguments += " --top-k 30";       // Limit vocabulary choices
             processInfo.Arguments += " --repeat-penalty 1.15";  // Penalize repetition
             processInfo.Arguments += " --presence-penalty 0.2"; // Reduce adding new concepts
             processInfo.Arguments += " --frequency-penalty 0.2"; // Discourage repeating patterns
-            
+            processInfo.Arguments += " -c 2048";          // Context window size (was implicit)
+
             var process = processInfo.Build();
 
             // Execute and capture output
@@ -107,12 +108,15 @@ public class PersistentLlmProcess : IDisposable
         var assistantStarted = false;
         var lastOutputTime = DateTime.UtcNow;
         var processStartTime = DateTime.UtcNow;
+        var consecutiveSilentChecks = 0;
+        const int maxSilentChecks = 5; // 5 seconds of silence after assistant starts
 
         process.OutputDataReceived += (sender, e) =>
         {
             if (string.IsNullOrEmpty(e.Data)) return;
 
             lastOutputTime = DateTime.UtcNow;
+            consecutiveSilentChecks = 0; // Reset counter on any output
 
             // Look for assistant tag
             if (!assistantStarted)
@@ -151,10 +155,17 @@ public class PersistentLlmProcess : IDisposable
             var timeSinceOutput = (DateTime.UtcNow - lastOutputTime).TotalMilliseconds;
             var totalTime = (DateTime.UtcNow - processStartTime).TotalMilliseconds;
             
-            // If we've started getting assistant output and there's a pause, consider done
-            if (assistantStarted && timeSinceOutput > 3000)
+            // If we've started getting assistant output and there's a sustained pause, consider done
+            if (assistantStarted && timeSinceOutput > 1000)
             {
-                break;
+                consecutiveSilentChecks++;
+                
+                // Only stop if we've had sustained silence (5 consecutive checks)
+                if (consecutiveSilentChecks >= maxSilentChecks)
+                {
+                    Console.WriteLine($"\n[Process completed after {consecutiveSilentChecks}s of silence]");
+                    break;
+                }
             }
 
             // Overall timeout - use the configured timeout value
@@ -181,18 +192,16 @@ public class PersistentLlmProcess : IDisposable
 
         var cleaned = response.Trim();
 
-        // Remove trailing tags
-        var endTagIndex = cleaned.IndexOf("<|");
-        if (endTagIndex >= 0)
+        // Remove trailing tags and EOS markers
+        string[] endMarkers = { "<|", "</s>", "[/INST]", "User:", "\n\n\n" };
+        
+        foreach (var marker in endMarkers)
         {
-            cleaned = cleaned.Substring(0, endTagIndex);
-        }
-
-        // Remove "User:" if it appears
-        var userIndex = cleaned.IndexOf("User:", StringComparison.OrdinalIgnoreCase);
-        if (userIndex >= 0)
-        {
-            cleaned = cleaned.Substring(0, userIndex);
+            var index = cleaned.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (index >= 0)
+            {
+                cleaned = cleaned.Substring(0, index);
+            }
         }
 
         return cleaned.Trim();

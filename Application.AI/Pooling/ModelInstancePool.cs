@@ -31,7 +31,7 @@ public class ModelInstancePool : IDisposable
         string llmPath, 
         string modelPath, 
         int maxInstances = 3,
-        int timeoutMs = 30000)
+        int timeoutMs = 45000)  // Updated from 30000 to match PersistentLlmProcess default
     {
         if (maxInstances < 1)
             throw new ArgumentException("Must have at least 1 instance", nameof(maxInstances));

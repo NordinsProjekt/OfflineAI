@@ -189,16 +189,21 @@ public static class DisplayService
 
     #region Commands and Help
 
-    public static void ShowAvailableCommands()
+    public static void ShowAvailableCommands(bool debugMode = false)
     {
         Console.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
         Console.WriteLine("║  Available Commands                                          ║");
         Console.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
-        Console.WriteLine("  /debug <query>  - Show relevant memory fragments");
-        Console.WriteLine("  /stats          - Show collection statistics");
-        Console.WriteLine("  /lengths        - Show fragment length analysis");
-        Console.WriteLine("  /collections    - List all collections");
-        Console.WriteLine("  /pool           - Show model pool status");
+        
+        if (debugMode)
+        {
+            Console.WriteLine("  /debug <query>  - Show relevant memory fragments");
+            Console.WriteLine("  /stats          - Show collection statistics");
+            Console.WriteLine("  /lengths        - Show fragment length analysis");
+            Console.WriteLine("  /collections    - List all collections");
+            Console.WriteLine("  /pool           - Show model pool status");
+        }
+        
         Console.WriteLine("  /reload         - Check inbox for new files and process them");
         Console.WriteLine("  exit            - Quit");
     }
@@ -369,4 +374,20 @@ public static class DisplayService
     }
 
     #endregion
+
+    public static void ShowInstancePool()
+    {
+        Console.WriteLine("\n╔════════════════════════════════════════════════════════╗");
+        Console.WriteLine("║         Initializing Model Instance Pool...            ║");
+        Console.WriteLine("╚════════════════════════════════════════════════════════╝");
+        Console.WriteLine("\nThis keeps the model loaded in memory for faster responses.");
+        Console.WriteLine("Pool size: 3 instances (supports 3-10 concurrent users)\n");
+    }
+
+    public static void ShowSmartFileProcessing()
+    {
+        Console.WriteLine("\n╔════════════════════════════════════════════════════════╗");
+        Console.WriteLine("║           Smart File Auto-Processing                   ║");
+        Console.WriteLine("╚════════════════════════════════════════════════════════╝");
+    }
 }
