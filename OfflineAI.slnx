@@ -1,16 +1,24 @@
 <Solution>
-  <Folder Name="/1. Domain/" />
+  <Folder Name="/1. Domain/">
+    <Project Path="Entities/Entities.csproj" Id="179e4a29-6336-4ef4-8dba-fdeddd799797" />
+  </Folder>
   <Folder Name="/2. Application/">
+    <Project Path="AI/AI.csproj" Id="92289308-2ae0-4c05-b3d7-44ae55221e1f" />
     <Project Path="Factories/Factories.csproj" />
     <Project Path="Services/Services.csproj" />
   </Folder>
   <Folder Name="/3. Infrastructure/">
-    <Project Path="MemoryLibrary/MemoryLibrary.csproj" Id="c06bc0bc-8c15-4a2f-8a93-583ed2fd4f25" />
+    <Project Path="Infrastructure.Data.Dapper/Infrastructure.Data.Dapper.csproj" />
+    <Project Path="Infrastructure.Data.EntityFramework/Infrastructure.Data.EntityFramework.csproj" />
   </Folder>
   <Folder Name="/4. Presentation/">
     <Project Path="OfflineAI/OfflineAI.csproj" />
+    <Project Path="RAGTesting/RAGTesting.csproj" />
   </Folder>
   <Folder Name="/98. Benchmarks/">
     <Project Path="BenchmarkSuite1/MemoryLibraryBenchmarks.csproj" />
+  </Folder>
+  <Folder Name="/99. UnitTests/">
+    <Project Path="OfflineAI.Tests/OfflineAI.Tests.csproj" />
   </Folder>
 </Solution>

@@ -1,4 +1,5 @@
-using Services;
+using Entities;
+using Services.Interfaces;
 
 namespace MemoryLibraryBenchmarks.TestMemoryModels;
 

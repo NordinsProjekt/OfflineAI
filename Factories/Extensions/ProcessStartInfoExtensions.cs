@@ -29,12 +29,6 @@ public static class ProcessStartInfoExtensions
         return processStartInfo;
     }
 
-    public static ProcessStartInfo SendQuestion(this ProcessStartInfo processStartInfo, string question)
-    {
-        processStartInfo.Arguments += $" -p \"{question}\" -n 150";
-        return processStartInfo;
-    }
-
     public static ProcessStartInfo SetModel(this ProcessStartInfo processStartInfo, string modelPath)
     {
         processStartInfo.Arguments += $" -m \"{modelPath}\"";
@@ -47,12 +41,6 @@ public static class ProcessStartInfoExtensions
         return processStartInfo;
     }
 
-    public static ProcessStartInfo SetSystemPrompt(this ProcessStartInfo processStartInfo, string systemPrompt)
-    {
-        processStartInfo.Arguments += $" --system \"{systemPrompt}\"";
-        return processStartInfo;
-    }
-    
     public static ProcessStartInfo SetBoardGameSampling(this ProcessStartInfo processStartInfo,
         int maxTokens = 150,
         float temperature = 0.3f,

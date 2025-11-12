@@ -7,7 +7,26 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="AI\**" />
+    <EmbeddedResource Remove="AI\**" />
+    <None Remove="AI\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Entities\Entities.csproj" />
     <ProjectReference Include="..\Factories\Factories.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.1.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.10" />
+    <!-- Use older, more compatible DirectML version -->
+    <PackageReference Include="Microsoft.SemanticKernel" Version="1.66.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Memory\" />
+  </ItemGroup>
+
 </Project>
+

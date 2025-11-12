@@ -3,12 +3,11 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Order;
-using BenchmarkSuite1.TestMemoryModels;
-using MemoryLibrary.Models;
+using Entities;
 using MemoryLibraryBenchmarks.TestMemoryModels;
 using Services;
 
-namespace BenchmarkSuite1;
+namespace MemoryLibraryBenchmarks;
 
 [MemoryDiagnoser]
 [Orderer(SummaryOrderPolicy.FastestToSlowest)]
