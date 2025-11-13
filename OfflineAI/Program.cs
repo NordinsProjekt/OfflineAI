@@ -30,13 +30,6 @@ namespace OfflineAI
         static IHostBuilder CreateHostBuilder(string[] args)
         {
             return Host.CreateDefaultBuilder(args)
-                // Host.CreateDefaultBuilder already configures:
-                // - appsettings.json
-                // - appsettings.{Environment}.json  
-                // - User Secrets (in Development)
-                // - Environment Variables
-                // - Command Line Arguments
-                // So we don't need to add them again!
                 .ConfigureServices((context, services) =>
                 {
                     // Bind configuration sections
@@ -122,24 +115,6 @@ namespace OfflineAI
                     DisplayService.WriteLine($"   - {error}");
                 }
                 
-                // Show what environment we're running in
-                var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") 
-                                  ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
-                                  ?? "Production";
-                DisplayService.WriteLine($"\n📊 Current Environment: {environment}");
-                
-                if (environment != "Development")
-                {
-                    DisplayService.WriteLine("\n⚠️  User Secrets are only loaded in Development environment!");
-                    DisplayService.WriteLine("   Set environment variable: DOTNET_ENVIRONMENT=Development");
-                }
-                
-                DisplayService.WriteLine("\n📝 Please configure using:");
-                DisplayService.WriteLine("   1. User Secrets: dotnet user-secrets set \"AppConfiguration:Llm:ExecutablePath\" \"d:\\\\tinyllama\\\\llama-cli.exe\"");
-                DisplayService.WriteLine("   2. appsettings.json: Copy appsettings.example.json and fill in your paths");
-                DisplayService.WriteLine("   3. Environment Variables: Set APPCONFIGURATION__LLM__EXECUTABLEPATH=...");
-                DisplayService.WriteLine("   4. Set DOTNET_ENVIRONMENT=Development to use User Secrets");
-                DisplayService.WriteLine("\nPress any key to exit...");
                 Console.ReadKey();
                 Environment.Exit(1);
             }
