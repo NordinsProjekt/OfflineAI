@@ -88,20 +88,27 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
         bool gpuEnabled = false;
         try
         {
-            // Try DirectML with explicit feature level configuration
-            // DirectML requires Windows 10 version 1903+ with DirectX 12 support
-            DisplayService.ShowAttemptingGpuAcceleration("DirectML");
+            if (_debugMode)
+            {
+                // Only show acceleration attempt in debug mode
+                DisplayService.ShowAttemptingGpuAcceleration("DirectML");
+            }
             
             // Use device ID 0 (default GPU)
-            // DirectML will automatically select the best feature level available
             sessionOptions.AppendExecutionProvider_DML(0);
             gpuEnabled = true;
-            DisplayService.ShowGpuAccelerationEnabled("DirectML");
+            if (_debugMode)
+            {
+                DisplayService.ShowGpuAccelerationEnabled("DirectML");
+            }
         }
         catch (Exception ex)
         {
-            DisplayService.ShowGpuAccelerationNotAvailable("DirectML", ex.Message);
-            DisplayService.ShowFallingBackToCpu();
+            if (_debugMode)
+            {
+                DisplayService.ShowGpuAccelerationNotAvailable("DirectML", ex.Message);
+                DisplayService.ShowFallingBackToCpu();
+            }
         }
         
         // Configure session based on GPU availability
@@ -113,7 +120,10 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
             sessionOptions.IntraOpNumThreads = Environment.ProcessorCount;
             sessionOptions.InterOpNumThreads = Math.Max(1, Environment.ProcessorCount / 2);
             
-            DisplayService.ShowGpuConfiguration();
+            if (_debugMode)
+            {
+                DisplayService.ShowGpuConfiguration();
+            }
         }
         else
         {
@@ -124,14 +134,16 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
             sessionOptions.EnableCpuMemArena = false;
             
             // Single-threaded execution to minimize memory overhead
-            // (Multi-threading creates multiple copies of intermediate tensors)
             sessionOptions.IntraOpNumThreads = 1;
             sessionOptions.InterOpNumThreads = 1;
             
             // Limit execution mode to sequential
             sessionOptions.ExecutionMode = ExecutionMode.ORT_SEQUENTIAL;
             
-            DisplayService.ShowCpuConfiguration();
+            if (_debugMode)
+            {
+                DisplayService.ShowCpuConfiguration();
+            }
         }
         
         _session = new InferenceSession(modelPath, sessionOptions);

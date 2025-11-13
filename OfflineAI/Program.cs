@@ -10,6 +10,7 @@ using Services.Configuration;
 using Infrastructure.Data.Dapper;
 using Infrastructure.Data.EntityFramework;
 using Microsoft.SemanticKernel.Embeddings;
+using System.Diagnostics;
 
 namespace OfflineAI
 {
@@ -19,6 +20,11 @@ namespace OfflineAI
         {
             // Set up dependency injection with configuration
             var host = CreateHostBuilder(args).Build();
+
+            // Read config to detect llama backend and show model info before other logs
+            var appConfig = host.Services.GetRequiredService<AppConfiguration>();
+            ShowLlamaBackendStatus(appConfig);
+            ShowLlamaModelInfo(appConfig);
             
             DisplayService.ShowVectorMemoryDatabaseHeader();
             DisplayService.WriteLine("\n🚀 Starting OfflineAI with BERT Embeddings + SQL Database...\n");
@@ -117,6 +123,74 @@ namespace OfflineAI
                 
                 Console.ReadKey();
                 Environment.Exit(1);
+            }
+        }
+
+        private static void ShowLlamaBackendStatus(AppConfiguration appConfig)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(appConfig.Llm.ExecutablePath) || !File.Exists(appConfig.Llm.ExecutablePath))
+                {
+                    return; // nothing to show
+                }
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = appConfig.Llm.ExecutablePath,
+                    Arguments = "--version",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+
+                using var proc = Process.Start(psi);
+                if (proc == null) return;
+                string stdout = proc.StandardOutput.ReadToEnd();
+                string stderr = proc.StandardError.ReadToEnd();
+                proc.WaitForExit(3000);
+
+                var text = (stdout + "\n" + stderr).ToLowerInvariant();
+                string backend = null!;
+                if (text.Contains("cublas") || text.Contains("cuda")) backend = "CUDA";
+                else if (text.Contains("hipblas") || text.Contains("rocm")) backend = "ROCm";
+                else if (text.Contains("metal")) backend = "Metal";
+                else if (text.Contains("opencl")) backend = "OpenCL";
+                else if (text.Contains("kompute")) backend = "Vulkan";
+                else if (text.Contains("blas")) backend = "CPU BLAS";
+
+                if (!string.IsNullOrEmpty(backend))
+                {
+                    DisplayService.WriteLine($"✅ Llama runtime backend detected: {backend}");
+                }
+                else
+                {
+                    DisplayService.WriteLine("ℹ️ Llama runtime backend: not detected from --version output");
+                }
+            }
+            catch
+            {
+                // Fail silent; do not block startup if detection fails
+            }
+        }
+
+        private static void ShowLlamaModelInfo(AppConfiguration appConfig)
+        {
+            try
+            {
+                var modelName = appConfig.Llm.ModelName;
+                var modelType = appConfig.Llm.ModelType;
+                var modelFile = string.IsNullOrWhiteSpace(appConfig.Llm.ModelPath) ? "(none)" : Path.GetFileName(appConfig.Llm.ModelPath);
+                if (!string.IsNullOrWhiteSpace(modelName) || !string.IsNullOrWhiteSpace(modelFile))
+                {
+                    var typePart = string.IsNullOrWhiteSpace(modelType) ? string.Empty : $" ({modelType})";
+                    DisplayService.WriteLine($"🧠 LLM model: {modelName}{typePart} [file: {modelFile}]");
+                }
+            }
+            catch
+            {
+                // Ignore failure to fetch model info
             }
         }
     }
