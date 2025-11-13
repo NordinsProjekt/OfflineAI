@@ -107,6 +107,13 @@ public class DebugSettings
     public bool EnableDebugMode { get; set; } = false;
 
     /// <summary>
+    /// Enable RAG mode (uses semantic search with vector memory)
+    /// When false, directly talks to the LLM without context retrieval
+    /// Default: true (RAG enabled)
+    /// </summary>
+    public bool EnableRagMode { get; set; } = false;
+
+    /// <summary>
     /// Collection name for vector memory
     /// Default: "game-rules-mpnet"
     /// </summary>

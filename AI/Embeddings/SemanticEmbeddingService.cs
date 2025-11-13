@@ -24,6 +24,7 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
     private readonly int _embeddingDimension;
     private readonly bool _isGpuEnabled;
     private readonly bool _requiresTokenTypeIds;
+    private readonly bool _debugMode;
     
     public IReadOnlyDictionary<string, object?> Attributes => new Dictionary<string, object?>();
 
@@ -34,11 +35,24 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
     /// - all-mpnet-base-v2: 768 dims, best quality (recommended)
     /// </summary>
     public SemanticEmbeddingService(
-        string modelPath = @"d:\tinyllama\models\all-mpnet-base-v2\onnx\model.onnx",
-        string vocabPath = @"d:\tinyllama\models\all-mpnet-base-v2\vocab.txt",
-        int embeddingDimension = 768)
+        string modelPath,
+        string vocabPath,
+        int embeddingDimension = 768,
+        bool debugMode = false)
     {
+        // Validate required parameters
+        if (string.IsNullOrWhiteSpace(modelPath))
+        {
+            throw new ArgumentException("Model path must be provided via configuration (AppConfiguration:Embedding:ModelPath)", nameof(modelPath));
+        }
+        
+        if (string.IsNullOrWhiteSpace(vocabPath))
+        {
+            throw new ArgumentException("Vocab path must be provided via configuration (AppConfiguration:Embedding:VocabPath)", nameof(vocabPath));
+        }
+        
         _embeddingDimension = embeddingDimension;
+        _debugMode = debugMode;
         
         // Create PROPER tokenizer with real BERT vocabulary
         // This replaces the problematic BERTTokenizers library
@@ -147,13 +161,20 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
         
         for (int i = 0; i < data.Count; i++)
         {
-            Console.WriteLine($"[DEBUG] Generating embedding {i + 1}/{data.Count}...");
+            if (_debugMode)
+            {
+                Console.WriteLine($"[DEBUG] Generating embedding {i + 1}/{data.Count}...");
+            }
             
             try
             {
                 var embedding = await GenerateEmbeddingAsync(data[i], kernel, cancellationToken);
                 results.Add(embedding);
-                Console.WriteLine($"[DEBUG] Successfully generated embedding {i + 1}/{data.Count}");
+                
+                if (_debugMode)
+                {
+                    Console.WriteLine($"[DEBUG] Successfully generated embedding {i + 1}/{data.Count}");
+                }
             }
             catch (Exception ex)
             {
@@ -164,7 +185,10 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
             // Aggressive garbage collection on CPU to keep memory < 2GB
             if (!_isGpuEnabled && i % 3 == 0)
             {
-                Console.WriteLine($"[DEBUG] Running GC after embedding {i + 1}...");
+                if (_debugMode)
+                {
+                    Console.WriteLine($"[DEBUG] Running GC after embedding {i + 1}...");
+                }
                 GC.Collect(0, GCCollectionMode.Forced, blocking: true, compacting: true);
             }
         }
@@ -201,22 +225,32 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
     {
         try
         {
-            Console.WriteLine($"[DEBUG] Step 1: Normalizing text (length: {text.Length})...");
+            if (_debugMode)
+            {
+                Console.WriteLine($"[DEBUG] Step 1: Normalizing text (length: {text.Length})...");
+            }
             
             // OPTIMIZATION: For very large texts, truncate more aggressively before normalization
             // This prevents tokenization issues with massive documents
             int maxTextLength = 5000; // Default from TextNormalizer
             if (text.Length > maxTextLength * 2)
             {
-                Console.WriteLine($"[WARN] Text is very large ({text.Length} chars), truncating to {maxTextLength} chars to prevent memory issues");
+                if (_debugMode)
+                {
+                    Console.WriteLine($"[WARN] Text is very large ({text.Length} chars), truncating to {maxTextLength} chars to prevent memory issues");
+                }
                 text = text.Substring(0, maxTextLength);
             }
             
             // Step 1: Normalize text to handle special characters
             text = TextNormalizer.NormalizeWithLimits(text, maxLength: maxTextLength, fallbackText: "[empty text]");
-            Console.WriteLine($"[DEBUG] Step 1 complete. Normalized length: {text.Length}");
             
-            Console.WriteLine($"[DEBUG] Step 2: Tokenizing with BERT vocabulary...");
+            if (_debugMode)
+            {
+                Console.WriteLine($"[DEBUG] Step 1 complete. Normalized length: {text.Length}");
+                Console.WriteLine($"[DEBUG] Step 2: Tokenizing with BERT vocabulary...");
+            }
+            
             // Step 2: Tokenize text using Microsoft.ML.Tokenizers with real BERT vocabulary
             var result = _tokenizer.EncodeToTokens(text, out string? normalizedText);
             
@@ -248,9 +282,12 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
             // Create token type IDs (all 0s for single sentence)
             var tokenTypeIds = Enumerable.Repeat(0, _maxSequenceLength).ToList();
             
-            Console.WriteLine($"[DEBUG] Step 2 complete. Token count: {tokens.Count + 2} (including [CLS] and [SEP])");
+            if (_debugMode)
+            {
+                Console.WriteLine($"[DEBUG] Step 2 complete. Token count: {tokens.Count + 2} (including [CLS] and [SEP])");
+                Console.WriteLine($"[DEBUG] Step 3: Creating input tensors...");
+            }
             
-            Console.WriteLine($"[DEBUG] Step 3: Creating input tensors...");
             // Step 3: Create input tensors for ONNX
             var inputIdsTensor = new DenseTensor<long>(
                 inputIds.Select(x => (long)x).ToArray(),
@@ -261,9 +298,13 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
             var tokenTypeIdsTensor = new DenseTensor<long>(
                 tokenTypeIds.Select(x => (long)x).ToArray(),
                 new[] { 1, _maxSequenceLength });
-            Console.WriteLine($"[DEBUG] Step 3 complete. Tensors created.");
             
-            Console.WriteLine($"[DEBUG] Step 4: Preparing ONNX inputs...");
+            if (_debugMode)
+            {
+                Console.WriteLine($"[DEBUG] Step 3 complete. Tensors created.");
+                Console.WriteLine($"[DEBUG] Step 4: Preparing ONNX inputs...");
+            }
+            
             // Step 4: Prepare ONNX inputs based on model requirements
             var inputs = new List<NamedOnnxValue>
             {
@@ -277,26 +318,42 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
             {
                 inputs.Add(NamedOnnxValue.CreateFromTensor("token_type_ids", tokenTypeIdsTensor));
             }
-            Console.WriteLine($"[DEBUG] Step 4 complete. Input count: {inputs.Count}");
             
-            Console.WriteLine($"[DEBUG] Step 5: Running BERT inference (this may take a while)...");
+            if (_debugMode)
+            {
+                Console.WriteLine($"[DEBUG] Step 4 complete. Input count: {inputs.Count}");
+                Console.WriteLine($"[DEBUG] Step 5: Running BERT inference (this may take a while)...");
+            }
+            
             // Step 5: Run BERT inference
             using var results = _session.Run(inputs);
-            Console.WriteLine($"[DEBUG] Step 5 complete. Got results.");
             
-            Console.WriteLine($"[DEBUG] Step 6: Extracting output tensor...");
+            if (_debugMode)
+            {
+                Console.WriteLine($"[DEBUG] Step 5 complete. Got results.");
+                Console.WriteLine($"[DEBUG] Step 6: Extracting output tensor...");
+            }
+            
             var outputTensor = results.First().AsEnumerable<float>().ToArray();
-            Console.WriteLine($"[DEBUG] Step 6 complete. Tensor size: {outputTensor.Length}");
             
-            Console.WriteLine($"[DEBUG] Step 7: Pooling and normalizing...");
+            if (_debugMode)
+            {
+                Console.WriteLine($"[DEBUG] Step 6 complete. Tensor size: {outputTensor.Length}");
+                Console.WriteLine($"[DEBUG] Step 7: Pooling and normalizing...");
+            }
+            
             // Step 7: Apply attention-masked mean pooling and L2 normalization
             var embedding = EmbeddingPooling.PoolAndNormalize(
                 outputTensor,
                 attentionMask.Select(x => (long)x).ToArray(),
                 _embeddingDimension);
-            Console.WriteLine($"[DEBUG] Step 7 complete. Embedding dimension: {embedding.Length}");
             
-            Console.WriteLine($"[DEBUG] Step 8: Cleaning up...");
+            if (_debugMode)
+            {
+                Console.WriteLine($"[DEBUG] Step 7 complete. Embedding dimension: {embedding.Length}");
+                Console.WriteLine($"[DEBUG] Step 8: Cleaning up...");
+            }
+            
             // Step 8: Clean up temporary arrays for CPU memory optimization
             if (!_isGpuEnabled)
             {
@@ -305,14 +362,21 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
                 tokenTypeIds.Clear();
                 Array.Clear(outputTensor, 0, outputTensor.Length);
             }
-            Console.WriteLine($"[DEBUG] Step 8 complete. Returning embedding.");
+            
+            if (_debugMode)
+            {
+                Console.WriteLine($"[DEBUG] Step 8 complete. Returning embedding.");
+            }
             
             return embedding.AsReadOnlyMemory();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[DEBUG] EXCEPTION in GenerateBertEmbedding: {ex.GetType().Name}: {ex.Message}");
-            Console.WriteLine($"[DEBUG] Stack trace: {ex.StackTrace}");
+            if (_debugMode)
+            {
+                Console.WriteLine($"[DEBUG] EXCEPTION in GenerateBertEmbedding: {ex.GetType().Name}: {ex.Message}");
+                Console.WriteLine($"[DEBUG] Stack trace: {ex.StackTrace}");
+            }
             var errorMessage = ExceptionMessageService.EmbeddingGenerationFailed(ex.GetType().Name, ex.Message);
             DisplayService.ShowEmbeddingError(errorMessage);
             throw;
