@@ -73,7 +73,8 @@ namespace OfflineAI
                         new SemanticEmbeddingService(
                             appConfig.Embedding.ModelPath,
                             appConfig.Embedding.VocabPath,
-                            appConfig.Embedding.Dimension));
+                            appConfig.Embedding.Dimension,
+                            appConfig.Debug.EnableDebugMode));
                     
                     services.AddSingleton<ITextEmbeddingGenerationService>(provider => 
                         provider.GetRequiredService<SemanticEmbeddingService>());

@@ -232,24 +232,45 @@ internal static class RunVectorMemoryWithDatabaseMode
         VectorMemory vectorMemory)
     {
         var conversationMemory = new SimpleMemory();
-        var service = new AiChatServicePooled(
+        
+        // Create chat service with current RAG mode
+        AiChatServicePooled CreateChatService() => new AiChatServicePooled(
             vectorMemory,
             conversationMemory,
             services.ModelPool,
-            debugMode: config.Debug.EnableDebugMode);
+            debugMode: config.Debug.EnableDebugMode,
+            enableRag: config.Debug.EnableRagMode);
+        
+        var service = CreateChatService();
 
         DisplaySystemReady(vectorMemory, config);
 
         var fileWatcher = new KnowledgeFileWatcher(config.Folders.InboxFolder, config.Folders.ArchiveFolder);
+        bool ragModeChanged = false;
 
         while (true)
         {
+            // Recreate service if RAG mode was toggled
+            if (ragModeChanged)
+            {
+                service = CreateChatService();
+                ragModeChanged = false;
+            }
+            
             var input = DisplayService.ReadInput("\n> ");
 
             if (string.IsNullOrWhiteSpace(input)) continue;
             if (input.ToLower() == "exit") break;
 
-            // Handle debug commands
+            // Check if RAG toggle command
+            if (input.Equals("/rag", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleToggleRagCommand(config);
+                ragModeChanged = true;
+                continue;
+            }
+
+            // Handle other debug commands
             if (config.Debug.EnableDebugMode && await HandleDebugCommandsAsync(
                 input, 
                 vectorMemory, 
@@ -271,6 +292,17 @@ internal static class RunVectorMemoryWithDatabaseMode
         AppConfiguration config)
     {
         DisplayService.ShowVectorMemoryInitialized(vectorMemory.Count);
+        
+        // Show RAG mode status
+        if (config.Debug.EnableRagMode)
+        {
+            DisplayService.WriteLine("🔍 RAG Mode: ENABLED (using semantic search with knowledge base)");
+        }
+        else
+        {
+            DisplayService.WriteLine("💬 RAG Mode: DISABLED (direct conversation mode - no knowledge base)");
+        }
+        
         DisplayService.ShowAvailableCommands(config.Debug.EnableDebugMode);
         DisplayService.ShowConfigurationInfo(config.Folders.InboxFolder, config.Folders.ArchiveFolder);
         DisplayService.ShowSystemReady();
@@ -538,6 +570,24 @@ internal static class RunVectorMemoryWithDatabaseMode
         DisplayService.WriteLine($"  Move-Item \"{config.Folders.ArchiveFolder}\\*.txt\" \"{config.Folders.InboxFolder}\"");
     }
 
+    private static void HandleToggleRagCommand(AppConfiguration config)
+    {
+        config.Debug.EnableRagMode = !config.Debug.EnableRagMode;
+        
+        DisplayService.WriteLine($"\n[*] RAG Mode: {(config.Debug.EnableRagMode ? "ENABLED ✓" : "DISABLED ✗")}");
+        
+        if (config.Debug.EnableRagMode)
+        {
+            DisplayService.WriteLine("    Using semantic search with knowledge base");
+        }
+        else
+        {
+            DisplayService.WriteLine("    Direct conversation mode (no knowledge base retrieval)");
+        }
+        
+        DisplayService.WriteLine("\n[!] Note: This change applies to new queries only");
+    }
+
     #endregion
 
     #region File Processing Helper
@@ -565,13 +615,11 @@ internal static class RunVectorMemoryWithDatabaseMode
         KnowledgeFileWatcher fileWatcher)
     {
         var allFragments = new List<MemoryFragment>();
-
         foreach (var (gameName, filePath) in newFiles)
         {
             var fragments = await fileWatcher.ProcessFileAsync(gameName, filePath);
             allFragments.AddRange(fragments);
         }
-
         return allFragments;
     }
 

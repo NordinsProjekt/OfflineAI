@@ -20,7 +20,8 @@ public class VectorMemoryQueryMatchingTests
     public VectorMemoryQueryMatchingTests()
     {
         var modelPath = @"d:\tinyllama\models\all-MiniLM-L6-v2\model.onnx";
-        _embeddingService = new SemanticEmbeddingService(modelPath, embeddingDimension: 384);
+        var vocabPath = @"d:\tinyllama\models\all-MiniLM-L6-v2\vocab.txt";
+        _embeddingService = new SemanticEmbeddingService(modelPath, vocabPath, embeddingDimension: 384, debugMode: false);
         _vectorMemory = new VectorMemory(_embeddingService, "test_collection");
     }
 
