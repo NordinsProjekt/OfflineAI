@@ -17,11 +17,7 @@ class Program
 {
     static async Task<int> Main(string[] args)
     {
-        Console.WriteLine("??????????????????????????????????????????????????????????????");
-        Console.WriteLine("?           RAG Quality Testing System                       ?");
-        Console.WriteLine("?           Testing Semantic Search & Retrieval             ?");
-        Console.WriteLine("??????????????????????????????????????????????????????????????");
-        Console.WriteLine();
+        DisplayService.ShowHeader();
 
         try
         {
@@ -32,12 +28,11 @@ class Program
             var testConfig = LoadTestQueries();
             if (testConfig.TestQueries.Length == 0)
             {
-                Console.WriteLine("? No test queries found in test-queries.json");
+                DisplayService.ShowNoTestQueriesFound();
                 return 1;
             }
 
-            Console.WriteLine($"?? Loaded {testConfig.TestQueries.Length} test queries");
-            Console.WriteLine();
+            DisplayService.ShowLoadedTestQueries(testConfig.TestQueries.Length);
 
             // Get services from DI
             var embeddingService = host.Services.GetRequiredService<ITextEmbeddingGenerationService>();
@@ -61,8 +56,7 @@ class Program
                 topK: 5);
 
             // Run all tests
-            Console.WriteLine("?? Running RAG quality tests...");
-            Console.WriteLine();
+            DisplayService.ShowRunningTestsHeader();
 
             var summary = await testRunner.RunAllTestsAsync(testConfig.TestQueries);
 
@@ -74,23 +68,22 @@ class Program
             // Return exit code based on results
             if (summary.FailedTests > 0)
             {
-                Console.WriteLine("\n??  Some tests failed. Check the reports for details.");
+                DisplayService.ShowTestsFailedMessage();
                 return 1;
             }
 
             if (summary.ThresholdPassRate < 80)
             {
-                Console.WriteLine($"\n??  Only {summary.ThresholdPassRate:F1}% of tests passed their minimum threshold.");
+                DisplayService.ShowLowPassRateMessage(summary.ThresholdPassRate);
                 return 1;
             }
 
-            Console.WriteLine("\n? All tests passed!");
+            DisplayService.ShowAllTestsPassedMessage();
             return 0;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"\n? Fatal error: {ex.Message}");
-            Console.WriteLine(ex.StackTrace);
+            DisplayService.ShowFatalError(ex);
             return 1;
         }
     }
@@ -102,16 +95,16 @@ class Program
             {
                 // DEBUG: Show environment
                 var environment = context.HostingEnvironment.EnvironmentName;
-                Console.WriteLine($"?? Environment: {environment}");
+                DisplayService.ShowEnvironment(environment);
                 
                 // DEBUG: Show configuration sources
                 var configRoot = context.Configuration as IConfigurationRoot;
                 if (configRoot != null)
                 {
-                    Console.WriteLine("?? Configuration sources:");
+                    DisplayService.ShowConfigurationSourcesHeader();
                     foreach (var provider in configRoot.Providers)
                     {
-                        Console.WriteLine($"   - {provider.GetType().Name}");
+                        DisplayService.ShowConfigurationSource(provider.GetType().Name);
                     }
                 }
                 
@@ -122,13 +115,13 @@ class Program
                                ?? new DatabaseConfig();
 
                 // DEBUG: Show what was loaded
-                Console.WriteLine($"\n?? Loaded configuration:");
-                Console.WriteLine($"   Embedding.ModelPath: '{appConfig.Embedding.ModelPath}'");
-                Console.WriteLine($"   Embedding.VocabPath: '{appConfig.Embedding.VocabPath}'");
-                Console.WriteLine($"   Embedding.Dimension: {appConfig.Embedding.Dimension}");
-                Console.WriteLine($"   Debug.CollectionName: '{appConfig.Debug.CollectionName}'");
-                Console.WriteLine($"   DatabaseConfig.ConnectionString: '{dbConfig.ConnectionString}'");
-                Console.WriteLine();
+                DisplayService.ShowConfigurationHeader();
+                DisplayService.ShowConfigurationValue("Embedding.ModelPath", appConfig.Embedding.ModelPath);
+                DisplayService.ShowConfigurationValue("Embedding.VocabPath", appConfig.Embedding.VocabPath);
+                DisplayService.ShowConfigurationValueInt("Embedding.Dimension", appConfig.Embedding.Dimension);
+                DisplayService.ShowConfigurationValue("Debug.CollectionName", appConfig.Debug.CollectionName);
+                DisplayService.ShowConfigurationValue("DatabaseConfig.ConnectionString", dbConfig.ConnectionString);
+                DisplayService.WriteLine();
 
                 services.AddSingleton(appConfig);
                 services.AddSingleton(dbConfig);
@@ -163,17 +156,7 @@ class Program
 
         if (errors.Any())
         {
-            Console.WriteLine("\n? Configuration Error:");
-            foreach (var error in errors)
-            {
-                Console.WriteLine($"   - {error}");
-            }
-
-            Console.WriteLine("\n?? Please configure using:");
-            Console.WriteLine("   1. User Secrets: dotnet user-secrets set \"AppConfiguration:Embedding:ModelPath\" \"path\"");
-            Console.WriteLine("   2. appsettings.json");
-            Console.WriteLine("   3. Environment Variables");
-
+            DisplayService.ShowConfigurationError(errors);
             throw new InvalidOperationException("Configuration validation failed");
         }
     }
@@ -200,18 +183,17 @@ class Program
         IVectorMemoryRepository repository,
         string collectionName)
     {
-        Console.WriteLine($"?? Loading embeddings from database (collection: {collectionName})...");
+        DisplayService.ShowLoadingEmbeddings(collectionName);
 
         var fragments = await repository.LoadByCollectionAsync(collectionName);
 
         if (fragments.Count == 0)
         {
-            Console.WriteLine("??  No fragments found in database!");
-            Console.WriteLine("   Run the main OfflineAI application to import game rules first.");
+            DisplayService.ShowNoFragmentsFound();
             throw new InvalidOperationException("No embeddings found in database");
         }
 
-        Console.WriteLine($"? Loaded {fragments.Count} fragments with embeddings");
+        DisplayService.ShowLoadedFragments(fragments.Count);
 
         // Import fragments into vector memory
         foreach (var fragmentEntity in fragments)
@@ -226,7 +208,6 @@ class Program
             }
         }
 
-        Console.WriteLine($"? Vector memory ready with {vectorMemory.Count} fragments");
-        Console.WriteLine();
+        DisplayService.ShowVectorMemoryReady(vectorMemory.Count);
     }
 }
