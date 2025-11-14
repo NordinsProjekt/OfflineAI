@@ -233,11 +233,12 @@ internal static class RunVectorMemoryWithDatabaseMode
     {
         var conversationMemory = new SimpleMemory();
         
-        // Create chat service with current RAG mode
+        // Create chat service with current RAG mode and generation settings
         AiChatServicePooled CreateChatService() => new AiChatServicePooled(
             vectorMemory,
             conversationMemory,
             services.ModelPool,
+            config.Generation,
             debugMode: config.Debug.EnableDebugMode,
             enableRag: config.Debug.EnableRagMode);
         
@@ -246,15 +247,15 @@ internal static class RunVectorMemoryWithDatabaseMode
         DisplaySystemReady(vectorMemory, config);
 
         var fileWatcher = new KnowledgeFileWatcher(config.Folders.InboxFolder, config.Folders.ArchiveFolder);
-        bool ragModeChanged = false;
+        bool serviceNeedsRecreation = false;
 
         while (true)
         {
-            // Recreate service if RAG mode was toggled
-            if (ragModeChanged)
+            // Recreate service if RAG mode was toggled or model was switched
+            if (serviceNeedsRecreation)
             {
                 service = CreateChatService();
-                ragModeChanged = false;
+                serviceNeedsRecreation = false;
             }
             
             var input = DisplayService.ReadInput("\n> ");
@@ -266,7 +267,43 @@ internal static class RunVectorMemoryWithDatabaseMode
             if (input.Equals("/rag", StringComparison.OrdinalIgnoreCase))
             {
                 HandleToggleRagCommand(config);
-                ragModeChanged = true;
+                serviceNeedsRecreation = true;
+                continue;
+            }
+
+            // Check if switch model command
+            if (input.Equals("/switchmodel", StringComparison.OrdinalIgnoreCase))
+            {
+                var switched = await HandleSwitchModelCommandAsync(config, services.ModelPool);
+                if (switched)
+                {
+                    serviceNeedsRecreation = true;
+                }
+                continue;
+            }
+
+            // Check if temperature command
+            if (input.StartsWith("/temperature ", StringComparison.OrdinalIgnoreCase) || 
+                input.StartsWith("/temp ", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleTemperatureCommand(input, config);
+                serviceNeedsRecreation = true;
+                continue;
+            }
+
+            // Check if tokens command
+            if (input.StartsWith("/tokens ", StringComparison.OrdinalIgnoreCase) ||
+                input.StartsWith("/maxtokens ", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleTokensCommand(input, config);
+                serviceNeedsRecreation = true;
+                continue;
+            }
+
+            // Check if settings command
+            if (input.Equals("/settings", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleSettingsCommand(config);
                 continue;
             }
 
@@ -498,6 +535,7 @@ internal static class RunVectorMemoryWithDatabaseMode
     }
 
     private record FragmentWithLength(IMemoryFragment Fragment, int Length);
+    
     private static async Task HandleCollectionsCommandAsync(VectorMemoryPersistenceService persistenceService)
     {
         var collections = await persistenceService.GetCollectionsAsync();
@@ -589,6 +627,215 @@ internal static class RunVectorMemoryWithDatabaseMode
         }
         
         DisplayService.WriteLine("\n[!] Note: This change applies to new queries only");
+    }
+
+    private static void HandleTemperatureCommand(string input, AppConfiguration config)
+    {
+        // Parse temperature value
+        var parts = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
+        {
+            DisplayService.WriteLine("\n[!] Usage: /temperature <value> or /temp <value>");
+            DisplayService.WriteLine($"    Current: {config.Generation.Temperature:F2}");
+            DisplayService.WriteLine("    Range: 0.0-2.0 (lower = more focused, higher = more creative)");
+            return;
+        }
+
+        if (!float.TryParse(parts[1], out float temperature) || temperature < 0 || temperature > 2.0f)
+        {
+            DisplayService.WriteLine("\n[!] Invalid temperature. Must be between 0.0 and 2.0");
+            DisplayService.WriteLine($"    Current: {config.Generation.Temperature:F2}");
+            return;
+        }
+
+        var oldTemp = config.Generation.Temperature;
+        config.Generation.Temperature = temperature;
+        
+        DisplayService.WriteLine($"\n[*] Temperature: {oldTemp:F2} → {temperature:F2}");
+        if (temperature < 0.3f)
+            DisplayService.WriteLine("    Very focused and deterministic responses");
+        else if (temperature < 0.7f)
+            DisplayService.WriteLine("    Balanced responses");
+        else if (temperature < 1.2f)
+            DisplayService.WriteLine("    Creative and varied responses");
+        else
+            DisplayService.WriteLine("    Highly creative but may be unpredictable");
+        
+        DisplayService.WriteLine("\n[!] Note: This change applies to new queries only");
+    }
+
+    private static void HandleTokensCommand(string input, AppConfiguration config)
+    {
+        // Parse tokens value
+        var parts = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
+        {
+            DisplayService.WriteLine("\n[!] Usage: /tokens <value> or /maxtokens <value>");
+            DisplayService.WriteLine($"    Current: {config.Generation.MaxTokens}");
+            DisplayService.WriteLine("    Range: 1-2048 (higher = longer responses, slower)");
+            return;
+        }
+
+        if (!int.TryParse(parts[1], out int tokens) || tokens < 1 || tokens > 2048)
+        {
+            DisplayService.WriteLine("\n[!] Invalid token count. Must be between 1 and 2048");
+            DisplayService.WriteLine($"    Current: {config.Generation.MaxTokens}");
+            return;
+        }
+
+        var oldTokens = config.Generation.MaxTokens;
+        config.Generation.MaxTokens = tokens;
+        
+        DisplayService.WriteLine($"\n[*] Max Tokens: {oldTokens} → {tokens}");
+        if (tokens < 100)
+            DisplayService.WriteLine("    Very short responses");
+        else if (tokens < 300)
+            DisplayService.WriteLine("    Medium-length responses");
+        else if (tokens < 500)
+            DisplayService.WriteLine("    Long responses");
+        else
+            DisplayService.WriteLine("    Very long responses (may be slower)");
+        
+        DisplayService.WriteLine("\n[!] Note: This change applies to new queries only");
+    }
+
+    private static void HandleSettingsCommand(AppConfiguration config)
+    {
+        DisplayService.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
+        DisplayService.WriteLine("║  Current Generation Settings                                 ║");
+        DisplayService.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
+        DisplayService.WriteLine($"\n  Temperature:         {config.Generation.Temperature:F2} (0.0-2.0)");
+        DisplayService.WriteLine($"  Max Tokens:          {config.Generation.MaxTokens} (1-2048)");
+        DisplayService.WriteLine($"  Top-K:               {config.Generation.TopK}");
+        DisplayService.WriteLine($"  Top-P:               {config.Generation.TopP:F2}");
+        DisplayService.WriteLine($"  Repeat Penalty:      {config.Generation.RepeatPenalty:F2}");
+        DisplayService.WriteLine($"  Presence Penalty:    {config.Generation.PresencePenalty:F2}");
+        DisplayService.WriteLine($"  Frequency Penalty:   {config.Generation.FrequencyPenalty:F2}");
+        
+        DisplayService.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
+        DisplayService.WriteLine("║  Model Information                                           ║");
+        DisplayService.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
+        var modelFile = string.IsNullOrWhiteSpace(config.Llm.ModelPath) ? "(none)" : Path.GetFileName(config.Llm.ModelPath);
+        DisplayService.WriteLine($"\n  Model:               {config.Llm.ModelName ?? modelFile}");
+        if (!string.IsNullOrWhiteSpace(config.Llm.ModelType))
+            DisplayService.WriteLine($"  Type:                {config.Llm.ModelType}");
+        DisplayService.WriteLine($"  RAG Mode:            {(config.Debug.EnableRagMode ? "ENABLED" : "DISABLED")}");
+        DisplayService.WriteLine($"  Debug Mode:          {(config.Debug.EnableDebugMode ? "ENABLED" : "DISABLED")}");
+        
+        DisplayService.WriteLine("\n  Commands:");
+        DisplayService.WriteLine("    /temperature <value>  - Change temperature (0.0-2.0)");
+        DisplayService.WriteLine("    /tokens <value>       - Change max tokens (1-2048)");
+        DisplayService.WriteLine("    /rag                  - Toggle RAG mode");
+        DisplayService.WriteLine("    /switchmodel          - Switch to a different model");
+    }
+
+    private static async Task<bool> HandleSwitchModelCommandAsync(AppConfiguration config, ModelInstancePool modelPool)
+    {
+        try
+        {
+            // Get the directory containing the current model
+            var currentModelPath = config.Llm.ModelPath;
+            if (string.IsNullOrWhiteSpace(currentModelPath) || !File.Exists(currentModelPath))
+            {
+                DisplayService.WriteLine("\n[!] Current model path is not valid or file does not exist.");
+                DisplayService.WriteLine($"    Path: {currentModelPath}");
+                return false;
+            }
+
+            var modelDirectory = Path.GetDirectoryName(currentModelPath);
+            if (string.IsNullOrWhiteSpace(modelDirectory) || !Directory.Exists(modelDirectory))
+            {
+                DisplayService.WriteLine("\n[!] Model directory not found.");
+                DisplayService.WriteLine($"    Directory: {modelDirectory}");
+                return false;
+            }
+
+            // Find all GGUF files in the directory
+            var ggufFiles = Directory.GetFiles(modelDirectory, "*.gguf", SearchOption.TopDirectoryOnly)
+                .Select(f => new
+                {
+                    FullPath = f,
+                    FileName = Path.GetFileName(f),
+                    SizeMB = new FileInfo(f).Length / (1024.0 * 1024.0),
+                    IsCurrent = string.Equals(f, currentModelPath, StringComparison.OrdinalIgnoreCase)
+                })
+                .OrderBy(x => x.FileName)
+                .ToList();
+
+            if (!ggufFiles.Any())
+            {
+                DisplayService.WriteLine("\n[!] No GGUF model files found in the directory.");
+                DisplayService.WriteLine($"    Directory: {modelDirectory}");
+                return false;
+            }
+
+            // Display available models
+            DisplayService.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
+            DisplayService.WriteLine("║  Available GGUF Models                                        ║");
+            DisplayService.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
+            DisplayService.WriteLine($"\nDirectory: {modelDirectory}\n");
+            
+            for (int i = 0; i < ggufFiles.Count; i++)
+            {
+                var model = ggufFiles[i];
+                var currentMarker = model.IsCurrent ? " ⭐ (current)" : "";
+                DisplayService.WriteLine($"  [{i + 1}] {model.FileName}{currentMarker}");
+                DisplayService.WriteLine($"      Size: {model.SizeMB:F2} MB");
+            }
+
+            DisplayService.WriteLine($"\n  [0] Cancel");
+            DisplayService.Write("\nSelect model number: ");
+
+            var input = Console.ReadLine()?.Trim();
+            if (!int.TryParse(input, out int selection) || selection < 0 || selection > ggufFiles.Count)
+            {
+                DisplayService.WriteLine("[!] Invalid selection. Operation cancelled.");
+                return false;
+            }
+
+            if (selection == 0)
+            {
+                DisplayService.WriteLine("[*] Model switch cancelled.");
+                return false;
+            }
+
+            var selectedModel = ggufFiles[selection - 1];
+            
+            if (selectedModel.IsCurrent)
+            {
+                DisplayService.WriteLine($"\n[*] '{selectedModel.FileName}' is already the current model.");
+                return false;
+            }
+
+            // Update configuration
+            DisplayService.WriteLine($"\n[*] Switching to: {selectedModel.FileName}");
+            DisplayService.WriteLine("[*] Reinitializing model pool with new model...");
+            
+            // Update config first
+            config.Llm.ModelPath = selectedModel.FullPath;
+            config.Llm.ModelName = Path.GetFileNameWithoutExtension(selectedModel.FileName);
+            
+            // Reinitialize pool with new model (this will dispose old instances and create new ones)
+            await modelPool.ReinitializeAsync(
+                config.Llm.ExecutablePath,
+                selectedModel.FullPath,
+                (current, total) => DisplayService.WriteLine($"    Loading instance {current}/{total}..."));
+
+            DisplayService.WriteLine($"\n[✓] Successfully switched to: {selectedModel.FileName}");
+            DisplayService.WriteLine($"[+] Model pool ready with {modelPool.AvailableCount} instances");
+            DisplayService.WriteLine("[!] Chat service will be recreated for next query");
+            
+            return true;
+        }
+        catch (Exception ex)
+        {
+            DisplayService.WriteLine($"\n[!] Error switching model: {ex.Message}");
+            if (config.Debug.EnableDebugMode)
+            {
+                DisplayService.WriteLine($"[DEBUG] Stack trace: {ex.StackTrace}");
+            }
+            return false;
+        }
     }
 
     #endregion

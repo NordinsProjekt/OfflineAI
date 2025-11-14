@@ -30,6 +30,11 @@ public class AppConfiguration
     /// Debug and logging settings
     /// </summary>
     public DebugSettings Debug { get; set; } = new();
+    
+    /// <summary>
+    /// LLM generation parameters
+    /// </summary>
+    public GenerationSettings Generation { get; set; } = new();
 }
 
 public class LlmSettings
@@ -71,6 +76,57 @@ public class LlmSettings
     /// Optional context size hint for llama backends
     /// </summary>
     public int ContextSize { get; set; } = 0;
+}
+
+public class GenerationSettings
+{
+    /// <summary>
+    /// Maximum number of tokens to generate
+    /// Default: 200
+    /// Range: 1-2048 (model dependent)
+    /// </summary>
+    public int MaxTokens { get; set; } = 200;
+
+    /// <summary>
+    /// Temperature for sampling (higher = more creative, lower = more focused)
+    /// Default: 0.3
+    /// Range: 0.0-2.0
+    /// </summary>
+    public float Temperature { get; set; } = 0.3f;
+
+    /// <summary>
+    /// Top-k sampling parameter (limits vocabulary choices)
+    /// Default: 30
+    /// </summary>
+    public int TopK { get; set; } = 30;
+
+    /// <summary>
+    /// Top-p (nucleus) sampling parameter
+    /// Default: 0.85
+    /// Range: 0.0-1.0
+    /// </summary>
+    public float TopP { get; set; } = 0.85f;
+
+    /// <summary>
+    /// Repeat penalty (discourages repetition)
+    /// Default: 1.15
+    /// Range: 1.0-2.0
+    /// </summary>
+    public float RepeatPenalty { get; set; } = 1.15f;
+
+    /// <summary>
+    /// Presence penalty (reduces adding new concepts)
+    /// Default: 0.2
+    /// Range: 0.0-1.0
+    /// </summary>
+    public float PresencePenalty { get; set; } = 0.2f;
+
+    /// <summary>
+    /// Frequency penalty (discourages repeating patterns)
+    /// Default: 0.2
+    /// Range: 0.0-1.0
+    /// </summary>
+    public float FrequencyPenalty { get; set; } = 0.2f;
 }
 
 public class EmbeddingSettings
