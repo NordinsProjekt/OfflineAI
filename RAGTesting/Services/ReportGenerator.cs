@@ -40,61 +40,24 @@ public class ReportGenerator
     /// </summary>
     public void DisplayConsoleSummary(TestSummary summary)
     {
-        Console.WriteLine("\n" + new string('=', 80));
-        Console.WriteLine("RAG QUALITY TEST SUMMARY");
-        Console.WriteLine(new string('=', 80));
-        Console.WriteLine($"Test Run: {summary.TestRunTime:yyyy-MM-dd HH:mm:ss}");
-        Console.WriteLine($"Total Execution Time: {summary.TotalExecutionTime.TotalSeconds:F2}s");
-        Console.WriteLine();
+        DisplayService.ShowSummaryHeader(summary);
+        DisplayService.ShowOverallResults(summary);
+        DisplayService.ShowQualityMetrics(summary);
+        DisplayService.ShowQualityDistribution(summary, GetQualityScore);
 
-        Console.WriteLine("OVERALL RESULTS:");
-        Console.WriteLine($"  Total Tests: {summary.TotalTests}");
-        Console.WriteLine($"  Successful: {summary.SuccessfulTests} ({summary.SuccessRate:F1}%)");
-        Console.WriteLine($"  Failed: {summary.FailedTests}");
-        Console.WriteLine($"  Passed Threshold: {summary.PassedThreshold} ({summary.ThresholdPassRate:F1}%)");
-        Console.WriteLine();
-
-        Console.WriteLine("QUALITY METRICS:");
-        Console.WriteLine($"  Average Relevance: {summary.AverageRelevanceAllTests:F3}");
-        Console.WriteLine($"  Average Keyword Match: {summary.AverageKeywordMatchRate:F1}%");
-        Console.WriteLine();
-
-        Console.WriteLine("QUALITY DISTRIBUTION:");
-        foreach (var kvp in summary.QualityDistribution.OrderByDescending(x => GetQualityScore(x.Key)))
-        {
-            var percentage = (double)kvp.Value / summary.SuccessfulTests * 100;
-            Console.WriteLine($"  {kvp.Key}: {kvp.Value} ({percentage:F1}%)");
-        }
-        Console.WriteLine();
-
-        Console.WriteLine("TOP PERFORMING QUERIES:");
         var topQueries = summary.TestResults
             .Where(r => r.Success)
             .OrderByDescending(r => r.MaxRelevance)
             .Take(3);
+        DisplayService.ShowTopPerformingQueries(topQueries);
 
-        foreach (var result in topQueries)
-        {
-            Console.WriteLine($"  ? {result.QueryId}: {result.MaxRelevance:F3} - {result.Query}");
-        }
-        Console.WriteLine();
-
-        Console.WriteLine("QUERIES NEEDING IMPROVEMENT:");
         var worstQueries = summary.TestResults
             .Where(r => r.Success)
             .OrderBy(r => r.MaxRelevance)
             .Take(3);
+        DisplayService.ShowQueriesNeedingImprovement(worstQueries);
 
-        foreach (var result in worstQueries)
-        {
-            var icon = result.PassedMinimumThreshold ? "??" : "?";
-            Console.WriteLine($"  {icon} {result.QueryId}: {result.MaxRelevance:F3} - {result.Query}");
-        }
-        Console.WriteLine();
-
-        Console.WriteLine(new string('=', 80));
-        Console.WriteLine($"Reports saved to: {Path.GetFullPath(_outputPath)}");
-        Console.WriteLine(new string('=', 80));
+        DisplayService.ShowReportsSaved(_outputPath);
     }
 
     /// <summary>
@@ -114,7 +77,7 @@ public class ReportGenerator
         var json = JsonSerializer.Serialize(summary, options);
         await File.WriteAllTextAsync(filename, json);
 
-        Console.WriteLine($"?? JSON report: {filename}");
+        DisplayService.ShowReportGenerated("JSON", filename);
     }
 
     /// <summary>
@@ -200,7 +163,7 @@ public class ReportGenerator
         }
 
         await File.WriteAllTextAsync(filename, sb.ToString());
-        Console.WriteLine($"?? Markdown report: {filename}");
+        DisplayService.ShowReportGenerated("Markdown", filename);
     }
 
     /// <summary>
@@ -235,7 +198,7 @@ public class ReportGenerator
         }
 
         await File.WriteAllTextAsync(filename, sb.ToString());
-        Console.WriteLine($"?? CSV report: {filename}");
+        DisplayService.ShowReportGenerated("CSV", filename);
     }
 
     private string EscapeCsv(string? value)

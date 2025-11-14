@@ -204,6 +204,7 @@ public static class DisplayService
             Console.WriteLine("  /pool           - Show model pool status");
         }
         
+        Console.WriteLine("  /rag            - Toggle RAG mode (semantic search on/off)");
         Console.WriteLine("  /reload         - Check inbox for new files and process them");
         Console.WriteLine("  exit            - Quit");
     }

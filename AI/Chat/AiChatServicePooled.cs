@@ -15,11 +15,13 @@ public class AiChatServicePooled(
     ILlmMemory memory,
     ILlmMemory conversationMemory,
     Application.AI.Pooling.ModelInstancePool modelPool,
-    bool debugMode = false)
+    bool debugMode = false,
+    bool enableRag = true)
 {
     private readonly ILlmMemory _memory = memory ?? throw new ArgumentNullException(nameof(memory));
     private readonly ILlmMemory _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
     private readonly Application.AI.Pooling.ModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
+    private readonly bool _enableRag = enableRag;
 
     // Performance tuning constants for TinyLlama
     private const int MaxContextChars = 1500;        // Reduced from ~2771 to prevent overload
@@ -37,22 +39,35 @@ public class AiChatServicePooled(
         // Store user question in conversation history
         _conversationMemory.ImportMemory(new MemoryFragment("User", question));
 
-        // Build system prompt with context
-        var systemPromptResult = await BuildSystemPromptAsync(question);
+        // Build system prompt with context (or skip RAG if disabled)
+        string systemPromptResult;
         
-        // Check if we found any relevant context
-        if (systemPromptResult == null)
+        if (_enableRag)
         {
-            return "I don't have any relevant information in my knowledge base to answer that question. " +
-                   "Please make sure your question relates to the loaded documents, or add more knowledge files to the inbox folder.";
+            // RAG mode: search knowledge base for context
+            var ragResult = await BuildSystemPromptAsync(question);
+            
+            // Check if we found any relevant context
+            if (ragResult == null)
+            {
+                return "I don't have any relevant information in my knowledge base to answer that question. " +
+                       "Please make sure your question relates to the loaded documents, or add more knowledge files to the inbox folder.";
+            }
+            
+            // Handle special case where game was detected but no results found
+            if (ragResult.StartsWith("NO_RESULTS_FOR_GAME:"))
+            {
+                var gameName = ragResult.Substring("NO_RESULTS_FOR_GAME:".Length);
+                return $"I don't have rules for {gameName} loaded in my knowledge base. " +
+                       $"Please add the rulebook for {gameName} to the inbox folder, or ask about a different game.";
+            }
+            
+            systemPromptResult = ragResult;
         }
-        
-        // Handle special case where game was detected but no results found
-        if (systemPromptResult.StartsWith("NO_RESULTS_FOR_GAME:"))
+        else
         {
-            var gameName = systemPromptResult.Substring("NO_RESULTS_FOR_GAME:".Length);
-            return $"I don't have rules for {gameName} loaded in my knowledge base. " +
-                   $"Please add the rulebook for {gameName} to the inbox folder, or ask about a different game.";
+            // Non-RAG mode: simple conversational prompt (no knowledge base search)
+            systemPromptResult = "You are a helpful AI assistant. Answer the user's questions directly and concisely.";
         }
 
         // Acquire a process from the pool
@@ -61,7 +76,15 @@ public class AiChatServicePooled(
         try
         {
             // Query the persistent process
-            DisplayService.WriteLine("[*] Querying TinyLlama... (this may take 10-30 seconds)");
+            if (_enableRag)
+            {
+                DisplayService.WriteLine("[*] Querying TinyLlama with RAG context... (this may take 10-30 seconds)");
+            }
+            else
+            {
+                DisplayService.WriteLine("[*] Querying TinyLlama in direct mode... (this may take 10-30 seconds)");
+            }
+            
             var response = await pooledInstance.Process.QueryAsync(systemPromptResult, question);
 
             // Check if response is empty or just whitespace

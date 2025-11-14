@@ -45,6 +45,32 @@ public class LlmSettings
     /// Example: "d:\tinyllama\tinyllama-1.1b-chat-v1.0.Q5_K_M.gguf"
     /// </summary>
     public string ModelPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Friendly model name for display purposes
+    /// Example: "mistral-7b-instruct-v0.2.Q5_K_M"
+    /// </summary>
+    public string? ModelName { get; set; }
+
+    /// <summary>
+    /// Optional model family/type label (e.g., "Mistral", "Llama3")
+    /// </summary>
+    public string? ModelType { get; set; }
+
+    /// <summary>
+    /// Optional hint whether to use GPU (parsed but not required by runtime logic)
+    /// </summary>
+    public bool UseGpu { get; set; } = false;
+
+    /// <summary>
+    /// Optional GPU layers hint for llama backends
+    /// </summary>
+    public int GpuLayers { get; set; } = 0;
+
+    /// <summary>
+    /// Optional context size hint for llama backends
+    /// </summary>
+    public int ContextSize { get; set; } = 0;
 }
 
 public class EmbeddingSettings
@@ -105,6 +131,13 @@ public class DebugSettings
     /// Default: false (production mode)
     /// </summary>
     public bool EnableDebugMode { get; set; } = false;
+
+    /// <summary>
+    /// Enable RAG mode (uses semantic search with vector memory)
+    /// When false, directly talks to the LLM without context retrieval
+    /// Default: true (RAG enabled)
+    /// </summary>
+    public bool EnableRagMode { get; set; } = true;
 
     /// <summary>
     /// Collection name for vector memory

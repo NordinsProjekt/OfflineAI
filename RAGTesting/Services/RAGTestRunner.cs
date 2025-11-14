@@ -43,10 +43,12 @@ public class RAGTestRunner
 
         foreach (var testQuery in testQueries)
         {
-            Console.WriteLine($"\n[TEST] Running: {testQuery.Id} - {testQuery.Description}");
-            Console.WriteLine($"   Query: \"{testQuery.Query}\"");
-            Console.WriteLine($"   Expected Game: {testQuery.ExpectedGame ?? "(any)"}");
-            Console.WriteLine($"   Minimum Relevance: {testQuery.MinimumRelevance:F2}");
+            DisplayService.ShowTestHeader(
+                testQuery.Id,
+                testQuery.Description,
+                testQuery.Query,
+                testQuery.ExpectedGame,
+                testQuery.MinimumRelevance);
             
             var result = await RunSingleTestAsync(testQuery);
             summary.TestResults.Add(result);
@@ -82,7 +84,7 @@ public class RAGTestRunner
         try
         {
             // Execute the RAG query
-            Console.WriteLine($"   ? Executing search...");
+            DisplayService.ShowExecutingSearch();
             var retrievedText = await _vectorMemory.SearchRelevantMemoryAsync(
                 testQuery.Query,
                 topK: _topK,
@@ -98,15 +100,15 @@ public class RAGTestRunner
             {
                 result.Success = false;
                 result.ErrorMessage = "No results returned from RAG system";
-                Console.WriteLine($"   ?? No results returned");
+                DisplayService.ShowNoResults();
                 return result;
             }
 
-            Console.WriteLine($"   ? Retrieved {retrievedText.Length} characters");
+            DisplayService.ShowRetrievedCharacters(retrievedText.Length);
 
             // Parse the retrieved fragments
             result.RetrievedFragments = ParseRetrievedFragments(retrievedText);
-            Console.WriteLine($"   ? Parsed {result.RetrievedFragments.Count} fragments");
+            DisplayService.ShowParsedFragments(result.RetrievedFragments.Count);
 
             // Calculate metrics
             CalculateMetrics(result, testQuery);
@@ -119,8 +121,7 @@ public class RAGTestRunner
             result.ExecutionTime = stopwatch.Elapsed;
             result.Success = false;
             result.ErrorMessage = $"{ex.GetType().Name}: {ex.Message}";
-            Console.WriteLine($"   ?? Exception: {ex.Message}");
-            Console.WriteLine($"   Stack trace: {ex.StackTrace}");
+            DisplayService.ShowTestException(ex);
         }
 
         return result;
@@ -287,20 +288,10 @@ public class RAGTestRunner
     {
         if (!result.Success)
         {
-            Console.WriteLine($"  ? FAILED: {result.ErrorMessage}");
+            DisplayService.ShowTestFailed(result.ErrorMessage ?? "Unknown error");
             return;
         }
 
-        var icon = result.PassedMinimumThreshold ? "?" : "??";
-        Console.WriteLine($"  {icon} Quality: {result.QualityRating}");
-        Console.WriteLine($"     Max Relevance: {result.MaxRelevance:F3} (threshold: {result.MinimumThreshold:F2})");
-        Console.WriteLine($"     Avg Relevance: {result.AverageRelevance:F3}");
-        Console.WriteLine($"     Keyword Match: {result.KeywordsFound}/{result.KeywordsExpected} ({result.KeywordMatchRate:P0})");
-        Console.WriteLine($"     Execution: {result.ExecutionTime.TotalMilliseconds:F0}ms");
-
-        if (result.RetrievedFragments.Any())
-        {
-            Console.WriteLine($"     Top Result: {result.RetrievedFragments[0].Category}");
-        }
+        DisplayService.ShowTestResult(result);
     }
 }

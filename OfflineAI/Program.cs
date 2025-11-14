@@ -10,6 +10,7 @@ using Services.Configuration;
 using Infrastructure.Data.Dapper;
 using Infrastructure.Data.EntityFramework;
 using Microsoft.SemanticKernel.Embeddings;
+using System.Diagnostics;
 
 namespace OfflineAI
 {
@@ -19,6 +20,11 @@ namespace OfflineAI
         {
             // Set up dependency injection with configuration
             var host = CreateHostBuilder(args).Build();
+
+            // Read config to detect llama backend and show model info before other logs
+            var appConfig = host.Services.GetRequiredService<AppConfiguration>();
+            ShowLlamaBackendStatus(appConfig);
+            ShowLlamaModelInfo(appConfig);
             
             DisplayService.ShowVectorMemoryDatabaseHeader();
             DisplayService.WriteLine("\n🚀 Starting OfflineAI with BERT Embeddings + SQL Database...\n");
@@ -30,13 +36,6 @@ namespace OfflineAI
         static IHostBuilder CreateHostBuilder(string[] args)
         {
             return Host.CreateDefaultBuilder(args)
-                // Host.CreateDefaultBuilder already configures:
-                // - appsettings.json
-                // - appsettings.{Environment}.json  
-                // - User Secrets (in Development)
-                // - Environment Variables
-                // - Command Line Arguments
-                // So we don't need to add them again!
                 .ConfigureServices((context, services) =>
                 {
                     // Bind configuration sections
@@ -73,7 +72,8 @@ namespace OfflineAI
                         new SemanticEmbeddingService(
                             appConfig.Embedding.ModelPath,
                             appConfig.Embedding.VocabPath,
-                            appConfig.Embedding.Dimension));
+                            appConfig.Embedding.Dimension,
+                            appConfig.Debug.EnableDebugMode));
                     
                     services.AddSingleton<ITextEmbeddingGenerationService>(provider => 
                         provider.GetRequiredService<SemanticEmbeddingService>());
@@ -121,26 +121,76 @@ namespace OfflineAI
                     DisplayService.WriteLine($"   - {error}");
                 }
                 
-                // Show what environment we're running in
-                var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") 
-                                  ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
-                                  ?? "Production";
-                DisplayService.WriteLine($"\n📊 Current Environment: {environment}");
-                
-                if (environment != "Development")
-                {
-                    DisplayService.WriteLine("\n⚠️  User Secrets are only loaded in Development environment!");
-                    DisplayService.WriteLine("   Set environment variable: DOTNET_ENVIRONMENT=Development");
-                }
-                
-                DisplayService.WriteLine("\n📝 Please configure using:");
-                DisplayService.WriteLine("   1. User Secrets: dotnet user-secrets set \"AppConfiguration:Llm:ExecutablePath\" \"d:\\\\tinyllama\\\\llama-cli.exe\"");
-                DisplayService.WriteLine("   2. appsettings.json: Copy appsettings.example.json and fill in your paths");
-                DisplayService.WriteLine("   3. Environment Variables: Set APPCONFIGURATION__LLM__EXECUTABLEPATH=...");
-                DisplayService.WriteLine("   4. Set DOTNET_ENVIRONMENT=Development to use User Secrets");
-                DisplayService.WriteLine("\nPress any key to exit...");
                 Console.ReadKey();
                 Environment.Exit(1);
+            }
+        }
+
+        private static void ShowLlamaBackendStatus(AppConfiguration appConfig)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(appConfig.Llm.ExecutablePath) || !File.Exists(appConfig.Llm.ExecutablePath))
+                {
+                    return; // nothing to show
+                }
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = appConfig.Llm.ExecutablePath,
+                    Arguments = "--version",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+
+                using var proc = Process.Start(psi);
+                if (proc == null) return;
+                string stdout = proc.StandardOutput.ReadToEnd();
+                string stderr = proc.StandardError.ReadToEnd();
+                proc.WaitForExit(3000);
+
+                var text = (stdout + "\n" + stderr).ToLowerInvariant();
+                string? backend = null;
+                if (text.Contains("cublas") || text.Contains("cuda")) backend = "CUDA";
+                else if (text.Contains("hipblas") || text.Contains("rocm")) backend = "ROCm";
+                else if (text.Contains("metal")) backend = "Metal";
+                else if (text.Contains("opencl")) backend = "OpenCL";
+                else if (text.Contains("kompute")) backend = "Vulkan";
+                else if (text.Contains("blas")) backend = "CPU BLAS";
+
+                if (!string.IsNullOrEmpty(backend))
+                {
+                    DisplayService.WriteLine($"✅ Llama runtime backend detected: {backend}");
+                }
+                else
+                {
+                    DisplayService.WriteLine("ℹ️ Llama runtime backend: not detected from --version output");
+                }
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception || ex is InvalidOperationException || ex is System.IO.IOException)
+            {
+                // Fail silent; do not block startup if detection fails
+            }
+        }
+
+        private static void ShowLlamaModelInfo(AppConfiguration appConfig)
+        {
+            try
+            {
+                var modelName = appConfig.Llm.ModelName;
+                var modelType = appConfig.Llm.ModelType;
+                var modelFile = string.IsNullOrWhiteSpace(appConfig.Llm.ModelPath) ? "(none)" : Path.GetFileName(appConfig.Llm.ModelPath);
+                if (!string.IsNullOrWhiteSpace(modelName) || !string.IsNullOrWhiteSpace(modelFile))
+                {
+                    var typePart = string.IsNullOrWhiteSpace(modelType) ? string.Empty : $" ({modelType})";
+                    DisplayService.WriteLine($"🧠 LLM model: {modelName}{typePart} [file: {modelFile}]");
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is System.IO.IOException || ex is System.IO.PathTooLongException)
+            {
+                // Ignore failure to fetch model info
             }
         }
     }
