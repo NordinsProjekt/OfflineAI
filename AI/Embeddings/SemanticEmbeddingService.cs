@@ -35,8 +35,8 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
     /// - all-mpnet-base-v2: 768 dims, best quality (recommended)
     /// </summary>
     public SemanticEmbeddingService(
-        string modelPath,
-        string vocabPath,
+        string modelPath = "models/all-mpnet-base-v2.onnx",
+        string vocabPath = "models/vocab.txt",
         int embeddingDimension = 768,
         bool debugMode = false)
     {
