@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using Entities;
+using Services.Configuration;
 using Services.Interfaces;
 using Services.Memory;
 using Services.UI;
@@ -15,12 +16,14 @@ public class AiChatServicePooled(
     ILlmMemory memory,
     ILlmMemory conversationMemory,
     Application.AI.Pooling.ModelInstancePool modelPool,
+    GenerationSettings generationSettings,
     bool debugMode = false,
     bool enableRag = true)
 {
     private readonly ILlmMemory _memory = memory ?? throw new ArgumentNullException(nameof(memory));
     private readonly ILlmMemory _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
     private readonly Application.AI.Pooling.ModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
+    private readonly GenerationSettings _generationSettings = generationSettings ?? throw new ArgumentNullException(nameof(generationSettings));
     private readonly bool _enableRag = enableRag;
 
     // Performance tuning constants for TinyLlama
@@ -85,7 +88,16 @@ public class AiChatServicePooled(
                 DisplayService.WriteLine("[*] Querying TinyLlama in direct mode... (this may take 10-30 seconds)");
             }
             
-            var response = await pooledInstance.Process.QueryAsync(systemPromptResult, question);
+            var response = await pooledInstance.Process.QueryAsync(
+                systemPromptResult, 
+                question,
+                maxTokens: _generationSettings.MaxTokens,
+                temperature: _generationSettings.Temperature,
+                topK: _generationSettings.TopK,
+                topP: _generationSettings.TopP,
+                repeatPenalty: _generationSettings.RepeatPenalty,
+                presencePenalty: _generationSettings.PresencePenalty,
+                frequencyPenalty: _generationSettings.FrequencyPenalty);
 
             // Check if response is empty or just whitespace
             if (string.IsNullOrWhiteSpace(response))
@@ -225,7 +237,7 @@ public class AiChatServicePooled(
         cleanedQuery = System.Text.RegularExpressions.Regex.Replace(cleanedQuery, @"\s+", " ").Trim();
         
         // Remove leading/trailing punctuation
-        cleanedQuery = cleanedQuery.Trim(' ', ',', '.', '?', '!');
+        cleanedQuery = cleanedQuery.Trim(' ', ',', '.', '?', '!', '"', '\'');
         
         return string.IsNullOrWhiteSpace(cleanedQuery) ? query : cleanedQuery;
     }

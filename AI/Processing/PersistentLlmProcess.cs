@@ -55,7 +55,16 @@ public class PersistentLlmProcess : IDisposable
     /// Sends a query using the configured LLM.
     /// Thread-safe: only one request can be processed at a time per instance.
     /// </summary>
-    public async Task<string> QueryAsync(string systemPrompt, string userQuestion)
+    public async Task<string> QueryAsync(
+        string systemPrompt, 
+        string userQuestion,
+        int maxTokens = 200,
+        float temperature = 0.3f,
+        int topK = 30,
+        float topP = 0.85f,
+        float repeatPenalty = 1.15f,
+        float presencePenalty = 0.2f,
+        float frequencyPenalty = 0.2f)
     {
         if (_disposed)
             throw new ObjectDisposedException(nameof(PersistentLlmProcess));
@@ -75,14 +84,14 @@ public class PersistentLlmProcess : IDisposable
             var processInfo = LlmFactory.CreateForLlama(_llmPath, _modelPath)
                 .SetPrompt(fullPrompt);
             
-            // Reduce hallucination with more conservative parameters
-            processInfo.Arguments += " -n 200";           // Max 200 tokens
-            processInfo.Arguments += " --temp 0.3";       // Lower temperature = more focused (was 0.4)
-            processInfo.Arguments += " --top-p 0.85";     // More conservative sampling (was default)
-            processInfo.Arguments += " --top-k 30";       // Limit vocabulary choices
-            processInfo.Arguments += " --repeat-penalty 1.15";  // Penalize repetition
-            processInfo.Arguments += " --presence-penalty 0.2"; // Reduce adding new concepts
-            processInfo.Arguments += " --frequency-penalty 0.2"; // Discourage repeating patterns
+            // Apply generation parameters
+            processInfo.Arguments += $" -n {maxTokens}";
+            processInfo.Arguments += $" --temp {temperature:F2}";
+            processInfo.Arguments += $" --top-p {topP:F2}";
+            processInfo.Arguments += $" --top-k {topK}";
+            processInfo.Arguments += $" --repeat-penalty {repeatPenalty:F2}";
+            processInfo.Arguments += $" --presence-penalty {presencePenalty:F2}";
+            processInfo.Arguments += $" --frequency-penalty {frequencyPenalty:F2}";
             
             var process = processInfo.Build();
 

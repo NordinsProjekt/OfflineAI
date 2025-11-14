@@ -18,8 +18,8 @@ public class ModelInstancePool : IDisposable
 {
     private readonly ConcurrentBag<PersistentLlmProcess> _availableInstances = new();
     private readonly SemaphoreSlim _semaphore;
-    private readonly string _llmPath;
-    private readonly string _modelPath;
+    private string _llmPath;
+    private string _modelPath;
     private readonly int _maxInstances;
     private readonly int _timeoutMs;
     private bool _disposed;
@@ -80,6 +80,32 @@ public class ModelInstancePool : IDisposable
         {
             throw new InvalidOperationException("Failed to initialize any LLM instances");
         }
+    }
+
+    /// <summary>
+    /// Reinitialize the pool with a new model.
+    /// Disposes all existing instances and creates new ones with the specified model.
+    /// </summary>
+    public async Task ReinitializeAsync(
+        string llmPath,
+        string modelPath,
+        Action<int, int>? progressCallback = null)
+    {
+        if (_disposed)
+            throw new ObjectDisposedException(nameof(ModelInstancePool));
+
+        // Update paths
+        _llmPath = llmPath ?? throw new ArgumentNullException(nameof(llmPath));
+        _modelPath = modelPath ?? throw new ArgumentNullException(nameof(modelPath));
+
+        // Dispose all existing instances
+        while (_availableInstances.TryTake(out var instance))
+        {
+            instance.Dispose();
+        }
+
+        // Reinitialize with new model
+        await InitializeAsync(progressCallback);
     }
 
     /// <summary>
