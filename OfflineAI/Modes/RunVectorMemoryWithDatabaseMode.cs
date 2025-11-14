@@ -574,7 +574,7 @@ internal static class RunVectorMemoryWithDatabaseMode
     {
         config.Debug.EnableRagMode = !config.Debug.EnableRagMode;
         
-        DisplayService.WriteLine($"\n[*] RAG Mode: {(config.Debug.EnableRagMode ? "ENABLED ✓" : "DISABLED ✗")}");
+        DisplayService.WriteLine($"\n[*] RAG Mode: {(config.Debug.EnableRagMode ? "ENABLED 🔍" : "DISABLED 💬")}");
         
         if (config.Debug.EnableRagMode)
         {
