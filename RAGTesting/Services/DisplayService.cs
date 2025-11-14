@@ -211,10 +211,20 @@ public static class DisplayService
     public static void ShowQualityDistribution(TestSummary summary, Func<string, int> getQualityScore)
     {
         Console.WriteLine("QUALITY DISTRIBUTION:");
-        foreach (var kvp in summary.QualityDistribution.OrderByDescending(x => getQualityScore(x.Key)))
+        if (summary.SuccessfulTests == 0)
         {
-            var percentage = (double)kvp.Value / summary.SuccessfulTests * 100;
-            Console.WriteLine($"  {kvp.Key}: {kvp.Value} ({percentage:F1}%)");
+            foreach (var kvp in summary.QualityDistribution.OrderByDescending(x => getQualityScore(x.Key)))
+            {
+                Console.WriteLine($"  {kvp.Key}: {kvp.Value} (0.0%)");
+            }
+        }
+        else
+        {
+            foreach (var kvp in summary.QualityDistribution.OrderByDescending(x => getQualityScore(x.Key)))
+            {
+                var percentage = (double)kvp.Value / summary.SuccessfulTests * 100;
+                Console.WriteLine($"  {kvp.Key}: {kvp.Value} ({percentage:F1}%)");
+            }
         }
         Console.WriteLine();
     }
