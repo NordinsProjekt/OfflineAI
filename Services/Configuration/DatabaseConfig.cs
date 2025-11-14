@@ -18,14 +18,9 @@ public class DatabaseConfig
     
     /// <summary>
     /// Auto-initialize database schema on startup.
+    /// Note: Only Dapper is supported. Entity Framework Core has been removed.
     /// </summary>
     public bool AutoInitializeDatabase { get; set; } = true;
-    
-    /// <summary>
-    /// Whether to use Entity Framework Core (true) or Dapper (false).
-    /// Default: false (Dapper).
-    /// </summary>
-    public bool UseEntityFramework { get; set; } = false;
     
     /// <summary>
     /// Get the connection string for database operations.

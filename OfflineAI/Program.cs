@@ -8,7 +8,6 @@ using Services.Memory;
 using Application.AI.Pooling;
 using Services.Configuration;
 using Infrastructure.Data.Dapper;
-using Infrastructure.Data.EntityFramework;
 using Microsoft.SemanticKernel.Embeddings;
 using System.Diagnostics;
 
@@ -40,14 +39,13 @@ namespace OfflineAI
                 {
                     // Bind configuration sections
                     var appConfig = context.Configuration.GetSection("AppConfiguration").Get<AppConfiguration>() 
-                                    ?? new AppConfiguration(); // Use defaults if not configured
+                                    ?? new AppConfiguration();
                     var dbConfig = context.Configuration.GetSection("DatabaseConfig").Get<DatabaseConfig>() 
                                    ?? new DatabaseConfig 
                                    {
                                        ConnectionString = @"Server=(localdb)\mssqllocaldb;Database=VectorMemoryDB;Integrated Security=true;TrustServerCertificate=true;",
                                        UseDatabasePersistence = true,
-                                       AutoInitializeDatabase = true,
-                                       UseEntityFramework = false
+                                       AutoInitializeDatabase = true
                                    };
                     
                     // Register configurations
@@ -57,15 +55,8 @@ namespace OfflineAI
                     // Validate configuration
                     ValidateConfiguration(appConfig);
                     
-                    // Register repository based on configuration
-                    if (dbConfig.UseEntityFramework)
-                    {
-                        services.AddEntityFrameworkVectorMemoryRepository(dbConfig.ConnectionString);
-                    }
-                    else
-                    {
-                        services.AddDapperVectorMemoryRepository(dbConfig.ConnectionString);
-                    }
+                    // Register Dapper repository (only option now - EF Core removed)
+                    services.AddDapperVectorMemoryRepository(dbConfig.ConnectionString);
                     
                     // Register embedding service (both as concrete type and interface)
                     services.AddSingleton(provider => 

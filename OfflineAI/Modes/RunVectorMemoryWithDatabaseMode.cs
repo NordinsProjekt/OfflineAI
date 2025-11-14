@@ -240,7 +240,8 @@ internal static class RunVectorMemoryWithDatabaseMode
             services.ModelPool,
             config.Generation,
             debugMode: config.Debug.EnableDebugMode,
-            enableRag: config.Debug.EnableRagMode);
+            enableRag: config.Debug.EnableRagMode,
+            showPerformanceMetrics: config.Debug.ShowPerformanceMetrics);
         
         var service = CreateChatService();
 
@@ -304,6 +305,14 @@ internal static class RunVectorMemoryWithDatabaseMode
             if (input.Equals("/settings", StringComparison.OrdinalIgnoreCase))
             {
                 HandleSettingsCommand(config);
+                continue;
+            }
+
+            // Check if performance toggle command
+            if (input.Equals("/perf", StringComparison.OrdinalIgnoreCase))
+            {
+                HandlePerfCommand(config);
+                serviceNeedsRecreation = true;
                 continue;
             }
 
@@ -629,6 +638,24 @@ internal static class RunVectorMemoryWithDatabaseMode
         DisplayService.WriteLine("\n[!] Note: This change applies to new queries only");
     }
 
+    private static void HandlePerfCommand(AppConfiguration config)
+    {
+        config.Debug.ShowPerformanceMetrics = !config.Debug.ShowPerformanceMetrics;
+        
+        DisplayService.WriteLine($"\n[*] Performance Metrics: {(config.Debug.ShowPerformanceMetrics ? "ENABLED 📊" : "DISABLED")}");
+        
+        if (config.Debug.ShowPerformanceMetrics)
+        {
+            DisplayService.WriteLine("    Will show tokens/sec, timing after each response");
+        }
+        else
+        {
+            DisplayService.WriteLine("    Performance metrics hidden");
+        }
+        
+        DisplayService.WriteLine("\n[!] Note: This change applies to new queries only");
+    }
+
     private static void HandleTemperatureCommand(string input, AppConfiguration config)
     {
         // Parse temperature value
@@ -721,11 +748,13 @@ internal static class RunVectorMemoryWithDatabaseMode
             DisplayService.WriteLine($"  Type:                {config.Llm.ModelType}");
         DisplayService.WriteLine($"  RAG Mode:            {(config.Debug.EnableRagMode ? "ENABLED" : "DISABLED")}");
         DisplayService.WriteLine($"  Debug Mode:          {(config.Debug.EnableDebugMode ? "ENABLED" : "DISABLED")}");
+        DisplayService.WriteLine($"  Performance Metrics: {(config.Debug.ShowPerformanceMetrics ? "ENABLED" : "DISABLED")}");
         
         DisplayService.WriteLine("\n  Commands:");
         DisplayService.WriteLine("    /temperature <value>  - Change temperature (0.0-2.0)");
         DisplayService.WriteLine("    /tokens <value>       - Change max tokens (1-2048)");
         DisplayService.WriteLine("    /rag                  - Toggle RAG mode");
+        DisplayService.WriteLine("    /perf                 - Toggle performance metrics");
         DisplayService.WriteLine("    /switchmodel          - Switch to a different model");
     }
 

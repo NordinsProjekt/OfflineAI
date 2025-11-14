@@ -9,7 +9,6 @@
   </Folder>
   <Folder Name="/3. Infrastructure/">
     <Project Path="Infrastructure.Data.Dapper/Infrastructure.Data.Dapper.csproj" />
-    <Project Path="Infrastructure.Data.EntityFramework/Infrastructure.Data.EntityFramework.csproj" />
   </Folder>
   <Folder Name="/4. Presentation/">
     <Project Path="OfflineAI/OfflineAI.csproj" />

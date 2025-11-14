@@ -205,10 +205,10 @@ public static class DisplayService
         }
         
         Console.WriteLine("  /rag            - Toggle RAG mode (semantic search on/off)");
-        Console.WriteLine("  /switchmodel    - Switch to a different LLM model");
-        Console.WriteLine("  /temperature <n>- Set temperature (0.0-2.0, default: 0.3)");
-        Console.WriteLine("  /tokens <n>     - Set max tokens (1-2048, default: 200)");
-        Console.WriteLine("  /settings       - Show current generation settings");
+        Console.WriteLine("  /perf           - Toggle performance metrics (tokens/sec)");
+        Console.WriteLine("  /temperature <value> or /temp <value> - Set temperature (0.0-2.0)");
+        Console.WriteLine("  /tokens <value> or /maxtokens <value> - Set max tokens (1-2048)");
+        Console.WriteLine("  /settings       - Show current settings");
         Console.WriteLine("  /reload         - Check inbox for new files and process them");
         Console.WriteLine("  exit            - Quit");
     }

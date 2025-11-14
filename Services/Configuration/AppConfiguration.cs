@@ -196,6 +196,12 @@ public class DebugSettings
     public bool EnableRagMode { get; set; } = true;
 
     /// <summary>
+    /// Show performance metrics (tokens/sec, timing)
+    /// Default: false
+    /// </summary>
+    public bool ShowPerformanceMetrics { get; set; } = false;
+
+    /// <summary>
     /// Collection name for vector memory
     /// Default: "game-rules-mpnet"
     /// </summary>

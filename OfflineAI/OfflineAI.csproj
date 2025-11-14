@@ -19,7 +19,6 @@
     <ProjectReference Include="..\AI\AI.csproj" />
     <ProjectReference Include="..\Services\Services.csproj" />
     <ProjectReference Include="..\Infrastructure.Data.Dapper\Infrastructure.Data.Dapper.csproj" />
-    <ProjectReference Include="..\Infrastructure.Data.EntityFramework\Infrastructure.Data.EntityFramework.csproj" />
   </ItemGroup>
 
   <ItemGroup>

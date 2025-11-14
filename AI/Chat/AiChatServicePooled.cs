@@ -1,4 +1,6 @@
 ﻿using System.Text;
+using System.Diagnostics;
+using Application.AI.Models;
 using Entities;
 using Services.Configuration;
 using Services.Interfaces;
@@ -18,19 +20,26 @@ public class AiChatServicePooled(
     Application.AI.Pooling.ModelInstancePool modelPool,
     GenerationSettings generationSettings,
     bool debugMode = false,
-    bool enableRag = true)
+    bool enableRag = true,
+    bool showPerformanceMetrics = false)
 {
     private readonly ILlmMemory _memory = memory ?? throw new ArgumentNullException(nameof(memory));
     private readonly ILlmMemory _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
     private readonly Application.AI.Pooling.ModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
     private readonly GenerationSettings _generationSettings = generationSettings ?? throw new ArgumentNullException(nameof(generationSettings));
     private readonly bool _enableRag = enableRag;
+    private readonly bool _showPerformanceMetrics = showPerformanceMetrics;
 
     // Performance tuning constants for TinyLlama
     private const int MaxContextChars = 1500;        // Reduced from ~2771 to prevent overload
     private const int MaxConversationChars = 500;   // Limit conversation history
     private const int MaxFragmentChars = 400;       // Truncate individual fragments
     private const int TopKResults = 3;              // Reduced from 5
+
+    /// <summary>
+    /// Last performance metrics from generation
+    /// </summary>
+    public PerformanceMetrics? LastMetrics { get; private set; }
 
     /// <summary>
     /// Send a message and get a response using a pooled LLM instance.
@@ -69,8 +78,9 @@ public class AiChatServicePooled(
         }
         else
         {
-            // Non-RAG mode: simple conversational prompt (no knowledge base search)
-            systemPromptResult = "You are a helpful AI assistant. Answer the user's questions directly and concisely.";
+            // Non-RAG mode: Simple, direct instruction
+            // Balance between preventing dialogues and allowing useful responses
+            systemPromptResult = "Answer the question directly in one paragraph.";
         }
 
         // Acquire a process from the pool
@@ -78,6 +88,10 @@ public class AiChatServicePooled(
 
         try
         {
+            // Adjust max tokens for non-RAG mode to prevent runaway generation
+            // Use moderate limit - 50 was too restrictive, 100 allows better responses
+            var maxTokens = _enableRag ? _generationSettings.MaxTokens : Math.Min(_generationSettings.MaxTokens, 80);
+            
             // Query the persistent process
             if (_enableRag)
             {
@@ -88,16 +102,38 @@ public class AiChatServicePooled(
                 DisplayService.WriteLine("[*] Querying TinyLlama in direct mode... (this may take 10-30 seconds)");
             }
             
+            // Start performance tracking
+            var stopwatch = Stopwatch.StartNew();
+            
             var response = await pooledInstance.Process.QueryAsync(
                 systemPromptResult, 
                 question,
-                maxTokens: _generationSettings.MaxTokens,
+                maxTokens: maxTokens,
                 temperature: _generationSettings.Temperature,
                 topK: _generationSettings.TopK,
                 topP: _generationSettings.TopP,
                 repeatPenalty: _generationSettings.RepeatPenalty,
                 presencePenalty: _generationSettings.PresencePenalty,
                 frequencyPenalty: _generationSettings.FrequencyPenalty);
+
+            stopwatch.Stop();
+
+            // Calculate performance metrics (do this before checking response validity)
+            var metrics = new PerformanceMetrics
+            {
+                TotalTimeMs = stopwatch.Elapsed.TotalMilliseconds,
+                CompletionTokens = string.IsNullOrWhiteSpace(response) ? 0 : EstimateTokenCount(response),
+                PromptTokens = EstimateTokenCount(systemPromptResult + " " + question),
+                ModelName = null // Model name not available from PersistentLlmProcess
+            };
+            
+            LastMetrics = metrics;
+            
+            // Display performance metrics if enabled (even for empty responses)
+            if (_showPerformanceMetrics)
+            {
+                DisplayService.WriteLine(metrics.ToString());
+            }
 
             // Check if response is empty or just whitespace
             if (string.IsNullOrWhiteSpace(response))
@@ -112,7 +148,7 @@ public class AiChatServicePooled(
         }
         catch (TimeoutException tex)
         {
-            return $"[ERROR] TinyLlama timed out after waiting for response: {tex.Message}";
+            return $"[ERROR] TinyLamma timed out after waiting for response: {tex.Message}";
         }
         catch (Exception ex)
         {
@@ -259,5 +295,19 @@ public class AiChatServicePooled(
         }
 
         return truncated + "...";
+    }
+
+    /// <summary>
+    /// Estimate token count from text (rough approximation: 1 token ≈ 4 characters for English)
+    /// This is an approximation since we don't have access to the actual tokenizer
+    /// </summary>
+    private static int EstimateTokenCount(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return 0;
+        
+        // Rough estimate: ~4 characters per token for English text
+        // This varies by tokenizer but gives a reasonable approximation
+        return (int)Math.Ceiling(text.Length / 4.0);
     }
 }
