@@ -1,0 +1,339 @@
+﻿@page "/"
+
+<PageTitle>Dashboard</PageTitle>
+
+<div class="oa-dashboard @(collapsed ? "collapsed" : string.Empty)">
+    <!-- Left sidebar - settings -->
+    <aside class="oa-sidebar">
+        <div class="oa-sidebar-header">
+            <div>
+                <div class="oa-app-title">OfflineAI</div>
+                <div class="oa-subtitle">Controls</div>
+            </div>
+            <button class="oa-icon-btn" title="Collapse" @onclick="ToggleSidebar">⟨</button>
+        </div>
+
+        <!-- System Toggles -->
+        <section class="oa-card">
+            <div class="oa-card-title">Modes</div>
+            <label class="oa-switch-row">
+                <input type="checkbox" checked>
+                <span class="oa-switch"></span>
+                <span>RAG Mode</span>
+            </label>
+            <label class="oa-switch-row">
+                <input type="checkbox">
+                <span class="oa-switch"></span>
+                <span>Performance Metrics</span>
+            </label>
+            <label class="oa-switch-row">
+                <input type="checkbox">
+                <span class="oa-switch"></span>
+                <span>Debug Mode</span>
+            </label>
+        </section>
+
+        <!-- Generation Settings -->
+        <section class="oa-card">
+            <div class="oa-card-title">Generation</div>
+            <div class="oa-field">
+                <label>Temperature</label>
+                <div class="oa-range">
+                    <input type="range" min="0" max="2" step="0.05" value="0.7">
+                    <input type="number" min="0" max="2" step="0.05" value="0.70" class="oa-number">
+                </div>
+            </div>
+            <div class="oa-field">
+                <label>Max Tokens</label>
+                <input type="number" min="1" max="4096" value="512" class="oa-text">
+            </div>
+            <div class="oa-grid2">
+                <div class="oa-field">
+                    <label>Top-K</label>
+                    <input type="number" min="1" max="100" value="40" class="oa-text">
+                </div>
+                <div class="oa-field">
+                    <label>Top-P</label>
+                    <input type="number" min="0" max="1" step="0.01" value="0.95" class="oa-text">
+                </div>
+            </div>
+            <div class="oa-grid2">
+                <div class="oa-field">
+                    <label>Repeat Penalty</label>
+                    <input type="number" min="0" max="2" step="0.01" value="1.10" class="oa-text">
+                </div>
+                <div class="oa-field">
+                    <label>Presence Penalty</label>
+                    <input type="number" min="0" max="2" step="0.01" value="0.00" class="oa-text">
+                </div>
+            </div>
+            <div class="oa-field">
+                <label>Frequency Penalty</label>
+                <input type="number" min="0" max="2" step="0.01" value="0.00" class="oa-text">
+            </div>
+        </section>
+
+        <!-- Model Controls -->
+        <section class="oa-card">
+            <div class="oa-card-title">Model</div>
+            <div class="oa-field">
+                <label>Current Model</label>
+                <select class="oa-text">
+                    <option>llama-3.1-8b-instruct.gguf</option>
+                    <option>qwen2.5-7b-instruct.gguf</option>
+                    <option selected>phi-3.5-mini-instruct.gguf</option>
+                </select>
+            </div>
+            <button class="oa-btn oa-btn-primary" disabled>Switch Model</button>
+            <div class="oa-note">Mockup only. Hook up to your model service.</div>
+        </section>
+
+        <!-- RAG Table Controls -->
+        <section class="oa-card">
+            <div class="oa-card-title">RAG Tables</div>
+            <div class="oa-field">
+                <label>Active Table</label>
+                <input type="text" class="oa-text" value="MemoryFragments">
+            </div>
+            <div class="oa-grid2">
+                <button class="oa-btn">List</button>
+                <button class="oa-btn">Info</button>
+            </div>
+            <div class="oa-grid2">
+                <button class="oa-btn">Create</button>
+                <button class="oa-btn">Switch</button>
+            </div>
+            <button class="oa-btn oa-btn-danger oa-btn-block">Delete</button>
+        </section>
+
+        <!-- Files / Inbox -->
+        <section class="oa-card">
+            <div class="oa-card-title">Files</div>
+            <div class="oa-field">
+                <label>Inbox</label>
+                <input type="text" class="oa-text" value="c:/llm/Inbox" readonly>
+            </div>
+            <div class="oa-field">
+                <label>Archive</label>
+                <input type="text" class="oa-text" value="c:/llm/Archive" readonly>
+            </div>
+            <button class="oa-btn oa-btn-secondary oa-btn-block">Reload Inbox</button>
+        </section>
+
+        <div class="oa-footer-note">UI mockup only • No backend wired</div>
+    </aside>
+
+    <!-- Chat area -->
+    <main class="oa-chat">
+        <!-- Expand button when collapsed -->
+        @if (collapsed)
+        {
+            <button class="oa-expand" title="Expand" @onclick="ToggleSidebar">☰</button>
+        }
+
+        <!-- Top badges -->
+        <div class="oa-topbar">
+            <div class="oa-badges">
+                <span class="oa-badge green">RAG: ON</span>
+                <span class="oa-badge blue">Model: phi-3.5-mini</span>
+                <span class="oa-badge gray">Table: MemoryFragments</span>
+            </div>
+        </div>
+
+        <!-- Messages -->
+        <div class="oa-messages no-scrollbar">
+            <div class="oa-msg ai">
+                <div class="oa-avatar">🤖</div>
+                <div class="oa-bubble">
+                    <div class="oa-meta">Assistant • Today 14:22</div>
+                    Hi! Ask me anything about your knowledge base. Use the controls on the left or the top bar.
+                    <div class="oa-tags">
+                        <span class="oa-tag">context: 5 fragments</span>
+                        <span class="oa-tag">latency: 1.2s</span>
+                        <span class="oa-tag">tokens: 256</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="oa-msg user">
+                <div class="oa-avatar">🧑</div>
+                <div class="oa-bubble">
+                    <div class="oa-meta">You • Today 14:23</div>
+                    Summarize the core rules of Pathfinder in 5 bullet points.
+                </div>
+            </div>
+
+            <div class="oa-msg ai">
+                <div class="oa-avatar">🤖</div>
+                <div class="oa-bubble">
+                    <div class="oa-meta">Assistant • Today 14:23</div>
+                    • Action economy with Standard, Move, Swift actions
+                    <br />• D20 core mechanic for checks, attacks, saves
+                    <br />• Classes with archetypes and feats for customization
+                    <br />• Spells use Vancian slots; components & concentration
+                    <br />• Combat: initiative, attacks of opportunity, conditions
+                </div>
+            </div>
+        </div>
+
+        <!-- Composer -->
+        <div class="oa-composer">
+            <textarea class="oa-input" rows="2" placeholder="Send a message..."></textarea>
+            <button class="oa-send" title="Send" aria-label="Send">➤</button>
+        </div>
+    </main>
+</div>
+
+<style>
+/***** Layout *****/
+.oa-dashboard {
+    position: relative;
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    height: calc(100vh - 140px);
+    background: #0f1115;
+    color: #e6e6e6;
+}
+.oa-dashboard.collapsed { grid-template-columns: 1fr; }
+.oa-dashboard.collapsed .oa-sidebar { display: none; }
+
+.oa-sidebar {
+    border-right: 1px solid #20232b;
+    padding: 16px 14px;
+    overflow-y: auto; /* allow scroll, but hide the bar */
+    background: #11141a;
+}
+/* hide scrollbars for sidebar */
+.oa-sidebar.no-scrollbar, .oa-sidebar {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE 10+ */
+}
+.oa-sidebar::-webkit-scrollbar { width: 0; height: 0; }
+
+.oa-chat {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    overflow: hidden;
+}
+
+/***** Sidebar *****/
+.oa-sidebar-header { display:flex; align-items:center; justify-content: space-between; gap:8px; margin-bottom: 12px; }
+.oa-app-title { font-weight: 700; font-size: 18px; }
+.oa-subtitle { opacity: .8; margin-top: 2px; font-size: 13px; }
+
+.oa-card {
+    background: #0f1319;
+    border: 1px solid #1b1f27;
+    border-radius: 10px;
+    padding: 12px;
+    margin: 10px 0 12px;
+}
+
+.oa-card-title {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: #93a1b5;
+    margin-bottom: 8px;
+}
+
+.oa-field { margin-bottom: 10px; }
+.oa-field > label { display:block; font-size: 12px; color:#9aa9be; margin-bottom:6px; }
+.oa-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.oa-text, select, .oa-number {
+    width: 100%;
+    background: #0b0e13;
+    border: 1px solid #1b1f27;
+    color: #e6e6e6;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 14px;
+}
+
+.oa-range { display: grid; grid-template-columns: 1fr 88px; gap: 8px; align-items: center; }
+.oa-range input[type="range"] { accent-color: #4aa8ff; }
+
+/* Switch */
+.oa-switch-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.oa-switch-row input { display:none; }
+.oa-switch {
+    position: relative; width: 40px; height: 22px; border-radius: 999px;
+    background: #2a2f3a; border: 1px solid #1b1f27; display: inline-block; cursor: pointer;
+}
+.oa-switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+    background: #c2c8d3; transition: transform .2s ease;
+}
+.oa-switch-row input:checked + .oa-switch { background: #1e6cf0; }
+.oa-switch-row input:checked + .oa-switch::after { transform: translateX(18px); background:#fff; }
+
+/* Buttons */
+.oa-btn { 
+    background: #151a22; color: #e6e6e6; border: 1px solid #2a2f3a; 
+    border-radius: 8px; padding: 8px 10px; font-size: 14px; cursor: pointer; 
+}
+.oa-btn:hover { background: #1a202a; }
+.oa-btn-block { width: 100%; }
+.oa-btn-primary { background: #1e6cf0; border-color: #1e6cf0; }
+.oa-btn-primary:hover { background: #2c79f5; }
+.oa-btn-secondary { background: #263142; border-color: #2f3b4f; }
+.oa-btn-secondary:hover { background: #2b384a; }
+.oa-btn-danger { background: #8a2532; border-color: #8a2532; }
+.oa-btn-danger:hover { background: #a12a3a; }
+.oa-icon-btn { background:#151a22; border:1px solid #2a2f3a; color:#e6e6e6; border-radius:8px; padding:6px 8px; cursor:pointer; }
+
+.oa-note { font-size: 12px; color: #96a3b8; margin-top: 6px; }
+.oa-footer-note { opacity:.7; font-size:12px; text-align:center; margin-top:8px; }
+
+/***** Chat *****/
+.oa-topbar {
+    border-bottom: 1px solid #20232b; padding: 10px 16px; display:flex; align-items:center; justify-content: space-between;
+}
+.oa-badges { display:flex; gap: 8px; flex-wrap: wrap; }
+.oa-badge { font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid #2a2f3a; background:#12151b; }
+.oa-badge.green { border-color:#234b2f; background:#15231a; color:#90e6a8; }
+.oa-badge.blue { border-color:#27456f; background:#141c26; color:#9ec7ff; }
+.oa-badge.gray { color:#c4cbd8; }
+
+.oa-messages { overflow-y:auto; padding: 18px 18px 0; }
+/* hide scrollbars for messages */
+.oa-messages.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.oa-messages.no-scrollbar::-webkit-scrollbar { width: 0; height: 0; }
+
+.oa-msg { display:flex; gap: 10px; margin-bottom: 14px; }
+.oa-msg.user { flex-direction: row-reverse; }
+.oa-avatar { width: 28px; height: 28px; display:grid; place-items:center; border-radius: 50%; background:#1a1f29; border:1px solid #2a2f3a; font-size:16px; }
+.oa-bubble { 
+    background: #11151c; border: 1px solid #242a36; border-radius: 12px; padding: 10px 12px; 
+    max-width: min(840px, 85%); line-height: 1.5; font-size: 14px; color:#e6e6e6;
+}
+.oa-msg.user .oa-bubble { background:#0d1218; border-color:#1f2633; }
+.oa-meta { font-size: 12px; color: #97a5ba; margin-bottom: 4px; }
+.oa-tags { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+.oa-tag { font-size:11px; border:1px solid #2a2f3a; background:#0b0e13; padding:2px 6px; border-radius:999px; color:#aeb9cc; }
+
+.oa-composer {
+    display:grid; grid-template-columns: 1fr auto; gap: 8px; padding: 10px; border-top: 1px solid #20232b; background:#0d1015;
+}
+.oa-input { 
+    width:100%; resize: none; border-radius: 10px; border: 1px solid #1b1f27; background:#0b0e13; color:#e6e6e6; 
+    padding: 10px 12px; font-size: 14px; outline: none;
+}
+.oa-send { width: 44px; height: 44px; border-radius: 10px; border: 1px solid #1e6cf0; background:#1e6cf0; color:#fff; cursor:pointer; font-weight:700; }
+.oa-send:hover { background:#2c79f5; }
+
+/* Expand button */
+.oa-expand { position: fixed; top: 64px; left: 10px; z-index: 60; background:#1e6cf0; color:#fff; border:1px solid #1e6cf0; border-radius:8px; padding:8px 10px; cursor:pointer; }
+
+/***** Responsive *****/
+@@media (max-width: 900px) {
+  .oa-dashboard { grid-template-columns: 1fr; }
+  .oa-sidebar { display:none; }
+}
+</style>
+
+@code {
+    private bool collapsed = false;
+    private void ToggleSidebar() => collapsed = !collapsed;
+}

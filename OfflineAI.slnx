@@ -11,6 +11,7 @@
     <Project Path="Infrastructure.Data.Dapper/Infrastructure.Data.Dapper.csproj" />
   </Folder>
   <Folder Name="/4. Presentation/">
+    <Project Path="AiDashboard/AiDashboard.csproj" Id="8786bc8e-07bd-4bb8-9bd3-3fd5cefbdf5b" />
     <Project Path="OfflineAI/OfflineAI.csproj" />
     <Project Path="RAGTesting/RAGTesting.csproj" />
   </Folder>

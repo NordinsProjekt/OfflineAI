@@ -1,0 +1,170 @@
+<header class="oa-topnav">
+    <div class="oa-topnav-row">
+        <div class="oa-brand">
+            <span class="oa-logo">??</span>
+            <span class="oa-title">OfflineAI</span>
+            <span class="oa-sub">Dashboard</span>
+        </div>
+        <div class="oa-actions">
+            <!-- Quick Toggles -->
+            <label class="oa-switch-row compact" title="RAG Mode">
+                <input type="checkbox" checked>
+                <span class="oa-switch"></span>
+                <span>RAG</span>
+            </label>
+            <label class="oa-switch-row compact" title="Performance Metrics">
+                <input type="checkbox">
+                <span class="oa-switch"></span>
+                <span>Perf</span>
+            </label>
+            <label class="oa-switch-row compact" title="Debug Mode">
+                <input type="checkbox">
+                <span class="oa-switch"></span>
+                <span>Debug</span>
+            </label>
+
+            <!-- Model Selector -->
+            <select class="oa-text oa-compact">
+                <option>llama-3.1-8b-instruct.gguf</option>
+                <option>qwen2.5-7b-instruct.gguf</option>
+                <option selected>phi-3.5-mini-instruct.gguf</option>
+            </select>
+            <button class="oa-btn oa-btn-primary oa-compact" disabled>Switch</button>
+
+            <!-- Active Table -->
+            <input class="oa-text oa-compact" value="MemoryFragments" />
+            <button class="oa-btn oa-compact">Tables</button>
+            <button class="oa-btn oa-btn-secondary oa-compact">Reload Inbox</button>
+        </div>
+    </div>
+
+    <!-- Advanced settings row (always visible for mockup) -->
+    <div class="oa-topnav-row oa-advanced">
+        <div class="oa-group">
+            <div class="oa-group-title">Generation</div>
+            <div class="oa-range">
+                <label>Temperature</label>
+                <input type="range" min="0" max="2" step="0.05" value="0.7">
+                <input type="number" min="0" max="2" step="0.05" value="0.70" class="oa-number">
+            </div>
+            <div class="oa-grid4">
+                <div class="oa-field">
+                    <label>Max Tokens</label>
+                    <input type="number" min="1" max="4096" value="512" class="oa-text">
+                </div>
+                <div class="oa-field">
+                    <label>Top-K</label>
+                    <input type="number" min="1" max="100" value="40" class="oa-text">
+                </div>
+                <div class="oa-field">
+                    <label>Top-P</label>
+                    <input type="number" min="0" max="1" step="0.01" value="0.95" class="oa-text">
+                </div>
+                <div class="oa-field">
+                    <label>Repeat Penalty</label>
+                    <input type="number" min="0" max="2" step="0.01" value="1.10" class="oa-text">
+                </div>
+            </div>
+            <div class="oa-grid4">
+                <div class="oa-field">
+                    <label>Presence Penalty</label>
+                    <input type="number" min="0" max="2" step="0.01" value="0.00" class="oa-text">
+                </div>
+                <div class="oa-field">
+                    <label>Frequency Penalty</label>
+                    <input type="number" min="0" max="2" step="0.01" value="0.00" class="oa-text">
+                </div>
+                <div class="oa-field">
+                    <label>Model</label>
+                    <select class="oa-text">
+                        <option>llama-3.1-8b-instruct.gguf</option>
+                        <option>qwen2.5-7b-instruct.gguf</option>
+                        <option selected>phi-3.5-mini-instruct.gguf</option>
+                    </select>
+                </div>
+                <div class="oa-field">
+                    <label>Active Table</label>
+                    <input class="oa-text" value="MemoryFragments" />
+                </div>
+            </div>
+        </div>
+        <div class="oa-group">
+            <div class="oa-group-title">RAG Tables</div>
+            <div class="oa-row">
+                <button class="oa-btn">List</button>
+                <button class="oa-btn">Info</button>
+                <button class="oa-btn">Create</button>
+                <button class="oa-btn">Switch</button>
+                <button class="oa-btn oa-btn-danger">Delete</button>
+            </div>
+            <div class="oa-note">Mockup only • Wire to services later</div>
+        </div>
+        <div class="oa-group">
+            <div class="oa-group-title">Files</div>
+            <div class="oa-row">
+                <input class="oa-text" value="c:/llm/Inbox" readonly />
+                <input class="oa-text" value="c:/llm/Archive" readonly />
+                <button class="oa-btn oa-btn-secondary">Reload</button>
+            </div>
+        </div>
+    </div>
+</header>
+
+<style>
+.oa-topnav {
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: blur(6px);
+    background: rgba(15,17,21,.9);
+    border-bottom: 1px solid #20232b;
+}
+.oa-topnav-row {
+    display:flex; gap: 16px; align-items: center; justify-content: space-between;
+    padding: 10px 16px;
+}
+.oa-brand { display:flex; align-items:center; gap:8px; }
+.oa-logo { font-size: 18px; }
+.oa-title { font-weight:700; }
+.oa-sub { opacity:.7; font-size: 12px; }
+.oa-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+
+/* compact inputs */
+.oa-compact { padding:6px 8px !important; font-size: 13px !important; }
+
+/* borrowed styles */
+.oa-switch-row { display: inline-flex; align-items: center; gap: 8px; }
+.oa-switch-row input { display:none; }
+.oa-switch {
+    position: relative; width: 36px; height: 20px; border-radius: 999px;
+    background: #2a2f3a; border: 1px solid #1b1f27; display: inline-block; cursor: pointer;
+}
+.oa-switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+    background: #c2c8d3; transition: transform .2s ease;
+}
+.oa-switch-row input:checked + .oa-switch { background: #1e6cf0; }
+.oa-switch-row input:checked + .oa-switch::after { transform: translateX(16px); background:#fff; }
+
+.oa-text, select, .oa-number {
+    background: #0b0e13; border: 1px solid #1b1f27; color: #e6e6e6; border-radius: 8px; padding: 8px 10px; font-size: 14px;
+}
+.oa-btn { background:#151a22; color:#e6e6e6; border:1px solid #2a2f3a; border-radius:8px; padding:8px 10px; }
+.oa-btn-primary { background:#1e6cf0; border-color:#1e6cf0; }
+.oa-btn-secondary { background:#263142; border-color:#2f3b4f; }
+.oa-btn-danger { background:#8a2532; border-color:#8a2532; }
+
+/* Advanced strip */
+.oa-advanced { border-top: 1px solid #20232b; flex-wrap: wrap; align-items: flex-start; }
+.oa-group { min-width: 280px; padding: 6px 0; }
+.oa-group + .oa-group { padding-left: 12px; border-left: 1px solid #20232b; }
+.oa-group-title { font-size:12px; color:#93a1b5; text-transform:uppercase; letter-spacing:.06em; margin-bottom:6px; }
+.oa-grid4 { display:grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap: 8px; }
+.oa-row { display:flex; gap:8px; flex-wrap: wrap; }
+.oa-range { display:grid; grid-template-columns: auto 1fr 90px; gap: 8px; align-items:center; margin-bottom:6px; }
+
+@@media (max-width: 1100px) {
+  .oa-grid4 { grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+}
+@@media (max-width: 780px) {
+  .oa-group + .oa-group { border-left: none; padding-left: 0; }
+}
+</style>
