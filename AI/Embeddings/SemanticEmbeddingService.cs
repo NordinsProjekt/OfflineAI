@@ -34,6 +34,14 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
     /// - all-MiniLM-L6-v2: 384 dims, fast (fallback)
     /// - all-mpnet-base-v2: 768 dims, best quality (recommended)
     /// </summary>
+    /// <param name="modelPath">Required. Path to the ONNX model file. Must be provided via configuration.</param>
+    /// <param name="vocabPath">Required. Path to the vocabulary file. Must be provided via configuration.</param>
+    /// <param name="embeddingDimension">Optional. The dimension of the embedding vectors. Default is 768.</param>
+    /// <param name="debugMode">Optional. Enable debug logging. Default is false.</param>
+    /// <remarks>
+    /// BREAKING CHANGE: modelPath and vocabPath are now required parameters (previously had default values).
+    /// Callers must explicitly provide these paths, typically from AppConfiguration.
+    /// </remarks>
     public SemanticEmbeddingService(
         string modelPath,
         string vocabPath,

@@ -572,6 +572,9 @@ internal static class RunVectorMemoryWithDatabaseMode
 
     private static void HandleToggleRagCommand(AppConfiguration config)
     {
+        // Note: This intentionally mutates the shared AppConfiguration.Debug.EnableRagMode
+        // to allow runtime toggling of RAG mode. The change affects new queries only,
+        // not in-flight operations. This is by design for interactive CLI usage.
         config.Debug.EnableRagMode = !config.Debug.EnableRagMode;
         
         DisplayService.WriteLine($"\n[*] RAG Mode: {(config.Debug.EnableRagMode ? "ENABLED 🔍" : "DISABLED 💬")}");
