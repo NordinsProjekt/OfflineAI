@@ -13,30 +13,52 @@ namespace Infrastructure.Data.Dapper;
 /// <summary>
 /// Repository for managing MemoryFragments in MSSQL database using Dapper.
 /// Handles CRUD operations and bulk inserts for vector embeddings.
+/// Supports dynamic table switching for different RAG contexts.
 /// </summary>
 public class VectorMemoryRepository : IVectorMemoryRepository
 {
     private readonly string _connectionString;
+    private string _tableName;
     
-    public VectorMemoryRepository(string connectionString)
+    public VectorMemoryRepository(string connectionString, string tableName = "MemoryFragments")
     {
         _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
+        _tableName = tableName ?? "MemoryFragments";
     }
     
     /// <summary>
-    /// Initialize database schema. Creates database if it doesn't exist, then creates tables.
-    /// Call this once during setup.
+    /// Switch to a different table for RAG context.
     /// </summary>
-    public async Task InitializeDatabaseAsync()
+    public void SetActiveTable(string tableName)
     {
-        // Step 1: Ensure the database exists
-        await EnsureDatabaseExistsAsync();
+        if (string.IsNullOrWhiteSpace(tableName))
+            throw new ArgumentException("Table name cannot be null or empty", nameof(tableName));
         
-        // Step 2: Create tables if they don't exist
-        const string createTableSql = @"
-            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'MemoryFragments')
+        _tableName = tableName;
+    }
+    
+    /// <summary>
+    /// Get the currently active table name.
+    /// </summary>
+    public string GetActiveTable() => _tableName;
+    
+    /// <summary>
+    /// Creates a new table with the same structure as MemoryFragments.
+    /// This allows switching between different RAG contexts.
+    /// </summary>
+    public async Task CreateTableAsync(string tableName)
+    {
+        if (string.IsNullOrWhiteSpace(tableName))
+            throw new ArgumentException("Table name cannot be null or empty", nameof(tableName));
+        
+        // Validate table name to prevent SQL injection
+        if (!IsValidTableName(tableName))
+            throw new ArgumentException("Invalid table name. Use only alphanumeric characters and underscores.", nameof(tableName));
+        
+        var createTableSql = $@"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{tableName}')
             BEGIN
-                CREATE TABLE MemoryFragments (
+                CREATE TABLE [{tableName}] (
                     Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
                     CollectionName NVARCHAR(255) NOT NULL,
                     Category NVARCHAR(500) NOT NULL,
@@ -50,23 +72,140 @@ public class VectorMemoryRepository : IVectorMemoryRepository
                     ChunkIndex INT NULL
                 );
 
-                CREATE INDEX IX_MemoryFragments_CollectionName ON MemoryFragments(CollectionName);
-                CREATE INDEX IX_MemoryFragments_Category ON MemoryFragments(Category);
-                CREATE INDEX IX_MemoryFragments_CreatedAt ON MemoryFragments(CreatedAt);
-                CREATE INDEX IX_MemoryFragments_ContentLength ON MemoryFragments(ContentLength);
+                CREATE INDEX IX_{tableName}_CollectionName ON [{tableName}](CollectionName);
+                CREATE INDEX IX_{tableName}_Category ON [{tableName}](Category);
+                CREATE INDEX IX_{tableName}_CreatedAt ON [{tableName}](CreatedAt);
+                CREATE INDEX IX_{tableName}_ContentLength ON [{tableName}](ContentLength);
+            END";
+        
+        using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await connection.ExecuteAsync(createTableSql);
+    }
+    
+    /// <summary>
+    /// List all tables that match the MemoryFragments schema.
+    /// </summary>
+    public async Task<List<string>> GetAllTablesAsync()
+    {
+        const string sql = @"
+            SELECT DISTINCT t.name
+            FROM sys.tables t
+            INNER JOIN sys.columns c1 ON t.object_id = c1.object_id AND c1.name = 'Embedding'
+            INNER JOIN sys.columns c2 ON t.object_id = c2.object_id AND c2.name = 'CollectionName'
+            INNER JOIN sys.columns c3 ON t.object_id = c3.object_id AND c3.name = 'Content'
+            ORDER BY t.name";
+        
+        using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync();
+        var results = await connection.QueryAsync<string>(sql);
+        return results.AsList();
+    }
+    
+    /// <summary>
+    /// Check if a table exists.
+    /// </summary>
+    public async Task<bool> TableExistsAsync(string tableName)
+    {
+        if (string.IsNullOrWhiteSpace(tableName))
+            return false;
+        
+        if (!IsValidTableName(tableName))
+            return false;
+        
+        const string sql = @"
+            SELECT COUNT(1) 
+            FROM sys.tables 
+            WHERE name = @TableName";
+        
+        using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync();
+        var count = await connection.ExecuteScalarAsync<int>(sql, new { TableName = tableName });
+        return count > 0;
+    }
+    
+    /// <summary>
+    /// Delete a table (use with caution!).
+    /// </summary>
+    public async Task DeleteTableAsync(string tableName)
+    {
+        if (string.IsNullOrWhiteSpace(tableName))
+            throw new ArgumentException("Table name cannot be null or empty", nameof(tableName));
+        
+        if (!IsValidTableName(tableName))
+            throw new ArgumentException("Invalid table name. Use only alphanumeric characters and underscores.", nameof(tableName));
+        
+        // Prevent deleting the default table
+        if (tableName.Equals("MemoryFragments", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Cannot delete the default MemoryFragments table.");
+        
+        var dropTableSql = $@"
+            IF EXISTS (SELECT * FROM sys.tables WHERE name = '{tableName}')
+            BEGIN
+                DROP TABLE [{tableName}]
+            END";
+        
+        using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync();
+        await connection.ExecuteAsync(dropTableSql);
+    }
+    
+    /// <summary>
+    /// Validates table name to prevent SQL injection.
+    /// </summary>
+    private static bool IsValidTableName(string tableName)
+    {
+        if (string.IsNullOrWhiteSpace(tableName))
+            return false;
+        
+        // Allow only alphanumeric characters, underscores, and must start with letter or underscore
+        return System.Text.RegularExpressions.Regex.IsMatch(tableName, @"^[a-zA-Z_][a-zA-Z0-9_]*$");
+    }
+    
+    /// <summary>
+    /// Initialize database schema. Creates database if it doesn't exist, then creates tables.
+    /// Call this once during setup.
+    /// </summary>
+    public async Task InitializeDatabaseAsync()
+    {
+        // Step 1: Ensure the database exists
+        await EnsureDatabaseExistsAsync();
+        
+        // Step 2: Create tables if they don't exist
+        var createTableSql = $@"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{_tableName}')
+            BEGIN
+                CREATE TABLE [{_tableName}] (
+                    Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+                    CollectionName NVARCHAR(255) NOT NULL,
+                    Category NVARCHAR(500) NOT NULL,
+                    Content NVARCHAR(MAX) NOT NULL,
+                    ContentLength INT NOT NULL DEFAULT 0,
+                    Embedding VARBINARY(MAX) NULL,
+                    EmbeddingDimension INT NULL,
+                    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                    UpdatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                    SourceFile NVARCHAR(1000) NULL,
+                    ChunkIndex INT NULL
+                );
+
+                CREATE INDEX IX_{_tableName}_CollectionName ON [{_tableName}](CollectionName);
+                CREATE INDEX IX_{_tableName}_Category ON [{_tableName}](Category);
+                CREATE INDEX IX_{_tableName}_CreatedAt ON [{_tableName}](CreatedAt);
+                CREATE INDEX IX_{_tableName}_ContentLength ON [{_tableName}](ContentLength);
             END
             ELSE
             BEGIN
                 -- Add ContentLength column if it doesn't exist (migration for existing databases)
-                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('MemoryFragments') AND name = 'ContentLength')
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('{_tableName}') AND name = 'ContentLength')
                 BEGIN
-                    ALTER TABLE MemoryFragments ADD ContentLength INT NOT NULL DEFAULT 0;
+                    ALTER TABLE [{_tableName}] ADD ContentLength INT NOT NULL DEFAULT 0;
                     
                     -- Update existing rows with calculated length
-                    UPDATE MemoryFragments SET ContentLength = LEN(Content);
+                    UPDATE [{_tableName}] SET ContentLength = LEN(Content);
                     
                     -- Create index on the new column
-                    CREATE INDEX IX_MemoryFragments_ContentLength ON MemoryFragments(ContentLength);
+                    CREATE INDEX IX_{_tableName}_ContentLength ON [{_tableName}](ContentLength);
                 END;
             END";
         
@@ -153,8 +292,8 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task<Guid> SaveAsync(MemoryFragmentEntity entity)
     {
-        const string sql = @"
-            INSERT INTO MemoryFragments 
+        var sql = $@"
+            INSERT INTO [{_tableName}] 
                 (Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension, 
                  CreatedAt, UpdatedAt, SourceFile, ChunkIndex)
             VALUES 
@@ -173,8 +312,8 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task BulkSaveAsync(IEnumerable<MemoryFragmentEntity> entities)
     {
-        const string sql = @"
-            INSERT INTO MemoryFragments 
+        var sql = $@"
+            INSERT INTO [{_tableName}] 
                 (Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension, 
                  CreatedAt, UpdatedAt, SourceFile, ChunkIndex)
             VALUES 
@@ -190,10 +329,10 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task<List<MemoryFragmentEntity>> LoadByCollectionAsync(string collectionName)
     {
-        const string sql = @"
+        var sql = $@"
             SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension,
                    CreatedAt, UpdatedAt, SourceFile, ChunkIndex
-            FROM MemoryFragments
+            FROM [{_tableName}]
             WHERE CollectionName = @CollectionName
             ORDER BY ChunkIndex, CreatedAt";
         
@@ -211,10 +350,10 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         int pageNumber, 
         int pageSize)
     {
-        const string sql = @"
+        var sql = $@"
             SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension,
                    CreatedAt, UpdatedAt, SourceFile, ChunkIndex
-            FROM MemoryFragments
+            FROM [{_tableName}]
             WHERE CollectionName = @CollectionName
             ORDER BY ChunkIndex, CreatedAt
             OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
@@ -236,9 +375,9 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task<int> GetCountAsync(string collectionName)
     {
-        const string sql = @"
+        var sql = $@"
             SELECT COUNT(1) 
-            FROM MemoryFragments 
+            FROM [{_tableName}] 
             WHERE CollectionName = @CollectionName";
         
         using var connection = new SqlConnection(_connectionString);
@@ -250,9 +389,9 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task<bool> HasEmbeddingsAsync(string collectionName)
     {
-        const string sql = @"
+        var sql = $@"
             SELECT COUNT(1) 
-            FROM MemoryFragments 
+            FROM [{_tableName}] 
             WHERE CollectionName = @CollectionName AND Embedding IS NOT NULL";
         
         using var connection = new SqlConnection(_connectionString);
@@ -266,9 +405,9 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task<List<string>> GetCollectionsAsync()
     {
-        const string sql = @"
+        var sql = $@"
             SELECT DISTINCT CollectionName 
-            FROM MemoryFragments 
+            FROM [{_tableName}] 
             ORDER BY CollectionName";
         
         using var connection = new SqlConnection(_connectionString);
@@ -282,7 +421,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task DeleteCollectionAsync(string collectionName)
     {
-        const string sql = "DELETE FROM MemoryFragments WHERE CollectionName = @CollectionName";
+        var sql = $"DELETE FROM [{_tableName}] WHERE CollectionName = @CollectionName";
         
         using var connection = new SqlConnection(_connectionString);
         await connection.ExecuteAsync(sql, new { CollectionName = collectionName });
@@ -293,7 +432,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task DeleteAsync(Guid id)
     {
-        const string sql = "DELETE FROM MemoryFragments WHERE Id = @Id";
+        var sql = $"DELETE FROM [{_tableName}] WHERE Id = @Id";
         
         using var connection = new SqlConnection(_connectionString);
         await connection.ExecuteAsync(sql, new { Id = id });
@@ -304,8 +443,8 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task UpdateContentAsync(Guid id, string content)
     {
-        const string sql = @"
-            UPDATE MemoryFragments 
+        var sql = $@"
+            UPDATE [{_tableName}] 
             SET Content = @Content, UpdatedAt = GETUTCDATE() 
             WHERE Id = @Id";
         
@@ -318,9 +457,9 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task<bool> CollectionExistsAsync(string collectionName)
     {
-        const string sql = @"
+        var sql = $@"
             SELECT COUNT(1) 
-            FROM MemoryFragments 
+            FROM [{_tableName}] 
             WHERE CollectionName = @CollectionName";
         
         using var connection = new SqlConnection(_connectionString);
@@ -334,7 +473,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task<ContentLengthStats> GetContentLengthStatsAsync(string collectionName)
     {
-        const string sql = @"
+        var sql = $@"
             SELECT 
                 COUNT(*) as TotalFragments,
                 AVG(CAST(ContentLength AS FLOAT)) as AverageLength,
@@ -342,7 +481,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
                 MAX(ContentLength) as MaxLength,
                 SUM(CASE WHEN ContentLength > 1000 THEN 1 ELSE 0 END) as LongFragments,
                 SUM(CASE WHEN ContentLength < 200 THEN 1 ELSE 0 END) as ShortFragments
-            FROM MemoryFragments
+            FROM [{_tableName}]
             WHERE CollectionName = @CollectionName";
         
         using var connection = new SqlConnection(_connectionString);
@@ -358,7 +497,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task<Dictionary<string, int>> GetLengthDistributionAsync(string collectionName)
     {
-        const string sql = @"
+        var sql = $@"
             SELECT 
                 CASE 
                     WHEN ContentLength <= 200 THEN '0-200'
@@ -368,7 +507,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
                     ELSE '1500+'
                 END as LengthBucket,
                 COUNT(*) as Count
-            FROM MemoryFragments
+            FROM [{_tableName}]
             WHERE CollectionName = @CollectionName
             GROUP BY 
                 CASE 

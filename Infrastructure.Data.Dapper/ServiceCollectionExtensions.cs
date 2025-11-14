@@ -13,10 +13,12 @@ public static class ServiceCollectionExtensions
     /// </summary>
     /// <param name="services">The service collection</param>
     /// <param name="connectionString">Database connection string</param>
+    /// <param name="tableName">Optional table name (defaults to "MemoryFragments")</param>
     /// <returns>The service collection for chaining</returns>
     public static IServiceCollection AddDapperVectorMemoryRepository(
         this IServiceCollection services, 
-        string connectionString)
+        string connectionString,
+        string tableName = "MemoryFragments")
     {
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -24,7 +26,7 @@ public static class ServiceCollectionExtensions
         }
 
         services.AddSingleton<IVectorMemoryRepository>(provider => 
-            new VectorMemoryRepository(connectionString));
+            new VectorMemoryRepository(connectionString, tableName));
 
         return services;
     }

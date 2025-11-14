@@ -209,8 +209,31 @@ public static class DisplayService
         Console.WriteLine("  /temperature <value> or /temp <value> - Set temperature (0.0-2.0)");
         Console.WriteLine("  /tokens <value> or /maxtokens <value> - Set max tokens (1-2048)");
         Console.WriteLine("  /settings       - Show current settings");
+        Console.WriteLine("  /table          - Manage RAG context tables (create/switch/list)");
         Console.WriteLine("  /reload         - Check inbox for new files and process them");
         Console.WriteLine("  exit            - Quit");
+    }
+    
+    /// <summary>
+    /// Display a prominent banner showing the currently active RAG table
+    /// </summary>
+    public static void ShowActiveTableBanner(string tableName, int fragmentCount)
+    {
+        var width = 67;
+        var tableInfo = $"Active RAG Table: {tableName}";
+        var fragmentInfo = $"({fragmentCount:N0} fragments loaded)";
+        
+        // Calculate padding for center alignment
+        var totalTextLength = tableInfo.Length + fragmentInfo.Length + 1; // +1 for space
+        var leftPadding = (width - totalTextLength - 2) / 2; // -2 for border chars
+        var rightPadding = width - totalTextLength - 2 - leftPadding;
+        
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine();
+        Console.WriteLine("╔═══════════════════════════════════════════════════════════════╗");
+        Console.WriteLine($"║{new string(' ', leftPadding)}{tableInfo} {fragmentInfo}{new string(' ', rightPadding)}║");
+        Console.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
+        Console.ResetColor();
     }
     
     public static void ShowConfigurationInfo(string inboxFolder, string archiveFolder)
@@ -218,13 +241,12 @@ public static class DisplayService
         Console.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
         Console.WriteLine("║  Configuration                                               ║");
         Console.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
-        Console.WriteLine($"  Inbox:   {inboxFolder}");
-        Console.WriteLine($"  Archive: {archiveFolder}");
-        Console.WriteLine("\nReady for your questions:");
+        Console.WriteLine($"  📂 Inbox:   {inboxFolder}");
+        Console.WriteLine($"  📦 Archive: {archiveFolder}");
     }
 
     #endregion
-
+    
     #region Debug and Statistics
 
     public static void ShowRelevantMemoryHeader()

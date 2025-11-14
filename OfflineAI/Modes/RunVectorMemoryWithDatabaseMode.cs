@@ -234,8 +234,8 @@ internal static class RunVectorMemoryWithDatabaseMode
         var conversationMemory = new SimpleMemory();
         
         // Create chat service with current RAG mode and generation settings
-        AiChatServicePooled CreateChatService() => new AiChatServicePooled(
-            vectorMemory,
+        AiChatServicePooled CreateChatService(VectorMemory memory) => new AiChatServicePooled(
+            memory,
             conversationMemory,
             services.ModelPool,
             config.Generation,
@@ -243,19 +243,32 @@ internal static class RunVectorMemoryWithDatabaseMode
             enableRag: config.Debug.EnableRagMode,
             showPerformanceMetrics: config.Debug.ShowPerformanceMetrics);
         
-        var service = CreateChatService();
+        var service = CreateChatService(vectorMemory);
 
-        DisplaySystemReady(vectorMemory, config);
+        DisplaySystemReady(vectorMemory, config, services.DbConfig);
 
         var fileWatcher = new KnowledgeFileWatcher(config.Folders.InboxFolder, config.Folders.ArchiveFolder);
         bool serviceNeedsRecreation = false;
+        bool vectorMemoryNeedsReload = false;
 
         while (true)
         {
+            // Reload vector memory if table was switched
+            if (vectorMemoryNeedsReload)
+            {
+                DisplayService.WriteLine("\n[*] Reloading vector memory from new table...");
+                vectorMemory = await LoadOrCreateVectorMemoryAsync(services, config);
+                service = CreateChatService(vectorMemory);
+                DisplaySystemReady(vectorMemory, config, services.DbConfig);
+                vectorMemoryNeedsReload = false;
+                serviceNeedsRecreation = false;
+                continue;
+            }
+            
             // Recreate service if RAG mode was toggled or model was switched
             if (serviceNeedsRecreation)
             {
-                service = CreateChatService();
+                service = CreateChatService(vectorMemory);
                 serviceNeedsRecreation = false;
             }
             
@@ -304,7 +317,7 @@ internal static class RunVectorMemoryWithDatabaseMode
             // Check if settings command
             if (input.Equals("/settings", StringComparison.OrdinalIgnoreCase))
             {
-                HandleSettingsCommand(config);
+                HandleSettingsCommand(config, services.DbConfig);
                 continue;
             }
 
@@ -313,6 +326,17 @@ internal static class RunVectorMemoryWithDatabaseMode
             {
                 HandlePerfCommand(config);
                 serviceNeedsRecreation = true;
+                continue;
+            }
+
+            // Check if table management commands
+            if (input.StartsWith("/table", StringComparison.OrdinalIgnoreCase))
+            {
+                var tableWasSwitched = await HandleTableCommandAsync(input, services.PersistenceService, services.DbConfig, config);
+                if (tableWasSwitched)
+                {
+                    vectorMemoryNeedsReload = true;
+                }
                 continue;
             }
 
@@ -335,8 +359,12 @@ internal static class RunVectorMemoryWithDatabaseMode
 
     private static void DisplaySystemReady(
         VectorMemory vectorMemory,
-        AppConfiguration config)
+        AppConfiguration config,
+        DatabaseConfig dbConfig)
     {
+        // Display prominent table banner
+        DisplayService.ShowActiveTableBanner(dbConfig.ActiveTableName, vectorMemory.Count);
+        
         DisplayService.ShowVectorMemoryInitialized(vectorMemory.Count);
         
         // Show RAG mode status
@@ -726,7 +754,7 @@ internal static class RunVectorMemoryWithDatabaseMode
         DisplayService.WriteLine("\n[!] Note: This change applies to new queries only");
     }
 
-    private static void HandleSettingsCommand(AppConfiguration config)
+    private static void HandleSettingsCommand(AppConfiguration config, DatabaseConfig dbConfig)
     {
         DisplayService.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
         DisplayService.WriteLine("║  Current Generation Settings                                 ║");
@@ -750,12 +778,365 @@ internal static class RunVectorMemoryWithDatabaseMode
         DisplayService.WriteLine($"  Debug Mode:          {(config.Debug.EnableDebugMode ? "ENABLED" : "DISABLED")}");
         DisplayService.WriteLine($"  Performance Metrics: {(config.Debug.ShowPerformanceMetrics ? "ENABLED" : "DISABLED")}");
         
+        DisplayService.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
+        DisplayService.WriteLine("║  Database & RAG Context                                      ║");
+        DisplayService.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
+        DisplayService.WriteLine($"\n  Active Table:        {dbConfig.ActiveTableName}");
+        
         DisplayService.WriteLine("\n  Commands:");
         DisplayService.WriteLine("    /temperature <value>  - Change temperature (0.0-2.0)");
         DisplayService.WriteLine("    /tokens <value>       - Change max tokens (1-2048)");
         DisplayService.WriteLine("    /rag                  - Toggle RAG mode");
         DisplayService.WriteLine("    /perf                 - Toggle performance metrics");
         DisplayService.WriteLine("    /switchmodel          - Switch to a different model");
+        DisplayService.WriteLine("    /table                - Manage RAG context tables");
+    }
+
+    private static async Task<bool> HandleTableCommandAsync(
+        string input, 
+        VectorMemoryPersistenceService persistenceService,
+        DatabaseConfig dbConfig,
+        AppConfiguration appConfig)
+    {
+        var parts = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        
+        // /table - show current table and available commands
+        if (parts.Length == 1)
+        {
+            await ShowTableManagementMenuAsync(persistenceService, dbConfig);
+            return false;
+        }
+        
+        var subCommand = parts[1].ToLowerInvariant();
+        
+        switch (subCommand)
+        {
+            case "list":
+                await HandleTableListCommandAsync(persistenceService, dbConfig);
+                return false;
+                
+            case "create":
+                if (parts.Length < 3)
+                {
+                    DisplayService.WriteLine("\n[!] Usage: /table create <table_name>");
+                    DisplayService.WriteLine("    Example: /table create GameRules_SciFi");
+                    return false;
+                }
+                await HandleTableCreateCommandAsync(parts[2], persistenceService);
+                return false;
+                
+            case "switch":
+                if (parts.Length < 3)
+                {
+                    DisplayService.WriteLine("\n[!] Usage: /table switch <table_name>");
+                    DisplayService.WriteLine("    Use '/table list' to see available tables");
+                    return false;
+                }
+                return await HandleTableSwitchCommandAsync(parts[2], persistenceService, dbConfig, appConfig);
+                
+            case "delete":
+                if (parts.Length < 3)
+                {
+                    DisplayService.WriteLine("\n[!] Usage: /table delete <table_name>");
+                    DisplayService.WriteLine("    WARNING: This will permanently delete the table!");
+                    return false;
+                }
+                await HandleTableDeleteCommandAsync(parts[2], persistenceService);
+                return false;
+                
+            case "info":
+                await HandleTableInfoCommandAsync(persistenceService, dbConfig, appConfig);
+                return false;
+                
+            default:
+                DisplayService.WriteLine($"\n[!] Unknown table command: {subCommand}");
+                await ShowTableManagementMenuAsync(persistenceService, dbConfig);
+                return false;
+        }
+    }
+
+    private static async Task ShowTableManagementMenuAsync(
+        VectorMemoryPersistenceService persistenceService,
+        DatabaseConfig dbConfig)
+    {
+        var repository = await GetRepositoryFromServiceAsync(persistenceService);
+        
+        DisplayService.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
+        DisplayService.WriteLine("║  RAG Context Table Management                                 ║");
+        DisplayService.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
+        DisplayService.WriteLine($"\n  Current Table: {dbConfig.ActiveTableName}");
+        DisplayService.WriteLine("\n  Available Commands:");
+        DisplayService.WriteLine("    /table list           - List all available tables");
+        DisplayService.WriteLine("    /table create <name>  - Create new table for RAG context");
+        DisplayService.WriteLine("    /table switch <name>  - Switch to different table");
+        DisplayService.WriteLine("    /table delete <name>  - Delete a table (cannot delete default)");
+        DisplayService.WriteLine("    /table info           - Show detailed info about current table");
+        DisplayService.WriteLine("\n  Use Case:");
+        DisplayService.WriteLine("    - Create separate tables for different knowledge domains");
+        DisplayService.WriteLine("    - Switch contexts without reloading files");
+        DisplayService.WriteLine("    - E.g., GameRules_Fantasy, GameRules_SciFi, Programming_Docs");
+    }
+
+    private static async Task HandleTableListCommandAsync(
+        VectorMemoryPersistenceService persistenceService,
+        DatabaseConfig dbConfig)
+    {
+        var repository = await GetRepositoryFromServiceAsync(persistenceService);
+        var tables = await repository.GetAllTablesAsync();
+        
+        DisplayService.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
+        DisplayService.WriteLine("║  Available RAG Context Tables                                 ║");
+        DisplayService.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
+        
+        if (!tables.Any())
+        {
+            DisplayService.WriteLine("\n  No tables found. Create one with: /table create <name>");
+            return;
+        }
+        
+        DisplayService.WriteLine($"\n  Current: {dbConfig.ActiveTableName}");
+        DisplayService.WriteLine("\n  Available Tables:");
+        
+        foreach (var table in tables)
+        {
+            var marker = table.Equals(dbConfig.ActiveTableName, StringComparison.OrdinalIgnoreCase) 
+                ? " ⭐ (active)" 
+                : "";
+            
+            // Get fragment count for this table
+            var currentActive = repository.GetActiveTable();
+            repository.SetActiveTable(table);
+            var collections = await repository.GetCollectionsAsync();
+            var totalFragments = 0;
+            foreach (var col in collections)
+            {
+                totalFragments += await repository.GetCountAsync(col);
+            }
+            repository.SetActiveTable(currentActive);
+            
+            DisplayService.WriteLine($"    - {table}{marker}");
+            DisplayService.WriteLine($"      Collections: {collections.Count}, Fragments: {totalFragments}");
+        }
+    }
+
+    private static async Task HandleTableCreateCommandAsync(
+        string tableName,
+        VectorMemoryPersistenceService persistenceService)
+    {
+        var repository = await GetRepositoryFromServiceAsync(persistenceService);
+        
+        try
+        {
+            // Check if table already exists
+            if (await repository.TableExistsAsync(tableName))
+            {
+                DisplayService.WriteLine($"\n[!] Table '{tableName}' already exists.");
+                DisplayService.WriteLine("    Use '/table switch {tableName}' to switch to it.");
+                return;
+            }
+            
+            DisplayService.WriteLine($"\n[*] Creating new table: {tableName}");
+            DisplayService.WriteLine($"[*] Connecting to database...");
+            
+            await repository.CreateTableAsync(tableName);
+            
+            // Verify the table was created
+            if (await repository.TableExistsAsync(tableName))
+            {
+                DisplayService.WriteLine($"[✓] Table '{tableName}' created successfully!");
+                DisplayService.WriteLine($"[✓] Table verified in database");
+                DisplayService.WriteLine($"\n  Next steps:");
+                DisplayService.WriteLine($"    1. Switch to the new table: /table switch {tableName}");
+                DisplayService.WriteLine($"    2. Add files to inbox to populate it");
+                DisplayService.WriteLine($"    3. Or use /reload to process existing inbox files");
+            }
+            else
+            {
+                DisplayService.WriteLine($"[!] WARNING: Table creation completed but verification failed.");
+                DisplayService.WriteLine($"    The table might exist but isn't showing up in queries.");
+                DisplayService.WriteLine($"    Try: /table list to see all tables");
+            }
+        }
+        catch (Microsoft.Data.SqlClient.SqlException sqlEx)
+        {
+            DisplayService.WriteLine($"\n[!] Database error creating table:");
+            DisplayService.WriteLine($"    Error: {sqlEx.Message}");
+            DisplayService.WriteLine($"    Number: {sqlEx.Number}");
+            if (sqlEx.Number == 262)
+            {
+                DisplayService.WriteLine($"\n    This error usually means you don't have CREATE TABLE permissions.");
+                DisplayService.WriteLine($"    Please check your database permissions.");
+            }
+        }
+        catch (Exception ex)
+        {
+            DisplayService.WriteLine($"\n[!] Error creating table: {ex.GetType().Name}");
+            DisplayService.WriteLine($"    Message: {ex.Message}");
+            if (ex.InnerException != null)
+            {
+                DisplayService.WriteLine($"    Inner: {ex.InnerException.Message}");
+            }
+        }
+    }
+
+    private static async Task<bool> HandleTableSwitchCommandAsync(
+        string tableName,
+        VectorMemoryPersistenceService persistenceService,
+        DatabaseConfig dbConfig,
+        AppConfiguration appConfig)
+    {
+        var repository = await GetRepositoryFromServiceAsync(persistenceService);
+        
+        try
+        {
+            // Check if table exists
+            if (!await repository.TableExistsAsync(tableName))
+            {
+                DisplayService.WriteLine($"\n[!] Table '{tableName}' does not exist.");
+                DisplayService.WriteLine("    Use '/table list' to see available tables");
+                DisplayService.WriteLine($"    Or create it with: /table create {tableName}");
+                return false;
+            }
+            
+            if (tableName.Equals(dbConfig.ActiveTableName, StringComparison.OrdinalIgnoreCase))
+            {
+                DisplayService.WriteLine($"\n[*] '{tableName}' is already the active table.");
+                return false;
+            }
+            
+            DisplayService.WriteLine($"\n[*] Switching from '{dbConfig.ActiveTableName}' to '{tableName}'");
+            
+            // Update configuration
+            dbConfig.ActiveTableName = tableName;
+            repository.SetActiveTable(tableName);
+            
+            // Show info about new table
+            var collections = await repository.GetCollectionsAsync();
+            var totalFragments = 0;
+            foreach (var col in collections)
+            {
+                totalFragments += await repository.GetCountAsync(col);
+            }
+            
+            DisplayService.WriteLine($"[✓] Switched to table: {tableName}");
+            DisplayService.WriteLine($"    Collections: {collections.Count}");
+            DisplayService.WriteLine($"    Total Fragments: {totalFragments}");
+            DisplayService.WriteLine("\n[*] Vector memory will be reloaded automatically...");
+            
+            return true; // Signal that table was switched and reload is needed
+        }
+        catch (Exception ex)
+        {
+            DisplayService.WriteLine($"\n[!] Error switching table: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static async Task HandleTableDeleteCommandAsync(
+        string tableName,
+        VectorMemoryPersistenceService persistenceService)
+    {
+        var repository = await GetRepositoryFromServiceAsync(persistenceService);
+        
+        try
+        {
+            // Check if table exists
+            if (!await repository.TableExistsAsync(tableName))
+            {
+                DisplayService.WriteLine($"\n[!] Table '{tableName}' does not exist.");
+                return;
+            }
+            
+            // Prevent deleting default table
+            if (tableName.Equals("MemoryFragments", StringComparison.OrdinalIgnoreCase))
+            {
+                DisplayService.WriteLine("\n[!] Cannot delete the default 'MemoryFragments' table.");
+                DisplayService.WriteLine("    This table is protected to prevent data loss.");
+                return;
+            }
+            
+            DisplayService.WriteLine($"\n⚠️  WARNING: You are about to permanently delete table '{tableName}'");
+            DisplayService.WriteLine("   This action cannot be undone!");
+            DisplayService.Write("\n   Type 'DELETE' to confirm: ");
+            
+            var confirmation = Console.ReadLine()?.Trim();
+            if (!confirmation.Equals("DELETE", StringComparison.Ordinal))
+            {
+                DisplayService.WriteLine("[*] Table deletion cancelled.");
+                return;
+            }
+            
+            DisplayService.WriteLine($"\n[*] Deleting table: {tableName}");
+            await repository.DeleteTableAsync(tableName);
+            DisplayService.WriteLine($"[✓] Table '{tableName}' has been deleted.");
+        }
+        catch (Exception ex)
+        {
+            DisplayService.WriteLine($"\n[!] Error deleting table: {ex.Message}");
+        }
+    }
+
+    private static async Task HandleTableInfoCommandAsync(
+        VectorMemoryPersistenceService persistenceService,
+        DatabaseConfig dbConfig,
+        AppConfiguration appConfig)
+    {
+        var repository = await GetRepositoryFromServiceAsync(persistenceService);
+        
+        try
+        {
+            var tableName = dbConfig.ActiveTableName;
+            var collections = await repository.GetCollectionsAsync();
+            
+            DisplayService.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
+            DisplayService.WriteLine("║  Current Table Information                                    ║");
+            DisplayService.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
+            DisplayService.WriteLine($"\n  Table Name: {tableName}");
+            DisplayService.WriteLine($"  Total Collections: {collections.Count}");
+            
+            if (collections.Any())
+            {
+                DisplayService.WriteLine("\n  Collections:");
+                foreach (var col in collections)
+                {
+                    var count = await repository.GetCountAsync(col);
+                    var hasEmbeddings = await repository.HasEmbeddingsAsync(col);
+                    var embeddingStatus = hasEmbeddings ? "✓" : "✗";
+                    DisplayService.WriteLine($"    - {col}: {count} fragments [Embeddings: {embeddingStatus}]");
+                }
+            }
+            else
+            {
+                DisplayService.WriteLine("\n  No collections found in this table.");
+                DisplayService.WriteLine("  Add files to inbox to populate it.");
+            }
+        }
+        catch (Exception ex)
+        {
+            DisplayService.WriteLine($"\n[!] Error getting table info: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Helper to get the repository instance from the persistence service.
+    /// Uses reflection as a workaround since the repository isn't directly exposed.
+    /// </summary>
+    private static async Task<IVectorMemoryRepository> GetRepositoryFromServiceAsync(
+        VectorMemoryPersistenceService persistenceService)
+    {
+        // The repository is private in VectorMemoryPersistenceService
+        // We need to access it via reflection or add a public property
+        var repositoryField = persistenceService.GetType()
+            .GetField("_repository", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        
+        if (repositoryField == null)
+            throw new InvalidOperationException("Could not access repository from persistence service");
+        
+        var repository = repositoryField.GetValue(persistenceService) as IVectorMemoryRepository;
+        if (repository == null)
+            throw new InvalidOperationException("Repository is null");
+        
+        return repository;
     }
 
     private static async Task<bool> HandleSwitchModelCommandAsync(AppConfiguration config, ModelInstancePool modelPool)

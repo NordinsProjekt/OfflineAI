@@ -17,6 +17,9 @@ namespace OfflineAI
     {
         static async Task Main(string[] args)
         {
+            // Set console encoding to UTF-8 for emoji support
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
+            
             // Set up dependency injection with configuration
             var host = CreateHostBuilder(args).Build();
 
@@ -56,7 +59,7 @@ namespace OfflineAI
                     ValidateConfiguration(appConfig);
                     
                     // Register Dapper repository (only option now - EF Core removed)
-                    services.AddDapperVectorMemoryRepository(dbConfig.ConnectionString);
+                    services.AddDapperVectorMemoryRepository(dbConfig.ConnectionString, dbConfig.ActiveTableName);
                     
                     // Register embedding service (both as concrete type and interface)
                     services.AddSingleton(provider => 

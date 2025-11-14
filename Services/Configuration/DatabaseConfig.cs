@@ -23,6 +23,12 @@ public class DatabaseConfig
     public bool AutoInitializeDatabase { get; set; } = true;
     
     /// <summary>
+    /// Name of the table to use for RAG memory fragments.
+    /// Default is "MemoryFragments". Can be changed to switch context.
+    /// </summary>
+    public string ActiveTableName { get; set; } = "MemoryFragments";
+    
+    /// <summary>
     /// Get the connection string for database operations.
     /// </summary>
     public string GetConnectionString() => ConnectionString;

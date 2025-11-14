@@ -1,8 +1,7 @@
+using Entities;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Entities;
-
 
 namespace Services.Repositories;
 
@@ -16,6 +15,37 @@ public interface IVectorMemoryRepository
     /// Initialize database schema. Call this once during setup.
     /// </summary>
     Task InitializeDatabaseAsync();
+    
+    /// <summary>
+    /// Switch to a different table for RAG context.
+    /// </summary>
+    void SetActiveTable(string tableName);
+    
+    /// <summary>
+    /// Get the currently active table name.
+    /// </summary>
+    string GetActiveTable();
+    
+    /// <summary>
+    /// Creates a new table with the same structure as MemoryFragments.
+    /// This allows switching between different RAG contexts.
+    /// </summary>
+    Task CreateTableAsync(string tableName);
+    
+    /// <summary>
+    /// List all tables that match the MemoryFragments schema.
+    /// </summary>
+    Task<List<string>> GetAllTablesAsync();
+    
+    /// <summary>
+    /// Check if a table exists.
+    /// </summary>
+    Task<bool> TableExistsAsync(string tableName);
+    
+    /// <summary>
+    /// Delete a table (use with caution!).
+    /// </summary>
+    Task DeleteTableAsync(string tableName);
     
     /// <summary>
     /// Save a single memory fragment with its vector embedding.
