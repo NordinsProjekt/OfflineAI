@@ -137,7 +137,7 @@ public class DebugSettings
     /// When false, directly talks to the LLM without context retrieval
     /// Default: true (RAG enabled)
     /// </summary>
-    public bool EnableRagMode { get; set; } = false;
+    public bool EnableRagMode { get; set; } = true;
 
     /// <summary>
     /// Collection name for vector memory
