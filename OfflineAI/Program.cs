@@ -152,7 +152,7 @@ namespace OfflineAI
                 proc.WaitForExit(3000);
 
                 var text = (stdout + "\n" + stderr).ToLowerInvariant();
-                string backend = null!;
+                string? backend = null;
                 if (text.Contains("cublas") || text.Contains("cuda")) backend = "CUDA";
                 else if (text.Contains("hipblas") || text.Contains("rocm")) backend = "ROCm";
                 else if (text.Contains("metal")) backend = "Metal";
@@ -169,7 +169,7 @@ namespace OfflineAI
                     DisplayService.WriteLine("ℹ️ Llama runtime backend: not detected from --version output");
                 }
             }
-            catch
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception || ex is InvalidOperationException || ex is System.IO.IOException)
             {
                 // Fail silent; do not block startup if detection fails
             }
@@ -188,7 +188,7 @@ namespace OfflineAI
                     DisplayService.WriteLine($"🧠 LLM model: {modelName}{typePart} [file: {modelFile}]");
                 }
             }
-            catch
+            catch (Exception ex) when (ex is ArgumentException || ex is System.IO.IOException || ex is System.IO.PathTooLongException)
             {
                 // Ignore failure to fetch model info
             }

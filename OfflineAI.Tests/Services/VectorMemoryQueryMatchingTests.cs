@@ -2,6 +2,7 @@ using Xunit;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
+using System.IO;
 using Entities;
 using Application.AI.Embeddings;
 using Services.Memory;
@@ -14,13 +15,21 @@ namespace OfflineAI.Tests.Services;
 /// </summary>
 public class VectorMemoryQueryMatchingTests
 {
-    private readonly SemanticEmbeddingService _embeddingService;
-    private VectorMemory _vectorMemory;
+    private readonly SemanticEmbeddingService? _embeddingService;
+    private VectorMemory? _vectorMemory;
 
     public VectorMemoryQueryMatchingTests()
     {
-        var modelPath = @"d:\tinyllama\models\all-MiniLM-L6-v2\model.onnx";
-        var vocabPath = @"d:\tinyllama\models\all-MiniLM-L6-v2\vocab.txt";
+        // Use environment variables or skip if paths don't exist
+        var modelPath = Environment.GetEnvironmentVariable("TEST_MODEL_PATH") ?? @"d:\tinyllama\models\all-MiniLM-L6-v2\model.onnx";
+        var vocabPath = Environment.GetEnvironmentVariable("TEST_VOCAB_PATH") ?? @"d:\tinyllama\models\all-MiniLM-L6-v2\vocab.txt";
+        
+        // Skip initialization if model files don't exist (tests will be skipped via test attribute)
+        if (!File.Exists(modelPath) || !File.Exists(vocabPath))
+        {
+            return;
+        }
+        
         _embeddingService = new SemanticEmbeddingService(modelPath, vocabPath, embeddingDimension: 384, debugMode: false);
         _vectorMemory = new VectorMemory(_embeddingService, "test_collection");
     }
