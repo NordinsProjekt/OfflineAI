@@ -8,32 +8,8 @@
         <div class="oa-status-message">@DashboardService.StatusMessage</div>
     }
     
-    <div class="oa-field">
-        <label>Collection Name</label>
-        <input type="text" class="oa-text" @bind="collectionName" placeholder="game-rules-mpnet">
+    <div class="oa-info-text">
+        Select a collection in the Collections section to use for RAG queries.
+        The active collection is automatically loaded.
     </div>
-    <button class="oa-btn oa-btn-primary oa-btn-block" @onclick="HandleLoadCollection">
-        Load Collection
-    </button>
-    <div class="oa-note">Load knowledge from database for RAG queries</div>
 </section>
-
-@code {
-    [Parameter]
-    public string CollectionName { get; set; } = "game-rules-mpnet";
-
-    [Parameter]
-    public EventCallback<string> OnLoadCollection { get; set; }
-
-    private string collectionName = "game-rules-mpnet";
-
-    protected override void OnInitialized()
-    {
-        collectionName = CollectionName;
-    }
-
-    private async Task HandleLoadCollection()
-    {
-        await OnLoadCollection.InvokeAsync(collectionName);
-    }
-}

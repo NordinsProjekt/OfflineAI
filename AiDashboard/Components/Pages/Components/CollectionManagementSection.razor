@@ -1,0 +1,177 @@
+@inject DashboardService DashboardService
+@inject IJSRuntime JSRuntime
+@implements IDisposable
+
+<section class="oa-card">
+    <div class="oa-card-title">Collections</div>
+    
+    <div class="oa-field">
+        <label>Active Collection</label>
+        @if (DashboardService.AvailableCollections.Any())
+        {
+            <select class="oa-text" @bind="selectedCollection" @bind:after="OnCollectionChanged">
+                <option value="">-- Select or create new --</option>
+                @foreach (var collection in DashboardService.AvailableCollections)
+                {
+                    <option value="@collection">@collection</option>
+                }
+            </select>
+        }
+        else
+        {
+            <div class="oa-info-text">No collections yet. Enter a name below to create one.</div>
+        }
+    </div>
+
+    <div class="oa-field">
+        <label>Create New Collection</label>
+        <input type="text" class="oa-text" @bind="newCollectionName" @bind:event="oninput"
+               placeholder="Enter new collection name...">
+        <button class="oa-btn oa-btn-block" @onclick="CreateNewCollection" 
+                disabled="@string.IsNullOrWhiteSpace(newCollectionName)">
+            Create & Select
+        </button>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(selectedCollection))
+    {
+        <div class="oa-field">
+            <div class="oa-active-collection">
+                <strong>Active:</strong> @selectedCollection
+                <small>New documents and RAG queries use this collection</small>
+            </div>
+        </div>
+
+        <div class="oa-grid2">
+            <button class="oa-btn" @onclick="RefreshCollections">Refresh</button>
+            <button class="oa-btn" @onclick="GetInfo">Info</button>
+        </div>
+
+        @if (!confirmingDelete)
+        {
+            <button class="oa-btn oa-btn-danger oa-btn-block" @onclick="ShowDeleteConfirmation">Delete Collection</button>
+        }
+        else
+        {
+            <div class="delete-confirmation">
+                <div class="confirmation-warning">
+                    ?? Delete collection '<strong>@selectedCollection</strong>'?
+                    <br/>
+                    <small>All fragments in this collection will be permanently deleted.</small>
+                </div>
+                <div class="oa-grid2">
+                    <button class="oa-btn" @onclick="CancelDelete">Cancel</button>
+                    <button class="oa-btn oa-btn-danger" @onclick="ConfirmDelete">Confirm Delete</button>
+                </div>
+            </div>
+        }
+    }
+</section>
+
+@code {
+    private string? selectedCollection;
+    private string newCollectionName = string.Empty;
+    private bool confirmingDelete = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        DashboardService.OnChange += StateHasChanged;
+        await InvokeAsync(async () => await RefreshCollections());
+        
+        // Set initial selection to current collection name
+        selectedCollection = DashboardService.CollectionName;
+    }
+
+    public void Dispose()
+    {
+        DashboardService.OnChange -= StateHasChanged;
+    }
+
+    private async Task OnCollectionChanged()
+    {
+        if (!string.IsNullOrWhiteSpace(selectedCollection))
+        {
+            // Update the dashboard service to use this collection for both saving and RAG
+            DashboardService.CollectionName = selectedCollection;
+            
+            // Automatically load it for RAG queries
+            try
+            {
+                await DashboardService.LoadCollectionAsync(selectedCollection);
+            }
+            catch
+            {
+                // Collection might be empty or not have embeddings yet - that's ok
+                await GetInfo();
+            }
+        }
+        
+        confirmingDelete = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task CreateNewCollection()
+    {
+        if (string.IsNullOrWhiteSpace(newCollectionName))
+            return;
+
+        // Set as active collection
+        selectedCollection = newCollectionName.Trim();
+        DashboardService.CollectionName = selectedCollection;
+        
+        // Clear the input
+        newCollectionName = string.Empty;
+        
+        // Show info about the new collection (will be created on first document add)
+        await DashboardService.GetCollectionInfoAsync(selectedCollection);
+        
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshCollections()
+    {
+        await DashboardService.RefreshCollectionsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task GetInfo()
+    {
+        if (!string.IsNullOrWhiteSpace(selectedCollection))
+        {
+            await DashboardService.GetCollectionInfoAsync(selectedCollection);
+        }
+    }
+
+    private void ShowDeleteConfirmation()
+    {
+        confirmingDelete = true;
+    }
+
+    private void CancelDelete()
+    {
+        confirmingDelete = false;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (string.IsNullOrWhiteSpace(selectedCollection))
+        {
+            confirmingDelete = false;
+            return;
+        }
+
+        bool finalConfirm = await JSRuntime.InvokeAsync<bool>(
+            "confirm", 
+            $"FINAL CONFIRMATION: Delete collection '{selectedCollection}'?\n\nAll fragments will be permanently deleted.");
+        
+        if (finalConfirm)
+        {
+            await DashboardService.DeleteCollectionAsync(selectedCollection);
+            selectedCollection = null;
+            DashboardService.CollectionName = "default";
+            await RefreshCollections();
+        }
+        
+        confirmingDelete = false;
+    }
+}

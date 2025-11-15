@@ -11,7 +11,6 @@ public partial class Home : IDisposable
     private DashboardService DashboardService { get; set; } = default!;
 
     private string composerText = string.Empty;
-    private string collectionName = "game-rules-mpnet";
     private bool isProcessing = false;
     private ElementReference messagesContainer;
 
@@ -20,7 +19,7 @@ public partial class Home : IDisposable
         new ChatMessageModel
         { 
             IsUser = false, 
-            Text = "Hi! I'm ready to chat. Enable RAG mode and load a collection to search your knowledge base.", 
+            Text = "Hi! I'm ready to chat. Select a collection in the Collections section to use for RAG queries.", 
             Timestamp = DateTime.Now 
         }
     };
@@ -54,42 +53,6 @@ public partial class Home : IDisposable
         text = text.Replace("\n", "<br>");
         
         return text;
-    }
-
-    private async Task LoadCollection(string name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            var errorMsg = new ChatMessageModel { IsUser = false, Text = "[ERROR] Please enter a collection name" };
-            errorMsg.FormattedText = FormatMessage(errorMsg.Text);
-            messages.Add(errorMsg);
-            return;
-        }
-
-        isProcessing = true;
-        var loadingMsg = new ChatMessageModel { IsUser = false, Text = $"? Loading collection '{name}'..." };
-        loadingMsg.FormattedText = FormatMessage(loadingMsg.Text);
-        messages.Add(loadingMsg);
-        StateHasChanged();
-
-        try
-        {
-            await DashboardService.LoadCollectionAsync(name);
-            var successMsg = new ChatMessageModel { IsUser = false, Text = $"? Collection '{name}' loaded successfully! RAG mode is now active." };
-            successMsg.FormattedText = FormatMessage(successMsg.Text);
-            messages.Add(successMsg);
-        }
-        catch (Exception ex)
-        {
-            var errorMsg = new ChatMessageModel { IsUser = false, Text = $"[ERROR] Failed to load collection: {ex.Message}" };
-            errorMsg.FormattedText = FormatMessage(errorMsg.Text);
-            messages.Add(errorMsg);
-        }
-        finally
-        {
-            isProcessing = false;
-            StateHasChanged();
-        }
     }
 
     private void OnComposerTextChanged(string value)

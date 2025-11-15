@@ -86,19 +86,50 @@ public class Program
             Console.WriteLine("??  Embedding service not configured (RAG disabled)");
         }
 
-        // Register Dapper repository (optional)
+        // Register Dapper repository (optional - but required for table management and collections)
+        IVectorMemoryRepository? repositoryInstance = null;
         if (!string.IsNullOrEmpty(dbConnectionString))
         {
             try
             {
                 builder.Services.AddDapperVectorMemoryRepository(dbConnectionString, dbTableName);
-                builder.Services.AddSingleton<VectorMemoryPersistenceService>();
-                Console.WriteLine("? Database repository registered (table management available)");
+                
+                // Build a temporary service provider to check if services are registered
+                using var tempProvider = builder.Services.BuildServiceProvider();
+                repositoryInstance = tempProvider.GetService<IVectorMemoryRepository>();
+                
+                if (repositoryInstance != null)
+                {
+                    Console.WriteLine("? Database repository registered");
+                    
+                    // Only register persistence service if we have both repository AND embedding service
+                    var embeddingService = tempProvider.GetService<ITextEmbeddingGenerationService>();
+                    if (embeddingService != null)
+                    {
+                        builder.Services.AddSingleton<VectorMemoryPersistenceService>();
+                        Console.WriteLine("? Persistence service registered (collection loading available)");
+                    }
+                    else
+                    {
+                        Console.WriteLine("??  Persistence service not registered - embedding service missing");
+                        Console.WriteLine("   Collection loading will not be available");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("??  Database repository registration failed");
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"??  Warning: Failed to register database repository: {ex.Message}");
+                Console.WriteLine($"??  Warning: Failed to register database services: {ex.Message}");
+                Console.WriteLine("   Table management and collection loading will not be available");
             }
+        }
+        else
+        {
+            Console.WriteLine("??  Database not configured");
+            Console.WriteLine("   Table management and collection loading disabled");
         }
 
         // Register empty VectorMemory as ILlmMemory for knowledge base (no database dependency)
@@ -167,7 +198,7 @@ public class Program
             Console.WriteLine($"??  Warning: Failed to register model pool: {ex.Message}");
         }
 
-        // Register DashboardChatService
+        // Register DashboardChatService (only if ModelInstancePool is available)
         builder.Services.AddSingleton<DashboardChatService>(sp =>
         {
             try
@@ -177,19 +208,26 @@ public class Program
                 
                 if (services.Length < 2)
                 {
-                    throw new InvalidOperationException("Not enough memory services registered");
+                    throw new InvalidOperationException($"Not enough memory services registered (found {services.Length}, need 2)");
                 }
                 
                 var vectorMemory = services[0];
                 var conversationMemory = services[1];
-                var modelPool = sp.GetRequiredService<ModelInstancePool>();
+                
+                // Try to get model pool - might not be available
+                var modelPool = sp.GetService<ModelInstancePool>();
+                if (modelPool == null)
+                {
+                    throw new InvalidOperationException("ModelInstancePool not available - check LLM configuration");
+                }
 
                 Console.WriteLine("? Chat service initialized");
                 return new DashboardChatService(vectorMemory, conversationMemory, modelPool);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"? Failed to initialize chat service: {ex.Message}");
+                Console.WriteLine($"[ERROR] Failed to initialize chat service: {ex.Message}");
+                Console.WriteLine("   Chat functionality will not be available");
                 throw;
             }
         });
@@ -259,6 +297,26 @@ public class Program
                 {
                     svc.PersistenceService = persistenceService;
                 }
+
+                // Set collection name from config
+                var collectionName = config.Debug?.CollectionName ?? builder.Configuration["AppConfiguration:Debug:CollectionName"];
+                if (!string.IsNullOrWhiteSpace(collectionName))
+                {
+                    svc.CollectionName = collectionName;
+                }
+
+                // Refresh collections list (async but fire-and-forget on startup)
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        await svc.RefreshCollectionsAsync();
+                    }
+                    catch
+                    {
+                        // Ignore errors during startup
+                    }
+                });
             }
             catch (Exception ex)
             {

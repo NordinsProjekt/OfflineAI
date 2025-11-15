@@ -5,7 +5,7 @@
 <PageTitle>Dashboard</PageTitle>
 
 <div class="oa-dashboard @(DashboardService.Collapsed ? "collapsed" : string.Empty)">
-    <Sidebar CollectionName="@collectionName" OnLoadCollection="@LoadCollection" />
+    <Sidebar />
     
     <ChatArea Messages="@messages"
               IsProcessing="@isProcessing"
@@ -15,3 +15,16 @@
               OnKeyDown="@HandleKeyDown"
               OnSendMessage="@SendMessage" />
 </div>
+
+@* Loading overlay for inbox reload *@
+@if (DashboardService.IsLoadingInbox)
+{
+    <div class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <h2>Processing Inbox Files</h2>
+            <p>@DashboardService.LoadingMessage</p>
+            <p class="loading-warning">Please wait, do not close or refresh the page...</p>
+        </div>
+    </div>
+}

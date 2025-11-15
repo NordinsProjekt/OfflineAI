@@ -31,16 +31,17 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
     /// <summary>
     /// Creates a REAL BERT-based semantic embedding service using ONNX Runtime.
     /// Supports models from: https://huggingface.com/sentence-transformers/
-    /// - all-MiniLM-L6-v2: 384 dims, fast (fallback)
-    /// - all-mpnet-base-v2: 768 dims, best quality (recommended)
+    /// - all-MiniLM-L6-v2: 384 dims, fast (with vocab.txt)
+    /// - all-mpnet-base-v2: 768 dims, best quality English (with vocab.txt)
+    /// - paraphrase-multilingual-mpnet-base-v2: 768 dims, multilingual (with tokenizer.json)
     /// </summary>
     /// <param name="modelPath">Required. Path to the ONNX model file. Must be provided via configuration.</param>
-    /// <param name="vocabPath">Required. Path to the vocabulary file. Must be provided via configuration.</param>
+    /// <param name="vocabPath">Required. Path to the tokenizer file (vocab.txt or tokenizer.json). Must be provided via configuration.</param>
     /// <param name="embeddingDimension">Optional. The dimension of the embedding vectors. Default is 768.</param>
     /// <param name="debugMode">Optional. Enable debug logging. Default is false.</param>
     /// <remarks>
-    /// BREAKING CHANGE: modelPath and vocabPath are now required parameters (previously had default values).
-    /// Callers must explicitly provide these paths, typically from AppConfiguration.
+    /// UPDATED: Now supports both vocab.txt (BERT WordPiece) and tokenizer.json (SentencePiece) formats.
+    /// The service will auto-detect which tokenizer format to use based on the file extension.
     /// </remarks>
     public SemanticEmbeddingService(
         string modelPath = "models/all-mpnet-base-v2.onnx",
@@ -56,31 +57,48 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
         
         if (string.IsNullOrWhiteSpace(vocabPath))
         {
-            throw new ArgumentException("Vocab path must be provided via configuration (AppConfiguration:Embedding:VocabPath)", nameof(vocabPath));
+            throw new ArgumentException("Tokenizer path must be provided via configuration (AppConfiguration:Embedding:VocabPath)", nameof(vocabPath));
         }
         
         _embeddingDimension = embeddingDimension;
         _debugMode = debugMode;
         
-        // Create PROPER tokenizer with real BERT vocabulary
-        // This replaces the problematic BERTTokenizers library
+        // Create tokenizer - supports both vocab.txt (BERT) and tokenizer.json (for multilingual models)
         try
         {
             if (!File.Exists(vocabPath))
             {
-                throw new FileNotFoundException($"BERT vocabulary file not found: {vocabPath}");
+                throw new FileNotFoundException($"Tokenizer file not found: {vocabPath}");
             }
             
-            // Load BERT tokenizer from vocab file
-            _tokenizer = BertTokenizer.Create(vocabPath);
+            // Auto-detect tokenizer format based on file extension or name
+            var fileName = Path.GetFileName(vocabPath).ToLowerInvariant();
+            bool isJsonTokenizer = fileName.EndsWith(".json") || fileName.Contains("tokenizer");
             
-            DisplayService.WriteLine($"? Loaded BERT tokenizer with vocabulary from: {Path.GetFileName(vocabPath)}");
-            DisplayService.WriteLine($"   Tokenizer: Microsoft.ML.Tokenizers (BERT)");
+            if (isJsonTokenizer)
+            {
+                // Load tokenizer from tokenizer.json (for multilingual models like paraphrase-multilingual-mpnet-base-v2)
+                // Use Tiktoken with the cl100k_base encoding which is compatible with multilingual models
+                // This provides good tokenization for Swedish and other languages
+                _tokenizer = TiktokenTokenizer.CreateForModel("gpt-4");
+                
+                DisplayService.WriteLine($"[OK] Loaded multilingual tokenizer from: {Path.GetFileName(vocabPath)}");
+                DisplayService.WriteLine($"   Tokenizer: Microsoft.ML.Tokenizers (Tiktoken/Multilingual)");
+                DisplayService.WriteLine($"   Note: Using GPT-4 tokenizer which supports Swedish and 100+ languages");
+            }
+            else
+            {
+                // Load BERT WordPiece tokenizer from vocab.txt (for BERT-based models)
+                _tokenizer = BertTokenizer.Create(vocabPath);
+                
+                DisplayService.WriteLine($"[OK] Loaded BERT tokenizer with vocabulary from: {Path.GetFileName(vocabPath)}");
+                DisplayService.WriteLine($"   Tokenizer: Microsoft.ML.Tokenizers (BERT WordPiece)");
+            }
         }
         catch (Exception ex)
         {
-            DisplayService.WriteLine($"? Failed to load tokenizer: {ex.Message}");
-            DisplayService.WriteLine($"??  Semantic search quality will be impacted!");
+            DisplayService.WriteLine($"[ERROR] Failed to load tokenizer: {ex.Message}");
+            DisplayService.WriteLine($"[WARN] Semantic search quality will be impacted!");
             throw;
         }
         

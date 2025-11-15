@@ -235,6 +235,47 @@ namespace AiDashboard.Services
             }
         }
 
+        // Loading state for inbox reload
+        private bool _isLoadingInbox = false;
+        public bool IsLoadingInbox
+        {
+            get => _isLoadingInbox;
+            private set
+            {
+                if (_isLoadingInbox == value) return;
+                _isLoadingInbox = value;
+                NotifyStateChanged();
+            }
+        }
+
+        private string _loadingMessage = string.Empty;
+        public string LoadingMessage
+        {
+            get => _loadingMessage;
+            private set
+            {
+                _loadingMessage = value;
+                NotifyStateChanged();
+            }
+        }
+
+        // Collection name for saving new documents
+        private string _collectionName = "game-rules-mpnet";
+        public string CollectionName
+        {
+            get => _collectionName;
+            set
+            {
+                if (_collectionName == value) return;
+                _collectionName = value;
+                NotifyStateChanged();
+            }
+        }
+
+        // List of available collections
+        private List<string> _availableCollections = new();
+        public IReadOnlyList<string> AvailableCollections => _availableCollections.AsReadOnly();
+
         public DashboardService()
         {
             // Default model folder: try common locations, fall back to current directory
@@ -498,6 +539,8 @@ namespace AiDashboard.Services
 
             try
             {
+                IsLoadingInbox = true;
+                LoadingMessage = "Checking for new files in inbox...";
                 StatusMessage = "[INFO] Checking for new files in inbox...";
                 NotifyStateChanged();
 
@@ -519,36 +562,155 @@ namespace AiDashboard.Services
                     return;
                 }
 
+                LoadingMessage = $"Found {newFiles.Count} file(s). Processing fragments...";
                 StatusMessage = $"[INFO] Found {newFiles.Count} new file(s). Processing...";
                 NotifyStateChanged();
 
                 // Collect fragments from files
                 var allFragments = new List<MemoryFragment>();
+                int fileIndex = 0;
                 foreach (var (gameName, filePath) in newFiles)
                 {
+                    fileIndex++;
+                    LoadingMessage = $"Processing file {fileIndex}/{newFiles.Count}: {gameName}...";
+                    NotifyStateChanged();
+                    
                     var fragments = await fileWatcher.ProcessFileAsync(gameName, filePath);
                     allFragments.AddRange(fragments);
                 }
 
-                // Save to database
-                var collectionName = AppConfig.Debug?.CollectionName ?? "default";
+                // Save to database using the current collection name
+                LoadingMessage = $"Generating embeddings for {allFragments.Count} fragments...";
+                NotifyStateChanged();
+                
                 await PersistenceService.SaveFragmentsAsync(
                     allFragments,
-                    collectionName,
+                    CollectionName,  // Use the collection name from UI
                     sourceFile: string.Join(", ", newFiles.Keys),
                     replaceExisting: false);
 
                 // Archive processed files
+                LoadingMessage = "Archiving processed files...";
+                NotifyStateChanged();
+                
                 foreach (var filePath in newFiles.Values)
                 {
                     await fileWatcher.ArchiveFileAsync(filePath);
                 }
 
-                StatusMessage = $"[OK] Processed {newFiles.Count} file(s), {allFragments.Count} fragments saved";
+                StatusMessage = $"[OK] Processed {newFiles.Count} file(s), {allFragments.Count} fragments saved to '{CollectionName}'";
+                
+                // Refresh collections list
+                await RefreshCollectionsAsync();
             }
             catch (Exception ex)
             {
                 StatusMessage = $"[ERROR] Failed to reload inbox: {ex.Message}";
+            }
+            finally
+            {
+                IsLoadingInbox = false;
+                LoadingMessage = string.Empty;
+                NotifyStateChanged();
+            }
+        }
+
+        /// <summary>
+        /// Refresh the list of available collections from the database
+        /// </summary>
+        public async Task RefreshCollectionsAsync()
+        {
+            if (VectorRepository == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _availableCollections.Clear();
+                var collections = await VectorRepository.GetCollectionsAsync();
+                _availableCollections.AddRange(collections.OrderBy(c => c));
+                // Don't call NotifyStateChanged here - let the component handle UI updates
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"[ERROR] Failed to refresh collections: {ex.Message}";
+                // StatusMessage setter will call NotifyStateChanged
+            }
+        }
+
+        /// <summary>
+        /// Get information about a specific collection
+        /// </summary>
+        public async Task GetCollectionInfoAsync(string collectionName)
+        {
+            if (VectorRepository == null)
+            {
+                StatusMessage = "[ERROR] Repository not available";
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(collectionName))
+            {
+                StatusMessage = "[ERROR] Collection name is required";
+                return;
+            }
+
+            try
+            {
+                var exists = await VectorRepository.CollectionExistsAsync(collectionName);
+                if (!exists)
+                {
+                    StatusMessage = $"[INFO] Collection '{collectionName}' does not exist yet";
+                    return;
+                }
+
+                var count = await VectorRepository.GetCountAsync(collectionName);
+                var hasEmbeddings = await VectorRepository.HasEmbeddingsAsync(collectionName);
+
+                StatusMessage = $"[INFO] Collection: {collectionName} | Fragments: {count} | Embeddings: {(hasEmbeddings ? "Yes" : "No")}";
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"[ERROR] Failed to get collection info: {ex.Message}";
+            }
+        }
+
+        /// <summary>
+        /// Delete a collection from the database
+        /// </summary>
+        public async Task DeleteCollectionAsync(string collectionName)
+        {
+            if (VectorRepository == null)
+            {
+                StatusMessage = "[ERROR] Repository not available";
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(collectionName))
+            {
+                StatusMessage = "[ERROR] Collection name is required";
+                return;
+            }
+
+            try
+            {
+                var exists = await VectorRepository.CollectionExistsAsync(collectionName);
+                if (!exists)
+                {
+                    StatusMessage = $"[INFO] Collection '{collectionName}' does not exist";
+                    return;
+                }
+
+                await VectorRepository.DeleteCollectionAsync(collectionName);
+                StatusMessage = $"[OK] Deleted collection: {collectionName}";
+                
+                // Refresh collections list
+                await RefreshCollectionsAsync();
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"[ERROR] Failed to delete collection: {ex.Message}";
             }
         }
 

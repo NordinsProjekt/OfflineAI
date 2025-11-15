@@ -3,11 +3,8 @@
 <section class="oa-card">
     <div class="oa-card-title">Generation</div>
     <div class="oa-field">
-        <label>Temperature (@DashboardService.Temperature.ToString("F2"))</label>
-        <div class="oa-range">
-            <input type="range" min="0" max="2" step="0.05" @bind="DashboardService.Temperature" @bind:event="oninput">
-            <input type="number" min="0" max="2" step="0.05" class="oa-number" @bind="DashboardService.Temperature" @bind:event="oninput">
-        </div>
+        <label>Temperature</label>
+        <input type="number" min="0" max="2" step="0.1" class="oa-text" @bind="DashboardService.Temperature" @bind:event="oninput">
     </div>
     <div class="oa-field">
         <label>Max Tokens</label>

@@ -12,17 +12,9 @@
     <ModesSection />
     <GenerationSettingsSection />
     <ModelControlsSection />
-    <RagKnowledgeBaseSection CollectionName="@CollectionName" OnLoadCollection="@OnLoadCollection" />
-    <TableManagementSection />
+    <CollectionManagementSection />
     <FilesSection />
+    <RagKnowledgeBaseSection />
 
     <div class="oa-footer-note">Connected to LLM backend</div>
 </aside>
-
-@code {
-    [Parameter]
-    public string CollectionName { get; set; } = "game-rules-mpnet";
-
-    [Parameter]
-    public EventCallback<string> OnLoadCollection { get; set; }
-}
