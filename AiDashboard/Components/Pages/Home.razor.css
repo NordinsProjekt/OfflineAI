@@ -1,0 +1,20 @@
+/***** Layout *****/
+.oa-dashboard {
+    position: relative;
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    height: 100vh;
+    background: #0f1115;
+    color: #e6e6e6;
+}
+
+.oa-dashboard.collapsed {
+    grid-template-columns: 1fr;
+}
+
+/***** Responsive *****/
+@media (max-width: 900px) {
+    .oa-dashboard {
+        grid-template-columns: 1fr;
+    }
+}

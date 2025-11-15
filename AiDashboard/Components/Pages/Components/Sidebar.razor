@@ -1,0 +1,28 @@
+@inject DashboardService DashboardService
+
+<aside class="oa-sidebar">
+    <div class="oa-sidebar-header">
+        <div>
+            <div class="oa-app-title">OfflineAI</div>
+            <div class="oa-subtitle">Controls</div>
+        </div>
+        <button type="button" class="oa-icon-btn" title="Collapse" aria-label="Collapse sidebar" @onclick="DashboardService.ToggleSidebar">?</button>
+    </div>
+
+    <ModesSection />
+    <GenerationSettingsSection />
+    <ModelControlsSection />
+    <RagKnowledgeBaseSection CollectionName="@CollectionName" OnLoadCollection="@OnLoadCollection" />
+    <TableManagementSection />
+    <FilesSection />
+
+    <div class="oa-footer-note">Connected to LLM backend</div>
+</aside>
+
+@code {
+    [Parameter]
+    public string CollectionName { get; set; } = "game-rules-mpnet";
+
+    [Parameter]
+    public EventCallback<string> OnLoadCollection { get; set; }
+}

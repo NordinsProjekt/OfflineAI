@@ -9,7 +9,7 @@ namespace Services.Memory;
 /// <summary>
 /// A vector-based memory implementation that uses embeddings to store and retrieve relevant memory fragments.
 /// </summary>
-public class VectorMemory : ILlmMemory
+public class VectorMemory : ISearchableMemory
 {
     private readonly ITextEmbeddingGenerationService _embeddingService;
     private readonly List<VectorMemoryEntry> _entries = new();

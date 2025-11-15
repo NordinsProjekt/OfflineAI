@@ -1,4 +1,6 @@
-﻿namespace Services.UI;
+﻿using Services.Configuration;
+
+namespace Services.UI;
 
 /// <summary>
 /// Service for handling console display and user interaction.
@@ -416,5 +418,24 @@ public static class DisplayService
         Console.WriteLine("\n╔════════════════════════════════════════════════════════╗");
         Console.WriteLine("║           Smart File Auto-Processing                   ║");
         Console.WriteLine("╚════════════════════════════════════════════════════════╝");
+    }
+    
+    /// <summary>
+    /// Display generation settings being used for the query
+    /// </summary>
+    public static void ShowGenerationSettings(GenerationSettings settings, bool enableRag)
+    {
+        WriteLine($"\n╔═══════════════════════════════════════════════════════════════╗");
+        WriteLine($"║  Generation Settings for Query                                ║");
+        WriteLine($"╚═══════════════════════════════════════════════════════════════╝");
+        WriteLine($"  RAG Mode:            {(enableRag ? "ENABLED" : "DISABLED")}");
+        WriteLine($"  Temperature:         {settings.Temperature:F2}");
+        WriteLine($"  Max Tokens:          {settings.MaxTokens}");
+        WriteLine($"  Top-K:               {settings.TopK}");
+        WriteLine($"  Top-P:               {settings.TopP:F2}");
+        WriteLine($"  Repeat Penalty:      {settings.RepeatPenalty:F2}");
+        WriteLine($"  Presence Penalty:    {settings.PresencePenalty:F2}");
+        WriteLine($"  Frequency Penalty:   {settings.FrequencyPenalty:F2}");
+        WriteLine($"");
     }
 }

@@ -19,6 +19,7 @@
     <Project Path="BenchmarkSuite1/MemoryLibraryBenchmarks.csproj" />
   </Folder>
   <Folder Name="/99. UnitTests/">
+    <Project Path="AiDashboardIntregrationTests/AiDashboardIntregrationTests.csproj" Id="7e3d125d-d4ad-4007-ae5d-2b11a6b292d2" />
     <Project Path="OfflineAI.Tests/OfflineAI.Tests.csproj" />
   </Folder>
 </Solution>

@@ -1,0 +1,9 @@
+@inject DashboardService DashboardService
+
+<div class="oa-topbar">
+    <div class="oa-badges">
+        <span class="oa-badge green">RAG: @(DashboardService.RagMode ? "ON" : "OFF")</span>
+        <span class="oa-badge blue">Model: @DashboardService.CurrentModel</span>
+        <span class="oa-badge gray">Table: @DashboardService.ActiveTable</span>
+    </div>
+</div>

@@ -1,0 +1,30 @@
+/* Alternative: CSS-based avatar fallback if emojis don't work */
+/* Uncomment this section if emojis still show as ?? */
+
+/*
+.oa-avatar {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: #1a1f29;
+    border: 1px solid #2a2f3a;
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+    text-transform: uppercase;
+}
+
+.oa-msg.user .oa-avatar {
+    background: #1e3a5f;
+    border-color: #2c5282;
+    color: #90cdf4;
+}
+
+.oa-msg.ai .oa-avatar {
+    background: #1f2937;
+    border-color: #374151;
+    color: #9ca3af;
+}
+*/

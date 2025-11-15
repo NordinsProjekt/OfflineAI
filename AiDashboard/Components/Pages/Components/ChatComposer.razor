@@ -1,0 +1,32 @@
+<div class="oa-composer">
+    <textarea class="oa-input" 
+              rows="2" 
+              placeholder="Send a message..." 
+              value="@ComposerText"
+              @oninput="@(e => OnComposerTextChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty))"
+              @onkeydown="@OnKeyDown" 
+              disabled="@IsProcessing"></textarea>
+    <button class="oa-send" 
+            type="button" 
+            title="Send" 
+            aria-label="Send" 
+            @onclick="@OnSendMessage" 
+            disabled="@IsProcessing">?</button>
+</div>
+
+@code {
+    [Parameter]
+    public string ComposerText { get; set; } = string.Empty;
+
+    [Parameter]
+    public bool IsProcessing { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnComposerTextChanged { get; set; }
+
+    [Parameter]
+    public EventCallback<KeyboardEventArgs> OnKeyDown { get; set; }
+
+    [Parameter]
+    public EventCallback OnSendMessage { get; set; }
+}

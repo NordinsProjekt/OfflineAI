@@ -1,0 +1,40 @@
+<div class="oa-messages no-scrollbar" @ref="messagesContainer">
+    @foreach (var msg in Messages)
+    {
+        <div class="oa-msg @(msg.IsUser ? "user" : "ai")">
+            <div class="oa-avatar">@(msg.IsUser ? "U" : "AI")</div>
+            <div class="oa-bubble">
+                <div class="oa-meta">@(msg.IsUser ? "You" : "Assistant") • @msg.Timestamp.ToString("HH:mm")</div>
+                @((MarkupString)msg.FormattedText)
+            </div>
+        </div>
+    }
+    @if (IsProcessing)
+    {
+        <div class="oa-msg ai">
+            <div class="oa-avatar">AI</div>
+            <div class="oa-bubble">
+                <div class="oa-meta">Assistant • Thinking...</div>
+                <div class="oa-typing">???</div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public List<ChatMessageModel> Messages { get; set; } = new();
+
+    [Parameter]
+    public bool IsProcessing { get; set; }
+
+    [Parameter]
+    public ElementReference MessagesContainerRef { get; set; }
+
+    private ElementReference messagesContainer;
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        MessagesContainerRef = messagesContainer;
+    }
+}

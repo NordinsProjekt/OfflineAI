@@ -1,0 +1,20 @@
+@inject DashboardService DashboardService
+
+<section class="oa-card">
+    <div class="oa-card-title">Modes</div>
+    <label class="oa-switch-row">
+        <input type="checkbox" @bind="DashboardService.RagMode">
+        <span class="oa-switch"></span>
+        <span>RAG Mode</span>
+    </label>
+    <label class="oa-switch-row">
+        <input type="checkbox" @bind="DashboardService.PerformanceMetrics">
+        <span class="oa-switch"></span>
+        <span>Performance Metrics</span>
+    </label>
+    <label class="oa-switch-row">
+        <input type="checkbox" @bind="DashboardService.DebugMode">
+        <span class="oa-switch"></span>
+        <span>Debug Mode</span>
+    </label>
+</section>

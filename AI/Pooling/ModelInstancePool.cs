@@ -21,11 +21,36 @@ public class ModelInstancePool : IDisposable
     private string _llmPath;
     private string _modelPath;
     private readonly int _maxInstances;
-    private readonly int _timeoutMs;
+    private int _timeoutMs;
     private bool _disposed;
+    private int _totalInstancesCreated = 0;
+    private readonly object _lock = new object();
 
     public int AvailableCount => _availableInstances.Count;
     public int MaxInstances => _maxInstances;
+    public int TotalInstances => _totalInstancesCreated;
+    public int TimeoutMs 
+    { 
+        get => _timeoutMs;
+        set
+        {
+            if (value < 1000 || value > 300000)
+                throw new ArgumentOutOfRangeException(nameof(value), "Timeout must be between 1 and 300 seconds (1000-300000ms)");
+            
+            _timeoutMs = value;
+            
+            // Update timeout on all existing instances in the pool
+            lock (_lock)
+            {
+                foreach (var instance in _availableInstances)
+                {
+                    instance.TimeoutMs = value;
+                }
+            }
+            
+            Console.WriteLine($"[*] Pool timeout updated to {value}ms ({value/1000}s)");
+        }
+    }
 
     public ModelInstancePool(
         string llmPath, 
@@ -65,7 +90,11 @@ public class ModelInstancePool : IDisposable
                         _modelPath, 
                         _timeoutMs);
                     
-                    _availableInstances.Add(instance);
+                    lock (_lock)
+                    {
+                        _availableInstances.Add(instance);
+                        _totalInstancesCreated++;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -80,6 +109,8 @@ public class ModelInstancePool : IDisposable
         {
             throw new InvalidOperationException("Failed to initialize any LLM instances");
         }
+
+        Console.WriteLine($"? Pool initialized: {_availableInstances.Count}/{_maxInstances} instances");
     }
 
     /// <summary>
@@ -94,18 +125,42 @@ public class ModelInstancePool : IDisposable
         if (_disposed)
             throw new ObjectDisposedException(nameof(ModelInstancePool));
 
+        Console.WriteLine($"[*] Reinitializing pool with new model...");
+        Console.WriteLine($"    Current state: {_availableInstances.Count}/{_totalInstancesCreated} instances");
+
         // Update paths
         _llmPath = llmPath ?? throw new ArgumentNullException(nameof(llmPath));
         _modelPath = modelPath ?? throw new ArgumentNullException(nameof(modelPath));
 
         // Dispose all existing instances
-        while (_availableInstances.TryTake(out var instance))
+        int disposedCount = 0;
+        lock (_lock)
         {
-            instance.Dispose();
+            while (_availableInstances.TryTake(out var instance))
+            {
+                instance.Dispose();
+                disposedCount++;
+                _totalInstancesCreated--;
+            }
+        }
+
+        Console.WriteLine($"[*] Disposed {disposedCount} old instances");
+
+        // Reset the semaphore to ensure correct state
+        // We need to drain any available permits and reset to max
+        while (_semaphore.CurrentCount > 0)
+        {
+            await _semaphore.WaitAsync();
+        }
+        for (int i = 0; i < _maxInstances; i++)
+        {
+            _semaphore.Release();
         }
 
         // Reinitialize with new model
         await InitializeAsync(progressCallback);
+        
+        Console.WriteLine($"? Pool reinitialized: {_availableInstances.Count}/{_maxInstances} instances");
     }
 
     /// <summary>
@@ -131,17 +186,33 @@ public class ModelInstancePool : IDisposable
             }
             else
             {
-                // Dispose unhealthy instance and try to create a new one
+                // Dispose unhealthy instance
+                Console.WriteLine($"[!] Disposing unhealthy instance");
                 candidate.Dispose();
+                
+                lock (_lock)
+                {
+                    _totalInstancesCreated--;
+                }
+                
+                // Try to create a replacement synchronously
                 try
                 {
+                    Console.WriteLine($"[*] Creating replacement instance...");
                     instance = await PersistentLlmProcess.CreateAsync(_llmPath, _modelPath, _timeoutMs);
+                    
+                    lock (_lock)
+                    {
+                        _totalInstancesCreated++;
+                    }
+                    
+                    Console.WriteLine($"[+] Replacement instance created");
                     break;
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Failed to create replacement, try next candidate
-                    continue;
+                    Console.WriteLine($"[!] Failed to create replacement: {ex.Message}");
+                    // Continue trying other candidates
                 }
             }
         }
@@ -163,33 +234,56 @@ public class ModelInstancePool : IDisposable
         if (_disposed)
         {
             instance.Dispose();
+            lock (_lock)
+            {
+                _totalInstancesCreated--;
+            }
             return;
         }
 
         if (instance.IsHealthy)
         {
             _availableInstances.Add(instance);
+            _semaphore.Release();
         }
         else
         {
+            // Instance is unhealthy, dispose it
+            Console.WriteLine($"[!] Returning unhealthy instance, will create replacement");
             instance.Dispose();
             
-            // Try to create a replacement instance
+            lock (_lock)
+            {
+                _totalInstancesCreated--;
+            }
+            
+            // Try to create a replacement synchronously to maintain pool size
             Task.Run(async () =>
             {
                 try
                 {
                     var replacement = await PersistentLlmProcess.CreateAsync(_llmPath, _modelPath, _timeoutMs);
-                    _availableInstances.Add(replacement);
+                    
+                    lock (_lock)
+                    {
+                        if (!_disposed && _totalInstancesCreated < _maxInstances)
+                        {
+                            _availableInstances.Add(replacement);
+                            _totalInstancesCreated++;
+                            Console.WriteLine($"[+] Replacement instance created and added to pool");
+                        }
+                        else
+                        {
+                            replacement.Dispose();
+                        }
+                    }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Failed to create replacement, pool size will be reduced
+                    Console.WriteLine($"[!] Failed to create replacement instance: {ex.Message}");
                 }
-            });
+            }).ContinueWith(_ => _semaphore.Release()); // Release semaphore after replacement attempt
         }
-
-        _semaphore.Release();
     }
 
     public void Dispose()
@@ -199,13 +293,21 @@ public class ModelInstancePool : IDisposable
 
         _disposed = true;
 
+        Console.WriteLine($"[*] Disposing pool with {_availableInstances.Count} instances");
+
         // Dispose all instances
-        while (_availableInstances.TryTake(out var instance))
+        lock (_lock)
         {
-            instance.Dispose();
+            while (_availableInstances.TryTake(out var instance))
+            {
+                instance.Dispose();
+                _totalInstancesCreated--;
+            }
         }
 
         _semaphore?.Dispose();
+        
+        Console.WriteLine($"[+] Pool disposed");
     }
 
     /// <summary>

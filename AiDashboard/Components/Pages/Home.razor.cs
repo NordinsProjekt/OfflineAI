@@ -1,0 +1,149 @@
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
+using AiDashboard.Services;
+using AiDashboard.Models;
+
+namespace AiDashboard.Components.Pages;
+
+public partial class Home : IDisposable
+{
+    [Inject]
+    private DashboardService DashboardService { get; set; } = default!;
+
+    private string composerText = string.Empty;
+    private string collectionName = "game-rules-mpnet";
+    private bool isProcessing = false;
+    private ElementReference messagesContainer;
+
+    private List<ChatMessageModel> messages = new()
+    {
+        new ChatMessageModel
+        { 
+            IsUser = false, 
+            Text = "Hi! I'm ready to chat. Enable RAG mode and load a collection to search your knowledge base.", 
+            Timestamp = DateTime.Now 
+        }
+    };
+
+    protected override void OnInitialized()
+    {
+        DashboardService.OnChange += Refresh;
+        
+        // Format initial message
+        foreach (var msg in messages)
+        {
+            msg.FormattedText = FormatMessage(msg.Text);
+        }
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private string FormatMessage(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        // Convert markdown-style bold **text** to HTML <strong>text</strong>
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\*\*(.+?)\*\*", "<strong>$1</strong>");
+        
+        // Escape other HTML to prevent injection
+        text = text.Replace("<", "&lt;").Replace(">", "&gt;")
+                   .Replace("<strong>", "<strong>").Replace("</strong>", "</strong>"); // But preserve our strong tags
+        
+        // Convert line breaks to <br> for proper rendering
+        text = text.Replace("\n", "<br>");
+        
+        return text;
+    }
+
+    private async Task LoadCollection(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            var errorMsg = new ChatMessageModel { IsUser = false, Text = "[ERROR] Please enter a collection name" };
+            errorMsg.FormattedText = FormatMessage(errorMsg.Text);
+            messages.Add(errorMsg);
+            return;
+        }
+
+        isProcessing = true;
+        var loadingMsg = new ChatMessageModel { IsUser = false, Text = $"? Loading collection '{name}'..." };
+        loadingMsg.FormattedText = FormatMessage(loadingMsg.Text);
+        messages.Add(loadingMsg);
+        StateHasChanged();
+
+        try
+        {
+            await DashboardService.LoadCollectionAsync(name);
+            var successMsg = new ChatMessageModel { IsUser = false, Text = $"? Collection '{name}' loaded successfully! RAG mode is now active." };
+            successMsg.FormattedText = FormatMessage(successMsg.Text);
+            messages.Add(successMsg);
+        }
+        catch (Exception ex)
+        {
+            var errorMsg = new ChatMessageModel { IsUser = false, Text = $"[ERROR] Failed to load collection: {ex.Message}" };
+            errorMsg.FormattedText = FormatMessage(errorMsg.Text);
+            messages.Add(errorMsg);
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OnComposerTextChanged(string value)
+    {
+        composerText = value;
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await SendMessage();
+        }
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(composerText) || isProcessing) return;
+
+        var userMessage = composerText.Trim();
+        composerText = string.Empty;
+        isProcessing = true;
+
+        // Add user message
+        var userMsg = new ChatMessageModel { IsUser = true, Text = userMessage };
+        userMsg.FormattedText = FormatMessage(userMsg.Text);
+        messages.Add(userMsg);
+        StateHasChanged();
+
+        try
+        {
+            // Get AI response
+            var response = await DashboardService.SendMessageAsync(userMessage);
+
+            // Add AI response
+            var aiMsg = new ChatMessageModel { IsUser = false, Text = response };
+            aiMsg.FormattedText = FormatMessage(aiMsg.Text);
+            messages.Add(aiMsg);
+        }
+        catch (Exception ex)
+        {
+            var errorMsg = new ChatMessageModel { IsUser = false, Text = $"[ERROR] {ex.Message}" };
+            errorMsg.FormattedText = FormatMessage(errorMsg.Text);
+            messages.Add(errorMsg);
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        DashboardService.OnChange -= Refresh;
+    }
+}

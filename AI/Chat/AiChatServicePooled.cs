@@ -28,6 +28,7 @@ public class AiChatServicePooled(
     private readonly Application.AI.Pooling.ModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
     private readonly GenerationSettings _generationSettings = generationSettings ?? throw new ArgumentNullException(nameof(generationSettings));
     private readonly bool _enableRag = enableRag;
+    private readonly bool _debugMode = debugMode;
     private readonly bool _showPerformanceMetrics = showPerformanceMetrics;
 
     // Performance tuning constants for TinyLlama
@@ -47,6 +48,10 @@ public class AiChatServicePooled(
     public async Task<string> SendMessageAsync(string question, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(question);
+
+        // Display generation settings being used for this query
+        DisplayService.ShowGenerationSettings(_generationSettings, _enableRag);
+        DisplayService.WriteLine($"[*] User question: \"{question}\"");
 
         // Store user question in conversation history
         _conversationMemory.ImportMemory(new MemoryFragment("User", question));
@@ -88,18 +93,17 @@ public class AiChatServicePooled(
 
         try
         {
-            // Adjust max tokens for non-RAG mode to prevent runaway generation
-            // Use moderate limit - 50 was too restrictive, 100 allows better responses
-            var maxTokens = _enableRag ? _generationSettings.MaxTokens : Math.Min(_generationSettings.MaxTokens, 80);
+            // Use configured max tokens - don't limit for non-RAG mode
+            var maxTokens = _generationSettings.MaxTokens;
             
             // Query the persistent process
             if (_enableRag)
             {
-                DisplayService.WriteLine("[*] Querying TinyLlama with RAG context... (this may take 10-30 seconds)");
+                DisplayService.WriteLine("[*] Querying with RAG context...");
             }
             else
             {
-                DisplayService.WriteLine("[*] Querying TinyLlama in direct mode... (this may take 10-30 seconds)");
+                DisplayService.WriteLine("[*] Querying in direct mode...");
             }
             
             // Start performance tracking
@@ -138,7 +142,7 @@ public class AiChatServicePooled(
             // Check if response is empty or just whitespace
             if (string.IsNullOrWhiteSpace(response))
             {
-                return "[WARNING] TinyLlama returned an empty response. The model may be overloaded or the context was too long. Try asking a more specific question.";
+                return "[WARNING] Model returned an empty response. The model may be overloaded or the context was too long. Try asking a more specific question.";
             }
 
             // Store AI response in conversation history
@@ -171,21 +175,19 @@ public class AiChatServicePooled(
             DisplayService.WriteLine($"[*] Detected game(s): {gameNames}");
         }
 
-        // Clean the query by removing game names for better semantic matching
-        // This prevents query dilution (e.g., "how to win in Munchkin Panic" -> "how to win")
-        var cleanedQuery = RemoveGameNamesFromQuery(question, detectedGames);
+        // IMPORTANT: Do NOT remove game names from the query before database search
+        // Game names are crucial for matching titles in embeddings
+        // The database search needs the full query INCLUDING game names to match properly
+        string queryForSearch = question;
         
-        if (cleanedQuery != question)
-        {
-            DisplayService.WriteLine($"[*] Cleaned query: '{question}' -> '{cleanedQuery}'");
-        }
+        DisplayService.WriteLine($"[*] Searching database with: '{queryForSearch}'");
 
         // Use vector search if available with reduced topK
         string? relevantMemory = null;
-        if (_memory is VectorMemory vectorMemory)
+        if (_memory is ISearchableMemory searchableMemory)
         {
-            relevantMemory = await vectorMemory.SearchRelevantMemoryAsync(
-                cleanedQuery,  // Use cleaned query without game names
+            relevantMemory = await searchableMemory.SearchRelevantMemoryAsync(
+                queryForSearch,  // Use ORIGINAL query with game names for better matching
                 topK: TopKResults,  // Reduced from 5 to 3
                 minRelevanceScore: 0.3,  // Lowered from 0.5 to 0.3 for better MPNet results
                 gameFilter: detectedGames.Count > 0 ? detectedGames : null,
@@ -204,6 +206,15 @@ public class AiChatServicePooled(
             return null;
         }
 
+        // AFTER getting results from database, we can clean the query for better LLM understanding
+        // But we keep the original game context in the results
+        var cleanedQuery = RemoveGameNamesFromQuery(question, detectedGames);
+        if (cleanedQuery != question)
+        {
+            DisplayService.WriteLine($"[*] Query cleanup for LLM: '{question}' -> '{cleanedQuery}'");
+            DisplayService.WriteLine($"    (Game context preserved in retrieved fragments)");
+        }
+
         // Truncate context if too long
         if (relevantMemory.Length > MaxContextChars)
         {
@@ -212,7 +223,7 @@ public class AiChatServicePooled(
         }
 
         // Show debug output if enabled
-        DisplayService.ShowSystemPromptDebug(relevantMemory, debugMode);
+        DisplayService.ShowSystemPromptDebug(relevantMemory, _debugMode);
 
         // Simple, direct prompt format for tiny models
         // No fancy formatting that confuses small LLMs

@@ -1,0 +1,40 @@
+@inject DashboardService DashboardService
+
+<main class="oa-chat">
+    <!-- Expand button when collapsed -->
+    @if (DashboardService.Collapsed)
+    {
+        <button type="button" class="oa-expand" title="Expand" aria-label="Expand sidebar" @onclick="DashboardService.ToggleSidebar">?</button>
+    }
+
+    <ChatTopBar />
+    <ChatMessages Messages="@Messages" IsProcessing="@IsProcessing" MessagesContainerRef="@MessagesContainerRef" />
+    <ChatComposer ComposerText="@ComposerText" 
+                  IsProcessing="@IsProcessing"
+                  OnComposerTextChanged="@OnComposerTextChanged"
+                  OnKeyDown="@OnKeyDown"
+                  OnSendMessage="@OnSendMessage" />
+</main>
+
+@code {
+    [Parameter]
+    public List<ChatMessageModel> Messages { get; set; } = new();
+
+    [Parameter]
+    public bool IsProcessing { get; set; }
+
+    [Parameter]
+    public string ComposerText { get; set; } = string.Empty;
+
+    [Parameter]
+    public ElementReference MessagesContainerRef { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnComposerTextChanged { get; set; }
+
+    [Parameter]
+    public EventCallback<KeyboardEventArgs> OnKeyDown { get; set; }
+
+    [Parameter]
+    public EventCallback OnSendMessage { get; set; }
+}

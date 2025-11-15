@@ -1,0 +1,257 @@
+/* Sidebar styles */
+.oa-sidebar {
+    border-right: 1px solid #20232b;
+    padding: 16px 14px;
+    overflow-y: auto;
+    background: #11141a;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE 10+ */
+}
+
+/* Hide sidebar when dashboard is collapsed */
+.oa-dashboard.collapsed .oa-sidebar {
+    display: none;
+}
+
+/* Hide sidebar on mobile */
+@media (max-width: 900px) {
+    .oa-sidebar {
+        display: none;
+    }
+}
+
+.oa-sidebar::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
+.oa-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.oa-app-title {
+    font-weight: 700;
+    font-size: 18px;
+}
+
+.oa-subtitle {
+    opacity: .8;
+    margin-top: 2px;
+    font-size: 13px;
+}
+
+.oa-footer-note {
+    opacity: .7;
+    font-size: 12px;
+    text-align: center;
+    margin-top: 8px;
+}
+
+/* Common card styles */
+.oa-card {
+    background: #0f1319;
+    border: 1px solid #1b1f27;
+    border-radius: 10px;
+    padding: 12px;
+    margin: 10px 0 12px;
+}
+
+.oa-card-title {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: #93a1b5;
+    margin-bottom: 8px;
+}
+
+.oa-field {
+    margin-bottom: 10px;
+}
+
+.oa-field > label {
+    display: block;
+    font-size: 12px;
+    color: #9aa9be;
+    margin-bottom: 6px;
+}
+
+.oa-grid2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.oa-text,
+select,
+.oa-number {
+    width: 100%;
+    background: #0b0e13;
+    border: 1px solid #1b1f27;
+    color: #e6e6e6;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 14px;
+}
+
+.oa-range {
+    display: grid;
+    grid-template-columns: 1fr 88px;
+    gap: 8px;
+    align-items: center;
+}
+
+.oa-range input[type="range"] {
+    accent-color: #4aa8ff;
+}
+
+/* Switch */
+.oa-switch-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+}
+
+.oa-switch-row input {
+    display: none;
+}
+
+.oa-switch {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    border-radius: 999px;
+    background: #2a2f3a;
+    border: 1px solid #1b1f27;
+    display: inline-block;
+    cursor: pointer;
+}
+
+.oa-switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #c2c8d3;
+    transition: transform .2s ease;
+}
+
+.oa-switch-row input:checked + .oa-switch {
+    background: #1e6cf0;
+}
+
+.oa-switch-row input:checked + .oa-switch::after {
+    transform: translateX(18px);
+    background: #fff;
+}
+
+/* Buttons */
+.oa-btn {
+    background: #151a22;
+    color: #e6e6e6;
+    border: 1px solid #2a2f3a;
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.oa-btn:hover {
+    background: #1a202a;
+}
+
+.oa-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.oa-btn-block {
+    width: 100%;
+}
+
+.oa-btn-primary {
+    background: #1e6cf0;
+    border-color: #1e6cf0;
+}
+
+.oa-btn-primary:hover {
+    background: #2c79f5;
+}
+
+.oa-btn-secondary {
+    background: #263142;
+    border-color: #2f3b4f;
+}
+
+.oa-btn-secondary:hover {
+    background: #2b384a;
+}
+
+.oa-btn-danger {
+    background: #8a2532;
+    border-color: #8a2532;
+}
+
+.oa-btn-danger:hover {
+    background: #a12a3a;
+}
+
+.oa-icon-btn {
+    background: #151a22;
+    border: 1px solid #2a2f3a;
+    color: #e6e6e6;
+    border-radius: 8px;
+    padding: 6px 8px;
+    cursor: pointer;
+}
+
+.oa-note {
+    font-size: 12px;
+    color: #96a3b8;
+    margin-top: 6px;
+}
+
+.oa-status-message {
+    font-size: 12px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    background: #1a2332;
+    border: 1px solid #2a3544;
+    color: #9ec7ff;
+}
+
+/* Delete confirmation */
+.delete-confirmation {
+    margin-top: 8px;
+}
+
+.confirmation-warning {
+    background: #3d2022;
+    border: 1px solid #8a2532;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    color: #ffb3ba;
+    text-align: center;
+}
+
+.confirmation-warning strong {
+    color: #ff8a92;
+    font-weight: 600;
+}
+
+.confirmation-warning small {
+    display: block;
+    margin-top: 6px;
+    font-size: 11px;
+    color: #d89ea3;
+}

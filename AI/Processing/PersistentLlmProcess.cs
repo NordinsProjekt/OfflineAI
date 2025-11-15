@@ -16,12 +16,23 @@ public class PersistentLlmProcess : IDisposable
 {
     private readonly string _llmPath;
     private readonly string _modelPath;
-    private readonly int _timeoutMs;
+    private int _timeoutMs;
     private readonly SemaphoreSlim _requestLock = new(1, 1);
     private bool _disposed;
 
     public bool IsHealthy { get; private set; } = true;
     public DateTime LastUsed { get; private set; } = DateTime.UtcNow;
+    
+    public int TimeoutMs 
+    { 
+        get => _timeoutMs;
+        set
+        {
+            if (value < 1000 || value > 300000)
+                throw new ArgumentOutOfRangeException(nameof(value), "Timeout must be between 1 and 300 seconds (1000-300000ms)");
+            _timeoutMs = value;
+        }
+    }
 
     private PersistentLlmProcess(string llmPath, string modelPath, int timeoutMs)
     {
@@ -113,35 +124,85 @@ public class PersistentLlmProcess : IDisposable
     private async Task<string> ExecuteProcessAsync(Process process)
     {
         var output = new StringBuilder();
+        var error = new StringBuilder();
         var assistantStarted = false;
         var lastOutputTime = DateTime.UtcNow;
         var processStartTime = DateTime.UtcNow;
+        var outputLock = new object();
+        var fullOutput = new StringBuilder(); // Keep track of all output for debugging
+
+        // Calculate pause timeout based on overall timeout
+        // For large timeouts (>60s), allow longer pauses (up to 10s)
+        // For small timeouts (<30s), keep short pauses (3s)
+        var pauseTimeoutMs = _timeoutMs switch
+        {
+            >= 120000 => 10000,  // 2+ minutes -> 10 second pause
+            >= 60000 => 7000,    // 1+ minute -> 7 second pause
+            >= 30000 => 5000,    // 30+ seconds -> 5 second pause
+            _ => 3000            // < 30 seconds -> 3 second pause
+        };
 
         process.OutputDataReceived += (sender, e) =>
         {
             if (string.IsNullOrEmpty(e.Data)) return;
 
-            lastOutputTime = DateTime.UtcNow;
-
-            // Look for assistant tag
-            if (!assistantStarted)
+            lock (outputLock)
             {
-                var fullText = output.ToString() + e.Data;
-                var assistantIndex = fullText.IndexOf("Assistant:", StringComparison.OrdinalIgnoreCase);
-                if (assistantIndex >= 0)
+                lastOutputTime = DateTime.UtcNow;
+                fullOutput.AppendLine(e.Data); // Keep full output for analysis
+
+                // Look for assistant tag - support multiple formats
+                if (!assistantStarted)
                 {
-                    assistantStarted = true;
-                    var startIndex = assistantIndex + "Assistant:".Length;
-                    output.Clear();
-                    output.Append(fullText.Substring(startIndex));
-                    Console.Write("\n"); // New line after loading indicator
+                    var fullText = output.ToString() + e.Data;
+                    
+                    // Try different assistant tag formats used by different models
+                    // Order matters - check more specific patterns first!
+                    var assistantPatterns = new[]
+                    {
+                        ("<|start_header_id|>assistant<|end_header_id|>", "<|start_header_id|>assistant<|end_header_id|>"),  // Llama 3.2
+                        ("<|assistant|>", "<|assistant|>"),                  // TinyLlama, Phi, etc.
+                        ("<|im_start|>assistant", "<|im_start|>assistant"),  // ChatML format
+                        ("### Assistant:", "### Assistant:"),                // Some instruction-tuned models
+                        ("Assistant:", "Assistant:")                         // Mistral, some Llama (check last to avoid false positives)
+                    };
+                    
+                    foreach (var (pattern, marker) in assistantPatterns)
+                    {
+                        var assistantIndex = fullText.IndexOf(pattern, StringComparison.Ordinal); // Use Ordinal for exact match
+                        if (assistantIndex >= 0)
+                        {
+                            assistantStarted = true;
+                            var startIndex = assistantIndex + marker.Length;
+                            output.Clear();
+                            
+                            // Extract text after the assistant marker
+                            var textAfterMarker = fullText.Substring(startIndex).TrimStart('\r', '\n', ' ');
+                            output.Append(textAfterMarker);
+                            
+                            Console.WriteLine($"\n[Detected format: {pattern}]"); // Debug info
+                            Console.Write(textAfterMarker); // Write the first chunk
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    // Stream output to console as it arrives
+                    Console.Write(e.Data);
+                    output.Append(e.Data); // Use Append instead of AppendLine to preserve formatting
                 }
             }
-            else
+        };
+
+        process.ErrorDataReceived += (sender, e) =>
+        {
+            if (!string.IsNullOrEmpty(e.Data))
             {
-                // Stream output to console as it arrives
-                Console.Write(e.Data);
-                output.AppendLine(e.Data);
+                lock (outputLock)
+                {
+                    error.AppendLine(e.Data);
+                }
             }
         };
 
@@ -156,13 +217,14 @@ public class PersistentLlmProcess : IDisposable
         {
             await Task.Delay(1000);
             if (!assistantStarted) Console.Write(".");
-
+            
             var timeSinceOutput = (DateTime.UtcNow - lastOutputTime).TotalMilliseconds;
             var totalTime = (DateTime.UtcNow - processStartTime).TotalMilliseconds;
             
             // If we've started getting assistant output and there's a pause, consider done
-            if (assistantStarted && timeSinceOutput > 3000)
+            if (assistantStarted && timeSinceOutput > pauseTimeoutMs)
             {
+                Console.WriteLine($"\n[Generation complete - {pauseTimeoutMs/1000}s pause detected]");
                 break;
             }
 
@@ -174,13 +236,38 @@ public class PersistentLlmProcess : IDisposable
             }
         }
 
+        // Give a small delay to ensure all output is captured
+        if (assistantStarted)
+        {
+            await Task.Delay(500);
+        }
+
         if (!process.HasExited)
         {
             process.Kill(entireProcessTree: true);
         }
 
+        // Wait for output/error streams to finish
+        process.WaitForExit();
+
+        var result = output.ToString();
+        var errorText = error.ToString();
+
+        // Debug: If result is empty but we have full output, log for analysis
+        if (string.IsNullOrWhiteSpace(result) && fullOutput.Length > 0)
+        {
+            Console.WriteLine($"\n[WARNING] No assistant marker detected. Full output:");
+            Console.WriteLine(fullOutput.ToString().Substring(0, Math.Min(500, fullOutput.Length)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(errorText) && !errorText.Contains("ggml_cuda_init") && !errorText.Contains("load_backend"))
+        {
+            // Only log errors that aren't informational backend messages
+            Console.WriteLine($"\n[LLM Error]: {errorText}");
+        }
+
         process.Dispose();
-        return output.ToString();
+        return result;
     }
 
     private static string CleanResponse(string response)
@@ -190,18 +277,43 @@ public class PersistentLlmProcess : IDisposable
 
         var cleaned = response.Trim();
 
-        // Remove trailing tags
-        var endTagIndex = cleaned.IndexOf("<|");
-        if (endTagIndex >= 0)
+        // Remove trailing special tokens used by different models
+        var endMarkers = new[]
         {
-            cleaned = cleaned.Substring(0, endTagIndex);
+            "<|eot_id|>",      // Llama 3.2 end of turn
+            "<|start_header_id|>", // Llama 3.2 next turn
+            "<|",              // Generic start of special token
+            "<|end|>",         // TinyLlama, Phi
+            "<|im_end|>",      // ChatML format
+            "</s>",            // Llama EOS token
+            "<|endoftext|>",   // GPT-style
+            "<|user|>",        // Start of next user turn
+            "User:",           // Start of next user turn
+            "###"              // Some instruction formats
+        };
+
+        foreach (var marker in endMarkers)
+        {
+            var endTagIndex = cleaned.IndexOf(marker, StringComparison.Ordinal);
+            if (endTagIndex >= 0)
+            {
+                cleaned = cleaned.Substring(0, endTagIndex);
+            }
         }
 
-        // Remove "User:" if it appears
-        var userIndex = cleaned.IndexOf("User:", StringComparison.OrdinalIgnoreCase);
-        if (userIndex >= 0)
+        // Remove incomplete sentence at the end if it ends with '>'
+        // This happens when generation is cut off mid-token
+        if (cleaned.EndsWith(">") && !cleaned.EndsWith(">>"))
         {
-            cleaned = cleaned.Substring(0, userIndex);
+            var lastCompleteStop = Math.Max(
+                cleaned.LastIndexOf('.'),
+                Math.Max(cleaned.LastIndexOf('!'), cleaned.LastIndexOf('?'))
+            );
+            
+            if (lastCompleteStop > 0)
+            {
+                cleaned = cleaned.Substring(0, lastCompleteStop + 1);
+            }
         }
 
         return cleaned.Trim();

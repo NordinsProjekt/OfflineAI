@@ -1,0 +1,22 @@
+@inject DashboardService DashboardService
+
+<section class="oa-card">
+    <div class="oa-card-title">Model</div>
+    <div class="oa-field">
+        <label>Current Model</label>
+        <select class="oa-text" @bind="DashboardService.CurrentModel" @bind:after="OnModelChanged">
+            @foreach (var m in DashboardService.AvailableModels)
+            {
+                <option>@m</option>
+            }
+        </select>
+    </div>
+    <div class="oa-note">Model switches automatically when selected.</div>
+</section>
+
+@code {
+    private async Task OnModelChanged()
+    {
+        await DashboardService.SwitchModelAsync();
+    }
+}

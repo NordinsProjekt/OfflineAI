@@ -1,0 +1,14 @@
+@inject DashboardService DashboardService
+
+<section class="oa-card">
+    <div class="oa-card-title">Files</div>
+    <div class="oa-field">
+        <label>Inbox</label>
+        <input type="text" class="oa-text" value="@DashboardService.InboxPath" readonly>
+    </div>
+    <div class="oa-field">
+        <label>Archive</label>
+        <input type="text" class="oa-text" value="@DashboardService.ArchivePath" readonly>
+    </div>
+    <button class="oa-btn oa-btn-secondary oa-btn-block" @onclick="async () => await DashboardService.ReloadInboxAsync()">Reload Inbox</button>
+</section>
