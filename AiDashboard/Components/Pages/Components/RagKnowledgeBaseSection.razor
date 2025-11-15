@@ -1,11 +1,11 @@
-@inject DashboardService DashboardService
+@inject DashboardState Dashboard
 
 <section class="oa-card">
     <div class="oa-card-title">RAG Knowledge Base</div>
     
-    @if (!string.IsNullOrWhiteSpace(DashboardService.StatusMessage))
+    @if (!string.IsNullOrWhiteSpace(Dashboard.StatusMessage))
     {
-        <div class="oa-status-message">@DashboardService.StatusMessage</div>
+        <div class="oa-status-message">@Dashboard.StatusMessage</div>
     }
     
     <div class="oa-info-text">

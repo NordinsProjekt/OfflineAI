@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
-using AiDashboard.Services;
+using AiDashboard.State;
 using AiDashboard.Models;
 
 namespace AiDashboard.Components.Pages;
@@ -8,7 +8,7 @@ namespace AiDashboard.Components.Pages;
 public partial class Home : IDisposable
 {
     [Inject]
-    private DashboardService DashboardService { get; set; } = default!;
+    private DashboardState Dashboard { get; set; } = default!;
 
     private string composerText = string.Empty;
     private bool isProcessing = false;
@@ -26,7 +26,7 @@ public partial class Home : IDisposable
 
     protected override void OnInitialized()
     {
-        DashboardService.OnChange += Refresh;
+        Dashboard.OnChange += Refresh;
         
         // Format initial message
         foreach (var msg in messages)
@@ -85,7 +85,7 @@ public partial class Home : IDisposable
         try
         {
             // Get AI response
-            var response = await DashboardService.SendMessageAsync(userMessage);
+            var response = await Dashboard.SendMessageAsync(userMessage);
 
             // Add AI response
             var aiMsg = new ChatMessageModel { IsUser = false, Text = response };
@@ -107,6 +107,6 @@ public partial class Home : IDisposable
 
     public void Dispose()
     {
-        DashboardService.OnChange -= Refresh;
+        Dashboard.OnChange -= Refresh;
     }
 }

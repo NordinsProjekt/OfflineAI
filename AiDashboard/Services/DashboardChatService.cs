@@ -1,9 +1,11 @@
 using System;
 using System.Threading.Tasks;
 using Application.AI.Chat;
+using Application.AI.Extensions;
 using Application.AI.Pooling;
 using Services.Configuration;
 using Services.Interfaces;
+using Services.UI;
 
 namespace AiDashboard.Services
 {
@@ -84,8 +86,9 @@ namespace AiDashboard.Services
             // Check pool health
             if (_modelPool.AvailableCount == 0)
             {
-                return $"[ERROR] Model pool has no available instances. Available: {_modelPool.AvailableCount}, Max: {_modelPool.MaxInstances}. " +
-                       $"Check console for initialization errors.";
+                return ExceptionMessageService.ModelPoolNoAvailableInstances(
+                    _modelPool.AvailableCount, 
+                    _modelPool.MaxInstances);
             }
 
             try
@@ -103,99 +106,31 @@ namespace AiDashboard.Services
                 // Send message and return response
                 var response = await chatService.SendMessageAsync(message);
 
-                // Clean up model-specific artifacts
-                response = CleanModelArtifacts(response);
+                // Clean up model-specific artifacts using extension method
+                response = response.CleanModelArtifacts();
 
                 // Append performance metrics to response if enabled
                 if (showPerformanceMetrics && chatService.LastMetrics != null)
                 {
                     var metrics = chatService.LastMetrics;
-                    var tokensPerSec = metrics.CompletionTokens / (metrics.TotalTimeMs / 1000.0);
-                    var totalTokens = metrics.PromptTokens + metrics.CompletionTokens;
-                    
-                    response += $"\n\n" +
-                               $"============================\n" +
-                               $"| **Performance Metrics**\n" +
-                               $"============================\n" +
-                               $"|  **Time:** {metrics.TotalTimeMs / 1000.0:F2}s\n" +
-                               $"|  **Tokens:** {metrics.PromptTokens} prompt + {metrics.CompletionTokens} completion = {totalTokens} total\n" +
-                               $"|  **Speed:** {tokensPerSec:F1} tokens/sec\n" +
-                               $"============================";
+                    response += DisplayService.FormatPerformanceMetrics(
+                        metrics.TotalTimeMs,
+                        metrics.PromptTokens,
+                        metrics.CompletionTokens);
                 }
 
                 return response;
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("No healthy instances"))
             {
-                return $"[ERROR] Model pool exhausted. This can happen if:\n" +
-                       $"1. The LLM executable path is incorrect\n" +
-                       $"2. The model file is corrupted or incompatible\n" +
-                       $"3. Previous queries crashed the model processes\n" +
-                       $"Try restarting the application.";
+                return ExceptionMessageService.ModelPoolExhausted();
             }
             catch (Exception ex)
             {
-                return $"[ERROR] {ex.GetType().Name}: {ex.Message}";
+                return ExceptionMessageService.MessageProcessingError(
+                    ex.GetType().Name, 
+                    ex.Message);
             }
-        }
-
-        /// <summary>
-        /// Remove model-specific artifacts from responses.
-        /// Handles Llama 3.2, TinyLlama, Mistral, Llama 2, Phi, ChatML, and other common model formats.
-        /// </summary>
-        private static string CleanModelArtifacts(string response)
-        {
-            if (string.IsNullOrWhiteSpace(response))
-                return response;
-
-            // Remove special tokens from various model formats
-            
-            // Llama 3.2 tokens
-            response = response.Replace("<|begin_of_text|>", "")
-                              .Replace("<|end_of_text|>", "")
-                              .Replace("<|eot_id|>", "")
-                              .Replace("<|start_header_id|>", "")
-                              .Replace("<|end_header_id|>", "");
-            
-            // TinyLlama / Phi tokens
-            response = response.Replace("<|system|>", "")
-                              .Replace("<|user|>", "")
-                              .Replace("<|assistant|>", "")
-                              .Replace("<|end|>", "")
-                              .Replace("<|endoftext|>", "");
-
-            // ChatML tokens
-            response = response.Replace("<|im_start|>", "")
-                              .Replace("<|im_end|>", "");
-
-            // Mistral instruction tokens
-            response = response.Replace("[INST]", "")
-                              .Replace("[/INST]", "")
-                              .Replace("<<SYS>>", "")
-                              .Replace("<</SYS>>", "");
-
-            // Llama 2 special tokens
-            response = response.Replace("<s>", "")
-                              .Replace("</s>", "");
-
-            // Remove incomplete sentence markers
-            if (response.EndsWith(">") && !response.EndsWith(">>"))
-            {
-                var lastCompleteStop = Math.Max(
-                    response.LastIndexOf('.'),
-                    Math.Max(response.LastIndexOf('!'), response.LastIndexOf('?'))
-                );
-                
-                if (lastCompleteStop > 0 && lastCompleteStop < response.Length - 10)
-                {
-                    response = response.Substring(0, lastCompleteStop + 1);
-                }
-            }
-
-            // Trim whitespace
-            response = response.Trim();
-
-            return response;
         }
 
         public void Dispose()

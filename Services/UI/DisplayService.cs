@@ -404,6 +404,32 @@ public static class DisplayService
 
     #endregion
 
+    #region Response Formatting
+    
+    /// <summary>
+    /// Format performance metrics to append to a response.
+    /// </summary>
+    /// <param name="totalTimeMs">Total time in milliseconds</param>
+    /// <param name="promptTokens">Number of prompt tokens</param>
+    /// <param name="completionTokens">Number of completion tokens</param>
+    /// <returns>Formatted performance metrics string</returns>
+    public static string FormatPerformanceMetrics(double totalTimeMs, int promptTokens, int completionTokens)
+    {
+        var tokensPerSec = completionTokens / (totalTimeMs / 1000.0);
+        var totalTokens = promptTokens + completionTokens;
+        
+        return $"\n\n" +
+               $"============================\n" +
+               $"| **Performance Metrics**\n" +
+               $"============================\n" +
+               $"|  **Time:** {totalTimeMs / 1000.0:F2}s\n" +
+               $"|  **Tokens:** {promptTokens} prompt + {completionTokens} completion = {totalTokens} total\n" +
+               $"|  **Speed:** {tokensPerSec:F1} tokens/sec\n" +
+               $"============================";
+    }
+    
+    #endregion
+
     public static void ShowInstancePool()
     {
         Console.WriteLine("\n╔════════════════════════════════════════════════════════╗");

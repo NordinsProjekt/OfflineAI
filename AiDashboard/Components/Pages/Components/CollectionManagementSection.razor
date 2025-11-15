@@ -1,4 +1,4 @@
-@inject DashboardService DashboardService
+@inject DashboardState Dashboard
 @inject IJSRuntime JSRuntime
 @implements IDisposable
 
@@ -7,11 +7,11 @@
     
     <div class="oa-field">
         <label>Active Collection</label>
-        @if (DashboardService.AvailableCollections.Any())
+        @if (Dashboard.CollectionService?.AvailableCollections.Any() == true)
         {
             <select class="oa-text" @bind="selectedCollection" @bind:after="OnCollectionChanged">
                 <option value="">-- Select or create new --</option>
-                @foreach (var collection in DashboardService.AvailableCollections)
+                @foreach (var collection in Dashboard.CollectionService.AvailableCollections)
                 {
                     <option value="@collection">@collection</option>
                 }
@@ -55,7 +55,7 @@
         {
             <div class="delete-confirmation">
                 <div class="confirmation-warning">
-                    ?? Delete collection '<strong>@selectedCollection</strong>'?
+                    ? Delete collection '<strong>@selectedCollection</strong>'?
                     <br/>
                     <small>All fragments in this collection will be permanently deleted.</small>
                 </div>
@@ -75,29 +75,29 @@
 
     protected override async Task OnInitializedAsync()
     {
-        DashboardService.OnChange += StateHasChanged;
+        Dashboard.OnChange += StateHasChanged;
         await InvokeAsync(async () => await RefreshCollections());
         
         // Set initial selection to current collection name
-        selectedCollection = DashboardService.CollectionName;
+        selectedCollection = Dashboard.CollectionService?.CurrentCollection;
     }
 
     public void Dispose()
     {
-        DashboardService.OnChange -= StateHasChanged;
+        Dashboard.OnChange -= StateHasChanged;
     }
 
     private async Task OnCollectionChanged()
     {
-        if (!string.IsNullOrWhiteSpace(selectedCollection))
+        if (!string.IsNullOrWhiteSpace(selectedCollection) && Dashboard.CollectionService != null)
         {
-            // Update the dashboard service to use this collection for both saving and RAG
-            DashboardService.CollectionName = selectedCollection;
+            // Update the collection service to use this collection
+            Dashboard.CollectionService.CurrentCollection = selectedCollection;
             
             // Automatically load it for RAG queries
             try
             {
-                await DashboardService.LoadCollectionAsync(selectedCollection);
+                await Dashboard.LoadCollectionAsync(selectedCollection);
             }
             catch
             {
@@ -112,25 +112,25 @@
 
     private async Task CreateNewCollection()
     {
-        if (string.IsNullOrWhiteSpace(newCollectionName))
+        if (string.IsNullOrWhiteSpace(newCollectionName) || Dashboard.CollectionService == null)
             return;
 
         // Set as active collection
         selectedCollection = newCollectionName.Trim();
-        DashboardService.CollectionName = selectedCollection;
+        Dashboard.CollectionService.CurrentCollection = selectedCollection;
         
         // Clear the input
         newCollectionName = string.Empty;
         
         // Show info about the new collection (will be created on first document add)
-        await DashboardService.GetCollectionInfoAsync(selectedCollection);
+        await Dashboard.GetCollectionInfoAsync(selectedCollection);
         
         await InvokeAsync(StateHasChanged);
     }
 
     private async Task RefreshCollections()
     {
-        await DashboardService.RefreshCollectionsAsync();
+        await Dashboard.RefreshCollectionsAsync();
         await InvokeAsync(StateHasChanged);
     }
 
@@ -138,7 +138,7 @@
     {
         if (!string.IsNullOrWhiteSpace(selectedCollection))
         {
-            await DashboardService.GetCollectionInfoAsync(selectedCollection);
+            await Dashboard.GetCollectionInfoAsync(selectedCollection);
         }
     }
 
@@ -166,9 +166,12 @@
         
         if (finalConfirm)
         {
-            await DashboardService.DeleteCollectionAsync(selectedCollection);
+            await Dashboard.DeleteCollectionAsync(selectedCollection);
             selectedCollection = null;
-            DashboardService.CollectionName = "default";
+            if (Dashboard.CollectionService != null)
+            {
+                Dashboard.CollectionService.CurrentCollection = "default";
+            }
             await RefreshCollections();
         }
         

@@ -1,4 +1,4 @@
-@inject DashboardService DashboardService
+@inject DashboardState Dashboard
 
 <aside class="oa-sidebar">
     <div class="oa-sidebar-header">
@@ -6,7 +6,7 @@
             <div class="oa-app-title">OfflineAI</div>
             <div class="oa-subtitle">Controls</div>
         </div>
-        <button type="button" class="oa-icon-btn" title="Collapse" aria-label="Collapse sidebar" @onclick="DashboardService.ToggleSidebar">?</button>
+        <button type="button" class="oa-icon-btn" title="Collapse" aria-label="Collapse sidebar" @onclick="Dashboard.ToggleSidebar">?</button>
     </div>
 
     <ModesSection />

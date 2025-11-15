@@ -232,98 +232,81 @@ public class Program
             }
         });
 
-        // Register dashboard service and initialize model folder from configuration if present
-        builder.Services.AddSingleton<DashboardService>(sp =>
+        // Register DashboardState (replaces DashboardService)
+        builder.Services.AddSingleton<AiDashboard.State.DashboardState>(sp =>
         {
-            var svc = new DashboardService();
-
             try
             {
                 var config = sp.GetRequiredService<AppConfiguration>();
-                svc.AppConfig = config;
-
-                // Set inbox and archive paths from config
-                if (config.Folders != null)
-                {
-                    svc.InboxPath = config.Folders.InboxFolder ?? svc.InboxPath;
-                    svc.ArchivePath = config.Folders.ArchiveFolder ?? svc.ArchivePath;
-                }
-
+                
+                // Determine model folder from config
                 var modelPath = config.Llm?.ModelPath ?? builder.Configuration["AppConfiguration:Llm:ModelPath"];
+                string? modelFolder = null;
                 if (!string.IsNullOrWhiteSpace(modelPath))
                 {
                     var dir = Path.GetDirectoryName(modelPath);
                     if (!string.IsNullOrWhiteSpace(dir) && Directory.Exists(dir))
                     {
-                        svc.ModelFolderPath = dir;
-                        svc.RefreshAvailableModelsAsync().GetAwaiter().GetResult();
-                        Console.WriteLine($"? Found {svc.AvailableModels.Count} models in {dir}");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"??  Model folder not found: {dir}");
+                        modelFolder = dir;
                     }
                 }
 
-                // Attach switch handler using model manager
+                // Create dashboard state
+                var dashboardState = new AiDashboard.State.DashboardState(modelFolder);
+                
+                // Initialize services
+                var repository = sp.GetService<IVectorMemoryRepository>();
+                var persistenceService = sp.GetService<VectorMemoryPersistenceService>();
+                dashboardState.InitializeServices(repository, persistenceService, config);
+                
+                // Attach chat service
+                var chatService = sp.GetService<DashboardChatService>();
+                dashboardState.ChatService = chatService;
+                
+                if (chatService != null)
+                {
+                    Console.WriteLine("? Chat service attached to dashboard");
+                }
+                
+                // Set model switch handler
                 var mgr = sp.GetService<IModelManager>();
                 if (mgr != null)
                 {
-                    svc.SwitchModelHandler = async (modelFullPath, progress) => await mgr.SwitchModelAsync(modelFullPath, progress);
+                    dashboardState.ModelService.SwitchModelHandler = 
+                        async (modelFullPath, progress) => await mgr.SwitchModelAsync(modelFullPath, progress);
                 }
-
-                // Attach chat service
-                var chatService = sp.GetService<DashboardChatService>();
-                if (chatService != null)
+                
+                // Refresh models and collections in background
+                if (modelFolder != null)
                 {
-                    svc.ChatService = chatService;
-                    Console.WriteLine("? Chat service attached to dashboard");
+                    Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await dashboardState.RefreshModelsAsync();
+                            Console.WriteLine($"? Found {dashboardState.ModelService.AvailableModels.Count} models in {modelFolder}");
+                        }
+                        catch { }
+                    });
                 }
-                else
-                {
-                    Console.WriteLine("??  Chat service not available");
-                }
-
-                // Attach repository for table management (optional)
-                var repository = sp.GetService<IVectorMemoryRepository>();
-                if (repository != null)
-                {
-                    svc.VectorRepository = repository;
-                }
-
-                // Attach persistence service for loading collections (optional)
-                var persistenceService = sp.GetService<VectorMemoryPersistenceService>();
-                if (persistenceService != null)
-                {
-                    svc.PersistenceService = persistenceService;
-                }
-
-                // Set collection name from config
-                var collectionName = config.Debug?.CollectionName ?? builder.Configuration["AppConfiguration:Debug:CollectionName"];
-                if (!string.IsNullOrWhiteSpace(collectionName))
-                {
-                    svc.CollectionName = collectionName;
-                }
-
-                // Refresh collections list (async but fire-and-forget on startup)
+                
                 Task.Run(async () =>
                 {
                     try
                     {
-                        await svc.RefreshCollectionsAsync();
+                        await dashboardState.RefreshCollectionsAsync();
                     }
-                    catch
-                    {
-                        // Ignore errors during startup
-                    }
+                    catch { }
                 });
+
+                Console.WriteLine("? Dashboard state initialized");
+                return dashboardState;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"??  Warning during dashboard initialization: {ex.Message}");
+                throw;
             }
-
-            return svc;
         });
 
         var app = builder.Build();

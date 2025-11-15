@@ -122,4 +122,40 @@ public static class ExceptionMessageService
         return $"Unsupported model format: {modelPath}\n" +
                $"Expected formats: {formats}";
     }
+
+    /// <summary>
+    /// Generates an error message when the model pool has no available instances.
+    /// </summary>
+    /// <param name="availableCount">Number of available instances</param>
+    /// <param name="maxInstances">Maximum number of instances in the pool</param>
+    /// <returns>Formatted error message with troubleshooting steps</returns>
+    public static string ModelPoolNoAvailableInstances(int availableCount, int maxInstances)
+    {
+        return $"[ERROR] Model pool has no available instances. Available: {availableCount}, Max: {maxInstances}. " +
+               $"Check console for initialization errors.";
+    }
+
+    /// <summary>
+    /// Generates an error message when the model pool is exhausted or unhealthy.
+    /// </summary>
+    /// <returns>Formatted error message with troubleshooting steps</returns>
+    public static string ModelPoolExhausted()
+    {
+        return $"[ERROR] Model pool exhausted. This can happen if:\n" +
+               $"1. The LLM executable path is incorrect\n" +
+               $"2. The model file is corrupted or incompatible\n" +
+               $"3. Previous queries crashed the model processes\n" +
+               $"Try restarting the application.";
+    }
+
+    /// <summary>
+    /// Generates a generic error message for exceptions during message processing.
+    /// </summary>
+    /// <param name="exceptionType">Type of the exception</param>
+    /// <param name="message">Exception message</param>
+    /// <returns>Formatted error message</returns>
+    public static string MessageProcessingError(string exceptionType, string message)
+    {
+        return $"[ERROR] {exceptionType}: {message}";
+    }
 }

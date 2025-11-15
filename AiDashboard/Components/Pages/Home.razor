@@ -4,7 +4,7 @@
 
 <PageTitle>Dashboard</PageTitle>
 
-<div class="oa-dashboard @(DashboardService.Collapsed ? "collapsed" : string.Empty)">
+<div class="oa-dashboard @(Dashboard.Collapsed ? "collapsed" : string.Empty)">
     <Sidebar />
     
     <ChatArea Messages="@messages"
@@ -17,13 +17,13 @@
 </div>
 
 @* Loading overlay for inbox reload *@
-@if (DashboardService.IsLoadingInbox)
+@if (Dashboard.InboxService?.IsProcessing == true)
 {
     <div class="loading-overlay">
         <div class="loading-content">
             <div class="loading-spinner"></div>
             <h2>Processing Inbox Files</h2>
-            <p>@DashboardService.LoadingMessage</p>
+            <p>@Dashboard.InboxService.CurrentStatus</p>
             <p class="loading-warning">Please wait, do not close or refresh the page...</p>
         </div>
     </div>

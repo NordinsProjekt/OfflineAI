@@ -1,11 +1,11 @@
-@inject DashboardService DashboardService
+@inject DashboardState Dashboard
 
 <section class="oa-card">
     <div class="oa-card-title">Model</div>
     <div class="oa-field">
         <label>Current Model</label>
-        <select class="oa-text" @bind="DashboardService.CurrentModel" @bind:after="OnModelChanged">
-            @foreach (var m in DashboardService.AvailableModels)
+        <select class="oa-text" @bind="Dashboard.ModelService.CurrentModel" @bind:after="OnModelChanged">
+            @foreach (var m in Dashboard.ModelService.AvailableModels)
             {
                 <option>@m</option>
             }
@@ -17,6 +17,6 @@
 @code {
     private async Task OnModelChanged()
     {
-        await DashboardService.SwitchModelAsync();
+        await Dashboard.SwitchModelAsync();
     }
 }

@@ -1,10 +1,10 @@
-@inject DashboardService DashboardService
+@inject DashboardState Dashboard
 
 <main class="oa-chat">
     <!-- Expand button when collapsed -->
-    @if (DashboardService.Collapsed)
+    @if (Dashboard.Collapsed)
     {
-        <button type="button" class="oa-expand" title="Expand" aria-label="Expand sidebar" @onclick="DashboardService.ToggleSidebar">?</button>
+        <button type="button" class="oa-expand" title="Expand" aria-label="Expand sidebar" @onclick="Dashboard.ToggleSidebar">?</button>
     }
 
     <ChatTopBar />

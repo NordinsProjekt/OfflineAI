@@ -1,4 +1,4 @@
-@inject DashboardService DashboardService
+@inject DashboardState Dashboard
 @inject IJSRuntime JSRuntime
 
 <section class="oa-card">
@@ -6,15 +6,15 @@
     
     <div class="oa-field">
         <label>Active Table</label>
-        <input type="text" class="oa-text" @bind="DashboardService.ActiveTable">
+        <input type="text" class="oa-text" @bind="Dashboard.ActiveTable">
     </div>
     <div class="oa-grid2">
-        <button class="oa-btn" @onclick="async () => await DashboardService.ListTablesAsync()">List</button>
-        <button class="oa-btn" @onclick="async () => await DashboardService.InfoTableAsync()">Info</button>
+        <button class="oa-btn" @onclick="async () => await Dashboard.ListTablesAsync()">List</button>
+        <button class="oa-btn" @onclick="async () => await Dashboard.InfoTableAsync()">Info</button>
     </div>
     <div class="oa-grid2">
-        <button class="oa-btn" @onclick="async () => await DashboardService.CreateTableAsync()">Create</button>
-        <button class="oa-btn" @onclick="async () => await DashboardService.SwitchTableAsync()">Switch</button>
+        <button class="oa-btn" @onclick="async () => await Dashboard.CreateTableAsync()">Create</button>
+        <button class="oa-btn" @onclick="async () => await Dashboard.SwitchTableAsync()">Switch</button>
     </div>
     
     @if (!confirmingDelete)
@@ -25,7 +25,7 @@
     {
         <div class="delete-confirmation">
             <div class="confirmation-warning">
-                ?? Are you sure you want to delete table '<strong>@DashboardService.ActiveTable</strong>'?
+                ? Are you sure you want to delete table '<strong>@Dashboard.ActiveTable</strong>'?
                 <br/>
                 <small>This action cannot be undone and all data will be lost.</small>
             </div>
@@ -55,11 +55,11 @@
         // Double confirmation using JavaScript confirm dialog
         bool finalConfirm = await JSRuntime.InvokeAsync<bool>(
             "confirm", 
-            $"FINAL CONFIRMATION: Delete table '{DashboardService.ActiveTable}'?\n\nThis will permanently delete all data in this table.");
+            $"FINAL CONFIRMATION: Delete table '{Dashboard.ActiveTable}'?\n\nThis will permanently delete all data in this table.");
         
         if (finalConfirm)
         {
-            await DashboardService.DeleteTableAsync();
+            await Dashboard.DeleteTableAsync();
         }
         
         confirmingDelete = false;
