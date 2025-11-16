@@ -23,13 +23,15 @@ public class AiChatServicePooled(
     GameDetector? gameDetector = null,
     bool debugMode = false,
     bool enableRag = true,
-    bool showPerformanceMetrics = false)
+    bool showPerformanceMetrics = false,
+    DomainDetector? domainDetector = null)
 {
     private readonly ILlmMemory _memory = memory ?? throw new ArgumentNullException(nameof(memory));
     private readonly ILlmMemory _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
     private readonly Application.AI.Pooling.ModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
     private readonly GenerationSettings _generationSettings = generationSettings ?? throw new ArgumentNullException(nameof(generationSettings));
     private readonly GameDetector? _gameDetector = gameDetector;
+    private readonly DomainDetector? _domainDetector = domainDetector;
     private readonly bool _enableRag = enableRag;
     private readonly bool _debugMode = debugMode;
     private readonly bool _showPerformanceMetrics = showPerformanceMetrics;
@@ -168,12 +170,28 @@ public class AiChatServicePooled(
         // Simplified prompt optimized for tiny models
         const string basePrompt = "Answer the question using only the information below.\n";
 
-        // Detect games mentioned in the query (if GameDetector is available)
-        List<string> detectedGames = new();
+        // Detect domains mentioned in the query (NEW SYSTEM - prioritize if available)
+        List<string> detectedDomains = new();
         
-        if (_gameDetector != null)
+        if (_domainDetector != null)
         {
-            detectedGames = await _gameDetector.DetectGamesAsync(question);
+            detectedDomains = await _domainDetector.DetectDomainsAsync(question);
+            
+            if (detectedDomains.Count > 0)
+            {
+                var domainNames = new List<string>();
+                foreach (var domainId in detectedDomains)
+                {
+                    domainNames.Add(await _domainDetector.GetDisplayNameAsync(domainId));
+                }
+                DisplayService.WriteLine($"[*] Detected domain(s): {string.Join(", ", domainNames)}");
+            }
+        }
+        else if (_gameDetector != null)
+        {
+            // Fallback to GameDetector if DomainDetector not available (LEGACY)
+            var detectedGames = await _gameDetector.DetectGamesAsync(question);
+            detectedDomains = detectedGames; // Use same list for compatibility
             
             if (detectedGames.Count > 0)
             {
@@ -186,9 +204,9 @@ public class AiChatServicePooled(
             }
         }
 
-        // IMPORTANT: Do NOT remove game names from the query before database search
-        // Game names are crucial for matching titles in embeddings
-        // The database search needs the full query INCLUDING game names to match properly
+        // IMPORTANT: Do NOT remove domain names from the query before database search
+        // Domain names are crucial for matching titles in embeddings
+        // The database search needs the full query INCLUDING domain names to match properly
         string queryForSearch = question;
         
         DisplayService.WriteLine($"[*] Searching database with: '{queryForSearch}'");
@@ -201,33 +219,44 @@ public class AiChatServicePooled(
                 queryForSearch,
                 topK: TopKResults,
                 minRelevanceScore: 0.3,
-                gameFilter: detectedGames.Count > 0 ? detectedGames : null,
+                gameFilter: detectedDomains.Count > 0 ? detectedDomains : null,
                 maxCharsPerFragment: MaxFragmentChars,
                 includeMetadata: false);
         }
         
         if (relevantMemory == null)
         {
-            // If we detected a game but found no results
-            if (_gameDetector != null && detectedGames.Count > 0)
+            // If we detected a domain but found no results
+            if (detectedDomains.Count > 0)
             {
-                var gameNames = new List<string>();
-                foreach (var gameId in detectedGames)
+                var domainNames = new List<string>();
+                
+                if (_domainDetector != null)
                 {
-                    gameNames.Add(await _gameDetector.GetDisplayNameAsync(gameId));
+                    foreach (var domainId in detectedDomains)
+                    {
+                        domainNames.Add(await _domainDetector.GetDisplayNameAsync(domainId));
+                    }
+                    return $"NO_RESULTS_FOR_DOMAIN:{string.Join(", ", domainNames)}";
                 }
-                return $"NO_RESULTS_FOR_GAME:{string.Join(", ", gameNames)}";
+                else if (_gameDetector != null)
+                {
+                    foreach (var gameId in detectedDomains)
+                    {
+                        domainNames.Add(await _gameDetector.GetDisplayNameAsync(gameId));
+                    }
+                    return $"NO_RESULTS_FOR_GAME:{string.Join(", ", domainNames)}";
+                }
             }
             return null;
         }
 
-        // AFTER getting results, clean the query for LLM
-        var cleanedQuery = await RemoveGameNamesFromQueryAsync(question, detectedGames);
-        if (cleanedQuery != question)
-        {
-            DisplayService.WriteLine($"[*] Query cleanup for LLM: '{question}' -> '{cleanedQuery}'");
-            DisplayService.WriteLine($"    (Game context preserved in retrieved fragments)");
-        }
+        // DON'T clean the query - domain names provide important context for the LLM
+        // The domain filtering already happened during the vector search above
+        // Removing domain names can create grammatically incorrect queries
+        
+        // Example: "How to win in Gloomhaven?" is clearer than "How to win?"
+        // The retrieved fragments already contain Gloomhaven-specific context
 
         // Truncate context if too long
         if (relevantMemory.Length > MaxContextChars)
@@ -239,7 +268,7 @@ public class AiChatServicePooled(
         // Show debug output if enabled
         DisplayService.ShowSystemPromptDebug(relevantMemory, _debugMode);
 
-        // Simple prompt format
+        // Simple prompt format - use the ORIGINAL question with domain name intact
         var prompt = new StringBuilder();
         prompt.Append(basePrompt);
         prompt.AppendLine("\nInformation:");
@@ -254,50 +283,6 @@ public class AiChatServicePooled(
         }
 
         return finalPrompt;
-    }
-
-    /// <summary>
-    /// Removes detected game names from the query to improve semantic matching.
-    /// Example: "how to win in Munchkin Panic" -> "how to win"
-    /// </summary>
-    private async Task<string> RemoveGameNamesFromQueryAsync(string query, List<string> detectedGames)
-    {
-        if (detectedGames.Count == 0 || _gameDetector == null)
-            return query;
-
-        var cleanedQuery = query;
-        
-        foreach (var gameId in detectedGames)
-        {
-            var gameName = await _gameDetector.GetDisplayNameAsync(gameId);
-            
-            // Remove exact game name (case-insensitive)
-            cleanedQuery = System.Text.RegularExpressions.Regex.Replace(
-                cleanedQuery, 
-                $@"\b{System.Text.RegularExpressions.Regex.Escape(gameName)}\b",
-                "",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
-            // Remove game ID variations
-            cleanedQuery = System.Text.RegularExpressions.Regex.Replace(
-                cleanedQuery,
-                $@"\b{System.Text.RegularExpressions.Regex.Escape(gameId)}\b",
-                "",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        }
-        
-        // Remove common connecting words
-        cleanedQuery = System.Text.RegularExpressions.Regex.Replace(
-            cleanedQuery, 
-            @"\b(in|for|about|regarding|concerning)\b",
-            "",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        
-        // Clean up extra whitespace
-        cleanedQuery = System.Text.RegularExpressions.Regex.Replace(cleanedQuery, @"\s+", " ").Trim();
-        cleanedQuery = cleanedQuery.Trim(' ', ',', '.', '?', '!', '"', '\'');
-        
-        return string.IsNullOrWhiteSpace(cleanedQuery) ? query : cleanedQuery;
     }
 
     /// <summary>

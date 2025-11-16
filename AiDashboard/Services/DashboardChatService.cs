@@ -20,18 +20,21 @@ namespace AiDashboard.Services
         private readonly ILlmMemory _conversationMemory;
         private readonly ModelInstancePool _modelPool;
         private readonly GameDetector? _gameDetector;
+        private readonly DomainDetector? _domainDetector;
         private bool _disposed;
 
         public DashboardChatService(
             ILlmMemory memory,
             ILlmMemory conversationMemory,
             ModelInstancePool modelPool,
-            GameDetector? gameDetector = null)
+            GameDetector? gameDetector = null,
+            DomainDetector? domainDetector = null)
         {
             _memory = memory ?? throw new ArgumentNullException(nameof(memory));
             _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
             _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
             _gameDetector = gameDetector;
+            _domainDetector = domainDetector;
         }
 
         /// <summary>
@@ -106,7 +109,8 @@ namespace AiDashboard.Services
                     _gameDetector,
                     debugMode: debugMode,
                     enableRag: ragMode,
-                    showPerformanceMetrics: showPerformanceMetrics);
+                    showPerformanceMetrics: showPerformanceMetrics,
+                    domainDetector: _domainDetector);
 
                 // Send message and return response
                 var response = await chatService.SendMessageAsync(message);

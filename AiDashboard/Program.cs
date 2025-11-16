@@ -97,6 +97,9 @@ public class Program
                 // Register GameRepository for game detection
                 builder.Services.AddDapperGameRepository(dbConnectionString);
                 
+                // Register KnowledgeDomainRepository for the new domain-based system
+                builder.Services.AddDapperKnowledgeDomainRepository(dbConnectionString);
+
                 // Build a temporary service provider to check if services are registered
                 using var tempProvider = builder.Services.BuildServiceProvider();
                 repositoryInstance = tempProvider.GetService<IVectorMemoryRepository>();
@@ -135,8 +138,11 @@ public class Program
             Console.WriteLine("   Table management and collection loading disabled");
         }
 
-        // Register GameDetector (requires GameRepository)
+        // Register GameDetector (requires GameRepository) - LEGACY
         builder.Services.AddSingleton<Application.AI.Utilities.GameDetector>();
+        
+        // Register DomainDetector (requires KnowledgeDomainRepository) - NEW SYSTEM
+        builder.Services.AddSingleton<Application.AI.Utilities.DomainDetector>();
 
         // Register empty VectorMemory as ILlmMemory for knowledge base (no database dependency)
         builder.Services.AddSingleton<ILlmMemory>(sp =>
@@ -229,9 +235,12 @@ public class Program
 
                 // Get GameDetector for game filtering
                 var gameDetector = sp.GetService<Application.AI.Utilities.GameDetector>();
+                
+                // Get DomainDetector for domain filtering (new system)
+                var domainDetector = sp.GetService<Application.AI.Utilities.DomainDetector>();
 
                 Console.WriteLine("? Chat service initialized");
-                return new DashboardChatService(vectorMemory, conversationMemory, modelPool, gameDetector);
+                return new DashboardChatService(vectorMemory, conversationMemory, modelPool, gameDetector, domainDetector);
             }
             catch (Exception ex)
             {
@@ -339,7 +348,7 @@ public class Program
             });
         }
 
-        // Initialize GameDetector on startup (non-blocking, optional)
+        // Initialize GameDetector on startup (non-blocking, optional) - LEGACY
         Task.Run(async () =>
         {
             using var scope = app.Services.CreateScope();
@@ -357,6 +366,28 @@ public class Program
             {
                 Console.WriteLine($"??  Warning: Failed to initialize game detector: {ex.Message}");
                 Console.WriteLine("   Game management will not be available");
+            }
+        });
+        
+        // Initialize DomainDetector on startup (non-blocking, optional) - NEW SYSTEM
+        Task.Run(async () =>
+        {
+            using var scope = app.Services.CreateScope();
+            try
+            {
+                var domainDetector = scope.ServiceProvider.GetService<Application.AI.Utilities.DomainDetector>();
+                if (domainDetector != null)
+                {
+                    await domainDetector.InitializeAsync();
+                    var domainCount = (await domainDetector.GetAllDomainsAsync()).Count;
+                    var categories = await domainDetector.GetCategoriesAsync();
+                    Console.WriteLine($"? Domain detector initialized ({domainCount} domain(s) in {categories.Count} categor{(categories.Count == 1 ? "y" : "ies")})");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"??  Warning: Failed to initialize domain detector: {ex.Message}");
+                Console.WriteLine("   Domain management will not be available");
             }
         });
 

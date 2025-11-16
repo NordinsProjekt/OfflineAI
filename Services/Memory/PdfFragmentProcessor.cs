@@ -60,7 +60,10 @@ public class PdfFragmentProcessor
         {
             // Encode metadata in the category field
             var category = $"{collectionName} - Chunk {chunk.ChunkIndex + 1}";
-            if (!string.IsNullOrWhiteSpace(chunk.SectionTitle))
+            
+            // Only use section title if it's meaningful (not the default fallback)
+            if (!string.IsNullOrWhiteSpace(chunk.SectionTitle) && 
+                chunk.SectionTitle != "General")
             {
                 category = $"{collectionName} - {chunk.SectionTitle}";
             }

@@ -229,7 +229,7 @@ public class ModelInstancePool : IDisposable
     /// <summary>
     /// Return an instance to the pool (called automatically by PooledInstance.Dispose).
     /// </summary>
-    private void Return(PersistentLlmProcess instance)
+    internal void ReturnInstance(PersistentLlmProcess instance)
     {
         if (_disposed)
         {
@@ -308,32 +308,6 @@ public class ModelInstancePool : IDisposable
         _semaphore?.Dispose();
         
         Console.WriteLine($"[+] Pool disposed");
-    }
-
-    /// <summary>
-    /// Wrapper that automatically returns the instance to the pool when disposed.
-    /// Use with 'using' statement for automatic resource management.
-    /// </summary>
-    public class PooledInstance : IDisposable
-    {
-        public PersistentLlmProcess Process { get; }
-        private readonly ModelInstancePool _pool;
-        private bool _disposed;
-
-        internal PooledInstance(PersistentLlmProcess process, ModelInstancePool pool)
-        {
-            Process = process ?? throw new ArgumentNullException(nameof(process));
-            _pool = pool ?? throw new ArgumentNullException(nameof(pool));
-        }
-
-        public void Dispose()
-        {
-            if (!_disposed)
-            {
-                _pool.Return(Process);
-                _disposed = true;
-            }
-        }
     }
 }
 

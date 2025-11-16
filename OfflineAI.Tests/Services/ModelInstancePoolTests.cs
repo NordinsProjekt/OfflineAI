@@ -355,7 +355,7 @@ public class ModelInstancePoolTests : IDisposable
         await pool.InitializeAsync();
 
         var tasks = new List<Task>();
-        var acquiredInstances = new List<ModelInstancePool.PooledInstance>();
+        var acquiredInstances = new List<PooledInstance>();
         var lockObj = new object();
 
         // Act - Acquire 3 instances concurrently

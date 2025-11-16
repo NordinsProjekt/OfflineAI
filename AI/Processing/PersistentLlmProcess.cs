@@ -158,16 +158,7 @@ public class PersistentLlmProcess : IDisposable
                     
                     // Try different assistant tag formats used by different models
                     // Order matters - check more specific patterns first!
-                    var assistantPatterns = new[]
-                    {
-                        ("<|start_header_id|>assistant<|end_header_id|>", "<|start_header_id|>assistant<|end_header_id|>"),  // Llama 3.2
-                        ("<|assistant|>", "<|assistant|>"),                  // TinyLlama, Phi, etc.
-                        ("<|im_start|>assistant", "<|im_start|>assistant"),  // ChatML format
-                        ("### Assistant:", "### Assistant:"),                // Some instruction-tuned models
-                        ("Assistant:", "Assistant:")                         // Mistral, some Llama (check last to avoid false positives)
-                    };
-                    
-                    foreach (var (pattern, marker) in assistantPatterns)
+                    foreach (var (pattern, marker) in LlmOutputPatterns.AssistantPatterns)
                     {
                         var assistantIndex = fullText.IndexOf(pattern, StringComparison.Ordinal); // Use Ordinal for exact match
                         if (assistantIndex >= 0)
@@ -278,21 +269,7 @@ public class PersistentLlmProcess : IDisposable
         var cleaned = response.Trim();
 
         // Remove trailing special tokens used by different models
-        var endMarkers = new[]
-        {
-            "<|eot_id|>",      // Llama 3.2 end of turn
-            "<|start_header_id|>", // Llama 3.2 next turn
-            "<|",              // Generic start of special token
-            "<|end|>",         // TinyLlama, Phi
-            "<|im_end|>",      // ChatML format
-            "</s>",            // Llama EOS token
-            "<|endoftext|>",   // GPT-style
-            "<|user|>",        // Start of next user turn
-            "User:",           // Start of next user turn
-            "###"              // Some instruction formats
-        };
-
-        foreach (var marker in endMarkers)
+        foreach (var marker in LlmOutputPatterns.EndMarkers)
         {
             var endTagIndex = cleaned.IndexOf(marker, StringComparison.Ordinal);
             if (endTagIndex >= 0)

@@ -282,32 +282,60 @@ public static class DocumentChunker
         // Common heading patterns
         var headingPatterns = new[]
         {
-            @"^#{1,6}\s+(.+)$",                    // Markdown headings
-            @"^([A-Z][A-Za-z\s]+):$",              // Title Case with colon
-            @"^(\d+\.\s+[A-Z].+)$",                // 1. Numbered headings
-            @"^([A-Z][A-Z\s]+)$",                  // ALL CAPS headings
-            @"^(Chapter\s+\d+.*)$",                // Chapter N
-            @"^(Section\s+\d+.*)$"                 // Section N
+            @"^#{1,6}\s+(.+)$",                           // Markdown headings
+            @"^([A-Z][A-Za-z\s]{2,40}):$",               // Title Case with colon (2-40 chars)
+            @"^(\d+\.\s+[A-Z].+)$",                      // 1. Numbered headings
+            @"^([A-Z][A-Z\s]{4,50})$",                   // ALL CAPS headings (4-50 chars)
+            @"^(Chapter\s+\d+.*)$",                      // Chapter N
+            @"^(Section\s+\d+.*)$",                      // Section N
+            @"^([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)$",  // Title Case multi-word (e.g., "Monster Attack")
+            @"^---\s*Page\s+\d+\s*---$"                  // Page markers (ignore these)
         };
         
         var lines = text.Split('\n');
-        var currentTitle = "Introduction";
+        string? currentTitle = null; // Changed from "Introduction" to null
         var currentContent = new StringBuilder();
         
         foreach (var line in lines)
         {
             var trimmedLine = line.Trim();
+            
+            // Skip empty lines
+            if (string.IsNullOrWhiteSpace(trimmedLine))
+            {
+                currentContent.AppendLine(line);
+                continue;
+            }
+            
             var isHeading = false;
+            
+            // Skip page markers
+            if (Regex.IsMatch(trimmedLine, @"^---\s*Page\s+\d+\s*---$"))
+            {
+                currentContent.AppendLine(line);
+                continue;
+            }
             
             foreach (var pattern in headingPatterns)
             {
                 var match = Regex.Match(trimmedLine, pattern, RegexOptions.Multiline);
                 if (match.Success)
                 {
+                    // Additional validation for ALL CAPS pattern
+                    if (pattern.Contains("[A-Z][A-Z\\s]+"))
+                    {
+                        // Must be at least 2 words and not too long (likely a heading, not a sentence)
+                        var words = trimmedLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        if (words.Length < 2 || trimmedLine.Length > 60)
+                        {
+                            continue;
+                        }
+                    }
+                    
                     // Save previous section
                     if (currentContent.Length > 0)
                     {
-                        sections.Add((currentTitle, currentContent.ToString().Trim()));
+                        sections.Add((currentTitle ?? "General", currentContent.ToString().Trim()));
                         currentContent.Clear();
                     }
                     
@@ -326,7 +354,7 @@ public static class DocumentChunker
         // Add final section
         if (currentContent.Length > 0)
         {
-            sections.Add((currentTitle, currentContent.ToString().Trim()));
+            sections.Add((currentTitle ?? "General", currentContent.ToString().Trim()));
         }
         
         return sections;
