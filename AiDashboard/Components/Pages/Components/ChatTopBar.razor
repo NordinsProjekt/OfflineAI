@@ -1,9 +1,23 @@
 @inject DashboardState Dashboard
+@implements IDisposable
 
 <div class="oa-topbar">
     <div class="oa-badges">
         <span class="oa-badge green">RAG: @(Dashboard.SettingsService.RagMode ? "ON" : "OFF")</span>
         <span class="oa-badge blue">Model: @Dashboard.ModelService.CurrentModel</span>
-        <span class="oa-badge gray">Table: @Dashboard.ActiveTable</span>
     </div>
 </div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        // Subscribe to state changes so UI updates when model/RAG changes
+        Dashboard.OnChange += StateHasChanged;
+    }
+
+    public void Dispose()
+    {
+        // Unsubscribe to prevent memory leaks
+        Dashboard.OnChange -= StateHasChanged;
+    }
+}
