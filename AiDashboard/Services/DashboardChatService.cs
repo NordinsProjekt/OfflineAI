@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Application.AI.Chat;
 using Application.AI.Extensions;
 using Application.AI.Pooling;
+using Application.AI.Utilities;
 using Services.Configuration;
 using Services.Interfaces;
 using Services.UI;
@@ -18,16 +19,19 @@ namespace AiDashboard.Services
         private ILlmMemory _memory;
         private readonly ILlmMemory _conversationMemory;
         private readonly ModelInstancePool _modelPool;
+        private readonly GameDetector? _gameDetector;
         private bool _disposed;
 
         public DashboardChatService(
             ILlmMemory memory,
             ILlmMemory conversationMemory,
-            ModelInstancePool modelPool)
+            ModelInstancePool modelPool,
+            GameDetector? gameDetector = null)
         {
             _memory = memory ?? throw new ArgumentNullException(nameof(memory));
             _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
             _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
+            _gameDetector = gameDetector;
         }
 
         /// <summary>
@@ -99,6 +103,7 @@ namespace AiDashboard.Services
                     _conversationMemory,
                     _modelPool,
                     generationSettings,
+                    _gameDetector,
                     debugMode: debugMode,
                     enableRag: ragMode,
                     showPerformanceMetrics: showPerformanceMetrics);

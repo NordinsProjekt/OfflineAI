@@ -180,10 +180,10 @@ public class VectorMemory : ISearchableMemory
         // Apply game filtering if specified
         if (gameFilter != null && gameFilter.Count > 0)
         {
-            Console.WriteLine($"[*] Filtering by game(s): {string.Join(", ", gameFilter.Select(GameDetector.GetDisplayName))}");
+            Console.WriteLine($"[*] Filtering by game(s): {string.Join(", ", gameFilter)}");
             
             allScores = allScores
-                .Where(x => GameDetector.MatchesGame(x.Entry.Fragment.Category, gameFilter))
+                .Where(x => MatchesAnyGame(x.Entry.Fragment.Category, gameFilter))
                 .ToList();
                 
             if (allScores.Count == 0)
@@ -241,6 +241,31 @@ public class VectorMemory : ISearchableMemory
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Check if a category matches any of the game filters.
+    /// Simple string contains matching.
+    /// </summary>
+    private static bool MatchesAnyGame(string category, List<string> gameFilter)
+    {
+        if (string.IsNullOrWhiteSpace(category))
+            return false;
+
+        var lowerCategory = category.ToLowerInvariant();
+
+        foreach (var gameId in gameFilter)
+        {
+            // Check if game ID (e.g., "gloomhaven") matches category
+            var gameIdWithSpaces = gameId.Replace("-", " ");
+            
+            if (lowerCategory.Contains(gameIdWithSpaces, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

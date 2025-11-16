@@ -94,6 +94,9 @@ public class Program
             {
                 builder.Services.AddDapperVectorMemoryRepository(dbConnectionString, dbTableName);
                 
+                // Register GameRepository for game detection
+                builder.Services.AddDapperGameRepository(dbConnectionString);
+                
                 // Build a temporary service provider to check if services are registered
                 using var tempProvider = builder.Services.BuildServiceProvider();
                 repositoryInstance = tempProvider.GetService<IVectorMemoryRepository>();
@@ -131,6 +134,9 @@ public class Program
             Console.WriteLine("??  Database not configured");
             Console.WriteLine("   Table management and collection loading disabled");
         }
+
+        // Register GameDetector (requires GameRepository)
+        builder.Services.AddSingleton<Application.AI.Utilities.GameDetector>();
 
         // Register empty VectorMemory as ILlmMemory for knowledge base (no database dependency)
         builder.Services.AddSingleton<ILlmMemory>(sp =>
@@ -221,8 +227,11 @@ public class Program
                     throw new InvalidOperationException("ModelInstancePool not available - check LLM configuration");
                 }
 
+                // Get GameDetector for game filtering
+                var gameDetector = sp.GetService<Application.AI.Utilities.GameDetector>();
+
                 Console.WriteLine("? Chat service initialized");
-                return new DashboardChatService(vectorMemory, conversationMemory, modelPool);
+                return new DashboardChatService(vectorMemory, conversationMemory, modelPool, gameDetector);
             }
             catch (Exception ex)
             {
@@ -329,6 +338,27 @@ public class Program
                 }
             });
         }
+
+        // Initialize GameDetector on startup (non-blocking, optional)
+        Task.Run(async () =>
+        {
+            using var scope = app.Services.CreateScope();
+            try
+            {
+                var gameDetector = scope.ServiceProvider.GetService<Application.AI.Utilities.GameDetector>();
+                if (gameDetector != null)
+                {
+                    await gameDetector.InitializeAsync();
+                    var gameCount = (await gameDetector.GetAllGamesAsync()).Count;
+                    Console.WriteLine($"? Game detector initialized ({gameCount} game(s) registered)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"??  Warning: Failed to initialize game detector: {ex.Message}");
+                Console.WriteLine("   Game management will not be available");
+            }
+        });
 
         Console.WriteLine("\n?? AiDashboard starting...\n");
 

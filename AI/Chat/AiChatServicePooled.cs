@@ -1,6 +1,7 @@
 ﻿using System.Text;
 using System.Diagnostics;
 using Application.AI.Models;
+using Application.AI.Utilities;
 using Entities;
 using Services.Configuration;
 using Services.Interfaces;
@@ -19,6 +20,7 @@ public class AiChatServicePooled(
     ILlmMemory conversationMemory,
     Application.AI.Pooling.ModelInstancePool modelPool,
     GenerationSettings generationSettings,
+    GameDetector? gameDetector = null,
     bool debugMode = false,
     bool enableRag = true,
     bool showPerformanceMetrics = false)
@@ -27,6 +29,7 @@ public class AiChatServicePooled(
     private readonly ILlmMemory _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
     private readonly Application.AI.Pooling.ModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
     private readonly GenerationSettings _generationSettings = generationSettings ?? throw new ArgumentNullException(nameof(generationSettings));
+    private readonly GameDetector? _gameDetector = gameDetector;
     private readonly bool _enableRag = enableRag;
     private readonly bool _debugMode = debugMode;
     private readonly bool _showPerformanceMetrics = showPerformanceMetrics;
@@ -163,16 +166,24 @@ public class AiChatServicePooled(
     private async Task<string?> BuildSystemPromptAsync(string question)
     {
         // Simplified prompt optimized for tiny models
-        // Removed verbose instructions that confuse small models
         const string basePrompt = "Answer the question using only the information below.\n";
 
-        // Detect games mentioned in the query
-        var detectedGames = GameDetector.DetectGames(question);
+        // Detect games mentioned in the query (if GameDetector is available)
+        List<string> detectedGames = new();
         
-        if (detectedGames.Count > 0)
+        if (_gameDetector != null)
         {
-            var gameNames = string.Join(", ", detectedGames.Select(GameDetector.GetDisplayName));
-            DisplayService.WriteLine($"[*] Detected game(s): {gameNames}");
+            detectedGames = await _gameDetector.DetectGamesAsync(question);
+            
+            if (detectedGames.Count > 0)
+            {
+                var gameNames = new List<string>();
+                foreach (var gameId in detectedGames)
+                {
+                    gameNames.Add(await _gameDetector.GetDisplayNameAsync(gameId));
+                }
+                DisplayService.WriteLine($"[*] Detected game(s): {string.Join(", ", gameNames)}");
+            }
         }
 
         // IMPORTANT: Do NOT remove game names from the query before database search
@@ -182,33 +193,36 @@ public class AiChatServicePooled(
         
         DisplayService.WriteLine($"[*] Searching database with: '{queryForSearch}'");
 
-        // Use vector search if available with reduced topK
+        // Use vector search if available
         string? relevantMemory = null;
         if (_memory is ISearchableMemory searchableMemory)
         {
             relevantMemory = await searchableMemory.SearchRelevantMemoryAsync(
-                queryForSearch,  // Use ORIGINAL query with game names for better matching
-                topK: TopKResults,  // Reduced from 5 to 3
-                minRelevanceScore: 0.3,  // Lowered from 0.5 to 0.3 for better MPNet results
+                queryForSearch,
+                topK: TopKResults,
+                minRelevanceScore: 0.3,
                 gameFilter: detectedGames.Count > 0 ? detectedGames : null,
-                maxCharsPerFragment: MaxFragmentChars,  // Limit individual fragment size
-                includeMetadata: false);  // Don't include [Relevance] and [Category] - confuses LLM
+                maxCharsPerFragment: MaxFragmentChars,
+                includeMetadata: false);
         }
         
         if (relevantMemory == null)
         {
-            // If we detected a game but found no results, provide helpful message
-            if (detectedGames.Count > 0)
+            // If we detected a game but found no results
+            if (_gameDetector != null && detectedGames.Count > 0)
             {
-                var gameNames = string.Join(", ", detectedGames.Select(GameDetector.GetDisplayName));
-                return $"NO_RESULTS_FOR_GAME:{gameNames}";
+                var gameNames = new List<string>();
+                foreach (var gameId in detectedGames)
+                {
+                    gameNames.Add(await _gameDetector.GetDisplayNameAsync(gameId));
+                }
+                return $"NO_RESULTS_FOR_GAME:{string.Join(", ", gameNames)}";
             }
             return null;
         }
 
-        // AFTER getting results from database, we can clean the query for better LLM understanding
-        // But we keep the original game context in the results
-        var cleanedQuery = RemoveGameNamesFromQuery(question, detectedGames);
+        // AFTER getting results, clean the query for LLM
+        var cleanedQuery = await RemoveGameNamesFromQueryAsync(question, detectedGames);
         if (cleanedQuery != question)
         {
             DisplayService.WriteLine($"[*] Query cleanup for LLM: '{question}' -> '{cleanedQuery}'");
@@ -225,8 +239,7 @@ public class AiChatServicePooled(
         // Show debug output if enabled
         DisplayService.ShowSystemPromptDebug(relevantMemory, _debugMode);
 
-        // Simple, direct prompt format for tiny models
-        // No fancy formatting that confuses small LLMs
+        // Simple prompt format
         var prompt = new StringBuilder();
         prompt.Append(basePrompt);
         prompt.AppendLine("\nInformation:");
@@ -247,16 +260,16 @@ public class AiChatServicePooled(
     /// Removes detected game names from the query to improve semantic matching.
     /// Example: "how to win in Munchkin Panic" -> "how to win"
     /// </summary>
-    private static string RemoveGameNamesFromQuery(string query, List<string> detectedGames)
+    private async Task<string> RemoveGameNamesFromQueryAsync(string query, List<string> detectedGames)
     {
-        if (detectedGames.Count == 0)
+        if (detectedGames.Count == 0 || _gameDetector == null)
             return query;
 
         var cleanedQuery = query;
         
         foreach (var gameId in detectedGames)
         {
-            var gameName = GameDetector.GetDisplayName(gameId);
+            var gameName = await _gameDetector.GetDisplayNameAsync(gameId);
             
             // Remove exact game name (case-insensitive)
             cleanedQuery = System.Text.RegularExpressions.Regex.Replace(
@@ -265,7 +278,7 @@ public class AiChatServicePooled(
                 "",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             
-            // Remove common game name variations (with dashes, spaces)
+            // Remove game ID variations
             cleanedQuery = System.Text.RegularExpressions.Regex.Replace(
                 cleanedQuery,
                 $@"\b{System.Text.RegularExpressions.Regex.Escape(gameId)}\b",
@@ -273,7 +286,7 @@ public class AiChatServicePooled(
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         }
         
-        // Remove common connecting words that may be left over
+        // Remove common connecting words
         cleanedQuery = System.Text.RegularExpressions.Regex.Replace(
             cleanedQuery, 
             @"\b(in|for|about|regarding|concerning)\b",
@@ -282,8 +295,6 @@ public class AiChatServicePooled(
         
         // Clean up extra whitespace
         cleanedQuery = System.Text.RegularExpressions.Regex.Replace(cleanedQuery, @"\s+", " ").Trim();
-        
-        // Remove leading/trailing punctuation
         cleanedQuery = cleanedQuery.Trim(' ', ',', '.', '?', '!', '"', '\'');
         
         return string.IsNullOrWhiteSpace(cleanedQuery) ? query : cleanedQuery;

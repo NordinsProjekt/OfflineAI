@@ -22,10 +22,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.10" />
     <!-- Use older, more compatible DirectML version -->
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.66.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Model\" />
+    <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
   </ItemGroup>
 
 </Project>

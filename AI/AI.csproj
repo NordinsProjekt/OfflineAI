@@ -8,6 +8,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Content Remove="C:\Users\belfe\.nuget\packages\berttokenizers\1.2.0\contentFiles\any\net6.0\Vocabularies\base_cased.txt" />
+    <Content Remove="C:\Users\belfe\.nuget\packages\berttokenizers\1.2.0\contentFiles\any\net6.0\Vocabularies\base_cased_german.txt" />
+    <Content Remove="C:\Users\belfe\.nuget\packages\berttokenizers\1.2.0\contentFiles\any\net6.0\Vocabularies\base_cased_large.txt" />
+    <Content Remove="C:\Users\belfe\.nuget\packages\berttokenizers\1.2.0\contentFiles\any\net6.0\Vocabularies\base_cased_multilingual.txt" />
+    <Content Remove="C:\Users\belfe\.nuget\packages\berttokenizers\1.2.0\contentFiles\any\net6.0\Vocabularies\base_uncased.txt" />
+    <Content Remove="C:\Users\belfe\.nuget\packages\berttokenizers\1.2.0\contentFiles\any\net6.0\Vocabularies\base_uncased_large.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Entities\Entities.csproj" />
     <ProjectReference Include="..\Factories\Factories.csproj" />
     <ProjectReference Include="..\Services\Services.csproj" />
