@@ -92,8 +92,10 @@ public class PersistentLlmProcess : IDisposable
             var fullPrompt = $"{systemPrompt}\n\nUser: {userQuestion}\nAssistant:";
 
             // Create process for this query
-            var processInfo = LlmFactory.CreateForLlama(_llmPath, _modelPath)
-                .SetPrompt(fullPrompt);
+            var processInfo = LlmFactory.CreateForLlama(_llmPath, _modelPath);
+            
+            // Add the prompt directly to arguments
+            processInfo.Arguments += $" -p \"{fullPrompt}\"";
             
             // Apply generation parameters
             processInfo.Arguments += $" -n {maxTokens}";

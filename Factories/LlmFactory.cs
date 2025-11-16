@@ -26,22 +26,4 @@ public static class LlmFactory
             .SetLlmCli(cliPath)
             .SetModel(modelPath);
     }
-
-    /// <summary>
-    /// Creates a ProcessStartInfo configured for board game question-answering with optimized sampling parameters.
-    /// </summary>
-    /// <param name="cliPath">Path to the llama-cli executable</param>
-    /// <param name="modelPath">Path to the GGUF model file</param>
-    /// <param name="maxTokens">Maximum tokens to generate (default: 200)</param>
-    /// <param name="temperature">Temperature for sampling (default: 0.4)</param>
-    /// <returns>Fully configured ProcessStartInfo for board game scenarios</returns>
-    public static ProcessStartInfo CreateForBoardGame(
-        string cliPath, 
-        string modelPath,
-        int maxTokens = 200,
-        float temperature = 0.4f)
-    {
-        return CreateForLlama(cliPath, modelPath)
-            .SetBoardGameSampling(maxTokens: maxTokens, temperature: temperature);
-    }
 }

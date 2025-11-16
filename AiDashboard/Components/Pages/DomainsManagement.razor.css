@@ -1,6 +1,6 @@
-/* Game Management Page Styles */
+/* Knowledge Domains Page Styles */
 
-.game-management-container {
+.domain-management-container {
     max-width: 1400px;
     margin: 0 auto;
     padding: 2rem;
@@ -22,6 +22,33 @@
     margin: 0;
     color: #666;
     font-size: 1rem;
+}
+
+/* Category Filter */
+.category-filter {
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.category-filter label {
+    font-weight: 600;
+    color: #333;
+}
+
+.form-select {
+    padding: 0.5rem 1rem;
+    border: 2px solid #e0e0e0;
+    border-radius: 6px;
+    font-size: 1rem;
+    min-width: 200px;
+    transition: border-color 0.2s;
+}
+
+.form-select:focus {
+    outline: none;
+    border-color: #667eea;
 }
 
 /* Alert Messages */
@@ -66,9 +93,9 @@
 }
 
 /* Panel Styles */
-.game-list-panel,
-.game-form-panel,
-.variants-panel {
+.domain-list-panel,
+.domain-form-panel,
+.keywords-panel {
     background: white;
     border-radius: 12px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -90,14 +117,47 @@
     font-weight: 600;
 }
 
-/* Game List */
-.game-list {
+/* Category Groups */
+.category-group {
+    margin-bottom: 1.5rem;
+}
+
+.category-header {
+    background: #f8f9fa;
+    padding: 0.75rem 1rem;
+    border-bottom: 2px solid #e0e0e0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    color: #555;
+}
+
+.category-header h4 {
+    margin: 0;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.count-badge {
+    background: #667eea;
+    color: white;
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+/* Domain List */
+.domain-list {
     max-height: 600px;
     overflow-y: auto;
     padding: 1rem;
 }
 
-.game-card {
+.domain-card {
     background: #f8f9fa;
     border: 2px solid #e0e0e0;
     border-radius: 8px;
@@ -110,25 +170,36 @@
     align-items: center;
 }
 
-.game-card:hover {
+.domain-card:hover {
     border-color: #667eea;
     background: #f0f4ff;
     transform: translateX(4px);
 }
 
-.game-card.selected {
+.domain-card.selected {
     border-color: #667eea;
     background: linear-gradient(to right, #f0f4ff, #fef5ff);
     box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
 }
 
-.game-card-header h4 {
+.domain-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex: 1;
+}
+
+.category-icon {
+    font-size: 1.5rem;
+}
+
+.domain-info h4 {
     margin: 0 0 0.25rem 0;
     color: #333;
     font-size: 1.1rem;
 }
 
-.game-id {
+.domain-id {
     font-size: 0.85rem;
     color: #666;
     font-family: 'Courier New', monospace;
@@ -137,7 +208,7 @@
     border-radius: 4px;
 }
 
-.game-card-actions {
+.domain-card-actions {
     display: flex;
     gap: 0.5rem;
 }
@@ -222,7 +293,7 @@
 }
 
 /* Form Styles */
-.game-form-panel {
+.domain-form-panel {
     padding: 1.5rem;
 }
 
@@ -274,6 +345,10 @@ textarea.form-control {
     margin-top: 0.25rem;
     font-size: 0.85rem;
     color: #666;
+}
+
+.mt-2 {
+    margin-top: 0.5rem;
 }
 
 /* Buttons */
@@ -351,27 +426,27 @@ textarea.form-control {
     background: rgba(255, 255, 255, 0.1);
 }
 
-/* Variants Panel */
-.variants-panel {
+/* Keywords Panel */
+.keywords-panel {
     grid-column: 1 / -1;
     padding: 1.5rem;
 }
 
-.variant-count {
+.keyword-count {
     background: rgba(255, 255, 255, 0.2);
     padding: 0.25rem 0.75rem;
     border-radius: 20px;
     font-size: 0.9rem;
 }
 
-.variant-list {
+.keyword-list {
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem;
     padding-top: 1rem;
 }
 
-.variant-chip {
+.keyword-chip {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     padding: 0.5rem 1rem;
@@ -383,7 +458,7 @@ textarea.form-control {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.variant-text {
+.keyword-text {
     font-family: 'Courier New', monospace;
 }
 
@@ -400,20 +475,20 @@ textarea.form-control {
 }
 
 /* Scrollbar Styling */
-.game-list::-webkit-scrollbar {
+.domain-list::-webkit-scrollbar {
     width: 8px;
 }
 
-.game-list::-webkit-scrollbar-track {
+.domain-list::-webkit-scrollbar-track {
     background: #f1f1f1;
     border-radius: 4px;
 }
 
-.game-list::-webkit-scrollbar-thumb {
+.domain-list::-webkit-scrollbar-thumb {
     background: #667eea;
     border-radius: 4px;
 }
 
-.game-list::-webkit-scrollbar-thumb:hover {
+.domain-list::-webkit-scrollbar-thumb:hover {
     background: #764ba2;
 }

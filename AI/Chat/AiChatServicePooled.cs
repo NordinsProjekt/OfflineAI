@@ -20,7 +20,6 @@ public class AiChatServicePooled(
     ILlmMemory conversationMemory,
     Application.AI.Pooling.ModelInstancePool modelPool,
     GenerationSettings generationSettings,
-    GameDetector? gameDetector = null,
     bool debugMode = false,
     bool enableRag = true,
     bool showPerformanceMetrics = false,
@@ -30,7 +29,6 @@ public class AiChatServicePooled(
     private readonly ILlmMemory _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
     private readonly Application.AI.Pooling.ModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
     private readonly GenerationSettings _generationSettings = generationSettings ?? throw new ArgumentNullException(nameof(generationSettings));
-    private readonly GameDetector? _gameDetector = gameDetector;
     private readonly DomainDetector? _domainDetector = domainDetector;
     private readonly bool _enableRag = enableRag;
     private readonly bool _debugMode = debugMode;
@@ -38,7 +36,6 @@ public class AiChatServicePooled(
 
     // Performance tuning constants for TinyLlama
     private const int MaxContextChars = 1500;        // Reduced from ~2771 to prevent overload
-    private const int MaxConversationChars = 500;   // Limit conversation history
     private const int MaxFragmentChars = 400;       // Truncate individual fragments
     private const int TopKResults = 3;              // Reduced from 5
 
@@ -55,7 +52,7 @@ public class AiChatServicePooled(
         ArgumentException.ThrowIfNullOrWhiteSpace(question);
 
         // Display generation settings being used for this query
-        DisplayService.ShowGenerationSettings(_generationSettings, _enableRag);
+        DisplayService.ShowGenerationSettings(_generationSettings, enableRag);
         DisplayService.WriteLine($"[*] User question: \"{question}\"");
 
         // Store user question in conversation history
@@ -77,11 +74,11 @@ public class AiChatServicePooled(
             }
             
             // Handle special case where game was detected but no results found
-            if (ragResult.StartsWith("NO_RESULTS_FOR_GAME:"))
+            if (ragResult.StartsWith("NO_RESULTS_FOR_DOMAIN:"))
             {
-                var gameName = ragResult.Substring("NO_RESULTS_FOR_GAME:".Length);
-                return $"I don't have rules for {gameName} loaded in my knowledge base. " +
-                       $"Please add the rulebook for {gameName} to the inbox folder, or ask about a different game.";
+                var domainName = ragResult.Substring("NO_RESULTS_FOR_DOMAIN:".Length);
+                return $"I don't have information about {domainName} loaded in my knowledge base. " +
+                       $"Please add documents for {domainName} to the inbox folder, or ask about a different topic.";
             }
             
             systemPromptResult = ragResult;
@@ -170,7 +167,7 @@ public class AiChatServicePooled(
         // Simplified prompt optimized for tiny models
         const string basePrompt = "Answer the question using only the information below.\n";
 
-        // Detect domains mentioned in the query (NEW SYSTEM - prioritize if available)
+        // Detect domains mentioned in the query
         List<string> detectedDomains = new();
         
         if (_domainDetector != null)
@@ -185,22 +182,6 @@ public class AiChatServicePooled(
                     domainNames.Add(await _domainDetector.GetDisplayNameAsync(domainId));
                 }
                 DisplayService.WriteLine($"[*] Detected domain(s): {string.Join(", ", domainNames)}");
-            }
-        }
-        else if (_gameDetector != null)
-        {
-            // Fallback to GameDetector if DomainDetector not available (LEGACY)
-            var detectedGames = await _gameDetector.DetectGamesAsync(question);
-            detectedDomains = detectedGames; // Use same list for compatibility
-            
-            if (detectedGames.Count > 0)
-            {
-                var gameNames = new List<string>();
-                foreach (var gameId in detectedGames)
-                {
-                    gameNames.Add(await _gameDetector.GetDisplayNameAsync(gameId));
-                }
-                DisplayService.WriteLine($"[*] Detected game(s): {string.Join(", ", gameNames)}");
             }
         }
 
@@ -227,26 +208,14 @@ public class AiChatServicePooled(
         if (relevantMemory == null)
         {
             // If we detected a domain but found no results
-            if (detectedDomains.Count > 0)
+            if (detectedDomains.Count > 0 && _domainDetector != null)
             {
                 var domainNames = new List<string>();
-                
-                if (_domainDetector != null)
+                foreach (var domainId in detectedDomains)
                 {
-                    foreach (var domainId in detectedDomains)
-                    {
-                        domainNames.Add(await _domainDetector.GetDisplayNameAsync(domainId));
-                    }
-                    return $"NO_RESULTS_FOR_DOMAIN:{string.Join(", ", domainNames)}";
+                    domainNames.Add(await _domainDetector.GetDisplayNameAsync(domainId));
                 }
-                else if (_gameDetector != null)
-                {
-                    foreach (var gameId in detectedDomains)
-                    {
-                        domainNames.Add(await _gameDetector.GetDisplayNameAsync(gameId));
-                    }
-                    return $"NO_RESULTS_FOR_GAME:{string.Join(", ", domainNames)}";
-                }
+                return $"NO_RESULTS_FOR_DOMAIN:{string.Join(", ", domainNames)}";
             }
             return null;
         }
@@ -266,7 +235,7 @@ public class AiChatServicePooled(
         }
 
         // Show debug output if enabled
-        DisplayService.ShowSystemPromptDebug(relevantMemory, _debugMode);
+        DisplayService.ShowSystemPromptDebug(relevantMemory, debugMode);
 
         // Simple prompt format - use the ORIGINAL question with domain name intact
         var prompt = new StringBuilder();

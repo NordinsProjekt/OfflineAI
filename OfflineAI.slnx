@@ -12,14 +12,7 @@
   </Folder>
   <Folder Name="/4. Presentation/">
     <Project Path="AiDashboard/AiDashboard.csproj" Id="8786bc8e-07bd-4bb8-9bd3-3fd5cefbdf5b" />
-    <Project Path="OfflineAI/OfflineAI.csproj" />
-    <Project Path="RAGTesting/RAGTesting.csproj" />
   </Folder>
-  <Folder Name="/98. Benchmarks/">
-    <Project Path="BenchmarkSuite1/MemoryLibraryBenchmarks.csproj" />
-  </Folder>
-  <Folder Name="/99. UnitTests/">
-    <Project Path="AiDashboardIntregrationTests/AiDashboardIntregrationTests.csproj" Id="7e3d125d-d4ad-4007-ae5d-2b11a6b292d2" />
-    <Project Path="OfflineAI.Tests/OfflineAI.Tests.csproj" />
-  </Folder>
+  <Folder Name="/98. Benchmarks/" />
+  <Folder Name="/99. UnitTests/" />
 </Solution>

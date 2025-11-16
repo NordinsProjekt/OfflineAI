@@ -19,7 +19,6 @@ namespace AiDashboard.Services
         private ILlmMemory _memory;
         private readonly ILlmMemory _conversationMemory;
         private readonly ModelInstancePool _modelPool;
-        private readonly GameDetector? _gameDetector;
         private readonly DomainDetector? _domainDetector;
         private bool _disposed;
 
@@ -27,13 +26,11 @@ namespace AiDashboard.Services
             ILlmMemory memory,
             ILlmMemory conversationMemory,
             ModelInstancePool modelPool,
-            GameDetector? gameDetector = null,
             DomainDetector? domainDetector = null)
         {
             _memory = memory ?? throw new ArgumentNullException(nameof(memory));
             _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
             _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
-            _gameDetector = gameDetector;
             _domainDetector = domainDetector;
         }
 
@@ -106,7 +103,6 @@ namespace AiDashboard.Services
                     _conversationMemory,
                     _modelPool,
                     generationSettings,
-                    _gameDetector,
                     debugMode: debugMode,
                     enableRag: ragMode,
                     showPerformanceMetrics: showPerformanceMetrics,
