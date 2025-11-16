@@ -1,8 +1,6 @@
 @inject DashboardState Dashboard
 
-<section class="oa-card">
-    <div class="oa-card-title">RAG Knowledge Base</div>
-    
+<CollapsibleSection SectionKey="knowledge" Title="RAG Knowledge Base">
     @if (!string.IsNullOrWhiteSpace(Dashboard.StatusMessage))
     {
         <div class="oa-status-message">@Dashboard.StatusMessage</div>
@@ -12,4 +10,4 @@
         Select a collection in the Collections section to use for RAG queries.
         The active collection is automatically loaded.
     </div>
-</section>
+</CollapsibleSection>

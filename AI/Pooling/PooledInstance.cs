@@ -8,11 +8,11 @@ namespace Application.AI.Pooling;
 /// </summary>
 public class PooledInstance : IDisposable
 {
-    public PersistentLlmProcess Process { get; }
-    private readonly ModelInstancePool _pool;
+    public IPersistentLlmProcess Process { get; }
+    private readonly IModelInstancePool _pool;
     private bool _disposed;
 
-    internal PooledInstance(PersistentLlmProcess process, ModelInstancePool pool)
+    public PooledInstance(IPersistentLlmProcess process, IModelInstancePool pool)
     {
         Process = process ?? throw new ArgumentNullException(nameof(process));
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));
@@ -22,7 +22,10 @@ public class PooledInstance : IDisposable
     {
         if (!_disposed)
         {
-            _pool.ReturnInstance(Process);
+            if (Process is PersistentLlmProcess persistentProcess && _pool is ModelInstancePool concretePool)
+            {
+                concretePool.ReturnInstance(persistentProcess);
+            }
             _disposed = true;
         }
     }

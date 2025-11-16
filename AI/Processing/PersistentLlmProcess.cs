@@ -12,7 +12,7 @@ namespace Application.AI.Processing;
 /// NOTE: This is a simplified implementation. For production use with llama-cli interactive mode,
 /// you may need to use llama.cpp server mode instead (--server flag) with HTTP API.
 /// </summary>
-public class PersistentLlmProcess : IDisposable
+public class PersistentLlmProcess : IPersistentLlmProcess
 {
     private readonly string _llmPath;
     private readonly string _modelPath;

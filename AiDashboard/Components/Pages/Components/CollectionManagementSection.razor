@@ -2,9 +2,7 @@
 @inject IJSRuntime JSRuntime
 @implements IDisposable
 
-<section class="oa-card">
-    <div class="oa-card-title">Collections</div>
-    
+<CollapsibleSection SectionKey="collection" Title="Collections">
     <div class="oa-field">
         <label>Active Collection</label>
         @if (Dashboard.CollectionService?.AvailableCollections.Any() == true)
@@ -66,7 +64,7 @@
             </div>
         }
     }
-</section>
+</CollapsibleSection>
 
 @code {
     private string? selectedCollection;
@@ -75,16 +73,23 @@
 
     protected override async Task OnInitializedAsync()
     {
-        Dashboard.OnChange += StateHasChanged;
-        await InvokeAsync(async () => await RefreshCollections());
+        // Use InvokeAsync for thread-safe state updates
+        Dashboard.OnChange += HandleStateChanged;
+        
+        await RefreshCollections();
         
         // Set initial selection to current collection name
         selectedCollection = Dashboard.CollectionService?.CurrentCollection;
     }
 
+    private void HandleStateChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
     public void Dispose()
     {
-        Dashboard.OnChange -= StateHasChanged;
+        Dashboard.OnChange -= HandleStateChanged;
     }
 
     private async Task OnCollectionChanged()

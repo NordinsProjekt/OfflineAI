@@ -17,6 +17,18 @@ public class DashboardState
 {
     // Change notification for Blazor components
     public event Action? OnChange;
+    
+    // Blazor dispatcher callback for thread-safe UI updates
+    private Func<Action, Task>? _invokeAsync;
+    
+    /// <summary>
+    /// Set the InvokeAsync callback from a Blazor component to enable thread-safe UI updates.
+    /// This should be called once during initialization from a ComponentBase.
+    /// </summary>
+    public void SetInvokeAsync(Func<Action, Task> invokeAsync)
+    {
+        _invokeAsync = invokeAsync;
+    }
 
     // Specialized services
     public GenerationSettingsService SettingsService { get; }
@@ -34,6 +46,34 @@ public class DashboardState
         {
             if (_collapsed == value) return;
             _collapsed = value;
+            NotifyStateChanged();
+        }
+    }
+
+    // Section collapse states
+    private readonly Dictionary<string, bool> _sectionCollapseState = new()
+    {
+        { "modes", true },           // Collapsed by default
+        { "generation", true },      // Collapsed by default
+        { "rag", true },            // Collapsed by default
+        { "model", false },         // Expanded by default (keep visible)
+        { "collection", true },     // Collapsed by default
+        { "domains", true },        // Collapsed by default
+        { "files", true },          // Collapsed by default
+        { "knowledge", true },      // Collapsed by default
+        { "table", true }           // Collapsed by default
+    };
+
+    public bool IsSectionCollapsed(string sectionKey)
+    {
+        return _sectionCollapseState.TryGetValue(sectionKey, out var collapsed) && collapsed;
+    }
+
+    public void ToggleSection(string sectionKey)
+    {
+        if (_sectionCollapseState.ContainsKey(sectionKey))
+        {
+            _sectionCollapseState[sectionKey] = !_sectionCollapseState[sectionKey];
             NotifyStateChanged();
         }
     }
@@ -378,5 +418,17 @@ public class DashboardState
         }
     }
 
-    private void NotifyStateChanged() => OnChange?.Invoke();
+    private void NotifyStateChanged()
+    {
+        if (_invokeAsync != null)
+        {
+            // Run on Blazor dispatcher thread
+            _ = _invokeAsync.Invoke(() => OnChange?.Invoke());
+        }
+        else
+        {
+            // Fallback for synchronous context (may cause issues if called from background thread)
+            OnChange?.Invoke();
+        }
+    }
 }

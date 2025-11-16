@@ -1,21 +1,13 @@
-using System;
-using System.Threading.Tasks;
 using Application.AI.Pooling;
 
 namespace Application.AI.Management
 {
-    public class ModelManager : IModelManager, IDisposable
+    public class ModelManager(IModelInstancePool pool, string llmExecutablePath) : IModelManager, IDisposable
     {
-        private readonly ModelInstancePool _pool;
-        private readonly string _llmExecutablePath;
+        private readonly IModelInstancePool _pool = pool ?? throw new ArgumentNullException(nameof(pool));
+        private readonly string _llmExecutablePath = llmExecutablePath ?? throw new ArgumentNullException(nameof(llmExecutablePath));
         private string? _activeModelPath;
         private bool _disposed;
-
-        public ModelManager(ModelInstancePool pool, string llmExecutablePath)
-        {
-            _pool = pool ?? throw new ArgumentNullException(nameof(pool));
-            _llmExecutablePath = llmExecutablePath ?? throw new ArgumentNullException(nameof(llmExecutablePath));
-        }
 
         public string? GetActiveModelPath() => _activeModelPath;
 

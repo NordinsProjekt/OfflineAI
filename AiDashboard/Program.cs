@@ -136,7 +136,7 @@ public class Program
         }
 
         // Register DomainDetector (requires KnowledgeDomainRepository)
-        builder.Services.AddSingleton<Application.AI.Utilities.DomainDetector>();
+        builder.Services.AddSingleton<Application.AI.Utilities.IDomainDetector, Application.AI.Utilities.DomainDetector>();
 
         // Register memory for knowledge base
         builder.Services.AddSingleton<ILlmMemory>(sp =>
@@ -180,8 +180,8 @@ public class Program
                 }
                 else
                 {
-                    builder.Services.AddSingleton(sp => new ModelInstancePool(llmExe, llmModel, maxInstances: poolMax, timeoutMs: poolTimeout));
-                    builder.Services.AddSingleton<IModelManager>(sp => new ModelManager(sp.GetRequiredService<ModelInstancePool>(), llmExe));
+                    builder.Services.AddSingleton<IModelInstancePool>(sp => new ModelInstancePool(llmExe, llmModel, maxInstances: poolMax, timeoutMs: poolTimeout));
+                    builder.Services.AddSingleton<IModelManager>(sp => new ModelManager(sp.GetRequiredService<IModelInstancePool>(), llmExe));
                     Console.WriteLine($"? Model pool registered (will initialize on first use)");
                     Console.WriteLine($"   LLM: {System.IO.Path.GetFileName(llmExe)}");
                     Console.WriteLine($"   Model: {System.IO.Path.GetFileName(llmModel)}");
@@ -215,14 +215,14 @@ public class Program
                 var conversationMemory = services[1];
                 
                 // Try to get model pool - might not be available
-                var modelPool = sp.GetService<ModelInstancePool>();
+                var modelPool = sp.GetService<IModelInstancePool>();
                 if (modelPool == null)
                 {
                     throw new InvalidOperationException("ModelInstancePool not available - check LLM configuration");
                 }
 
                 // Get DomainDetector for domain filtering
-                var domainDetector = sp.GetService<Application.AI.Utilities.DomainDetector>();
+                var domainDetector = sp.GetService<Application.AI.Utilities.IDomainDetector>();
 
                 Console.WriteLine("? Chat service initialized");
                 return new DashboardChatService(vectorMemory, conversationMemory, modelPool, domainDetector);
@@ -339,7 +339,7 @@ public class Program
             using var scope = app.Services.CreateScope();
             try
             {
-                var domainDetector = scope.ServiceProvider.GetService<Application.AI.Utilities.DomainDetector>();
+                var domainDetector = scope.ServiceProvider.GetService<Application.AI.Utilities.IDomainDetector>();
                 if (domainDetector != null)
                 {
                     await domainDetector.InitializeAsync();

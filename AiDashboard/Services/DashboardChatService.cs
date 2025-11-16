@@ -18,15 +18,15 @@ namespace AiDashboard.Services
     {
         private ILlmMemory _memory;
         private readonly ILlmMemory _conversationMemory;
-        private readonly ModelInstancePool _modelPool;
-        private readonly DomainDetector? _domainDetector;
+        private readonly IModelInstancePool _modelPool;
+        private readonly IDomainDetector? _domainDetector;
         private bool _disposed;
 
         public DashboardChatService(
             ILlmMemory memory,
             ILlmMemory conversationMemory,
-            ModelInstancePool modelPool,
-            DomainDetector? domainDetector = null)
+            IModelInstancePool modelPool,
+            IDomainDetector? domainDetector = null)
         {
             _memory = memory ?? throw new ArgumentNullException(nameof(memory));
             _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));

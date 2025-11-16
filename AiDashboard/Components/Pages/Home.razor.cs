@@ -26,6 +26,9 @@ public partial class Home : IDisposable
 
     protected override void OnInitialized()
     {
+        // Set InvokeAsync callback for thread-safe state updates
+        Dashboard.SetInvokeAsync(action => InvokeAsync(action));
+        
         Dashboard.OnChange += Refresh;
         
         // Format initial message

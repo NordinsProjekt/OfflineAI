@@ -14,5 +14,7 @@
     <Project Path="AiDashboard/AiDashboard.csproj" Id="8786bc8e-07bd-4bb8-9bd3-3fd5cefbdf5b" />
   </Folder>
   <Folder Name="/98. Benchmarks/" />
-  <Folder Name="/99. UnitTests/" />
+  <Folder Name="/99. UnitTests/">
+    <Project Path="Application.AI.Tests/Application.AI.Tests.csproj" Id="4bdb3278-a091-4162-869b-d4f44dbff38f" />
+  </Folder>
 </Solution>

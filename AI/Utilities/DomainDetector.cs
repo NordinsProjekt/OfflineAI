@@ -7,7 +7,7 @@ namespace Application.AI.Utilities;
 /// Detects knowledge domains from user queries to enable domain-specific filtering.
 /// Now database-backed for dynamic domain management.
 /// </summary>
-public class DomainDetector(IKnowledgeDomainRepository domainRepository)
+public class DomainDetector(IKnowledgeDomainRepository domainRepository) : IDomainDetector
 {
     private readonly IKnowledgeDomainRepository _domainRepository = domainRepository ?? throw new ArgumentNullException(nameof(domainRepository));
     

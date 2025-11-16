@@ -1,0 +1,22 @@
+@inject NavigationManager Navigation
+
+<CollapsibleSection SectionKey="domains" Title="Knowledge Domains">
+    <div class="oa-info-text">
+        Manage knowledge domains and search keywords for intelligent query filtering.
+    </div>
+    
+    <button class="oa-btn oa-btn-primary oa-btn-block" @onclick="NavigateToDomains">
+        ?? Manage Domains
+    </button>
+    
+    <div class="oa-note">
+        Add domains to filter RAG queries by specific topics or projects.
+    </div>
+</CollapsibleSection>
+
+@code {
+    private void NavigateToDomains()
+    {
+        Navigation.NavigateTo("/domains");
+    }
+}

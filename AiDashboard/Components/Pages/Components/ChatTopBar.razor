@@ -12,12 +12,17 @@
     protected override void OnInitialized()
     {
         // Subscribe to state changes so UI updates when model/RAG changes
-        Dashboard.OnChange += StateHasChanged;
+        Dashboard.OnChange += HandleStateChanged;
+    }
+
+    private void HandleStateChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
     }
 
     public void Dispose()
     {
         // Unsubscribe to prevent memory leaks
-        Dashboard.OnChange -= StateHasChanged;
+        Dashboard.OnChange -= HandleStateChanged;
     }
 }

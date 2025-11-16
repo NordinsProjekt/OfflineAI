@@ -1,9 +1,7 @@
 @inject DashboardState Dashboard
 @inject IJSRuntime JSRuntime
 
-<section class="oa-card">
-    <div class="oa-card-title">Table Management</div>
-    
+<CollapsibleSection SectionKey="table" Title="Table Management">
     <div class="oa-field">
         <label>Active Table</label>
         <input type="text" class="oa-text" @bind="Dashboard.ActiveTable">
@@ -35,7 +33,7 @@
             </div>
         </div>
     }
-</section>
+</CollapsibleSection>
 
 @code {
     private bool confirmingDelete = false;

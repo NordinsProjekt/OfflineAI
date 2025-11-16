@@ -1,7 +1,6 @@
 @inject DashboardState Dashboard
 
-<section class="oa-card">
-    <div class="oa-card-title">Generation</div>
+<CollapsibleSection SectionKey="generation" Title="Generation">
     <div class="oa-field">
         <label>Temperature</label>
         <input type="number" min="0" max="2" step="0.1" class="oa-text" @bind="Dashboard.SettingsService.Temperature" @bind:event="oninput">
@@ -38,10 +37,9 @@
         <label>Frequency Penalty</label>
         <input type="number" min="0" max="2" step="0.01" class="oa-text" @bind="Dashboard.SettingsService.FrequencyPenalty" @bind:event="oninput">
     </div>
-</section>
+</CollapsibleSection>
 
-<section class="oa-card">
-    <div class="oa-card-title">RAG Settings</div>
+<CollapsibleSection SectionKey="rag" Title="RAG Settings">
     <div class="oa-field">
         <label title="Number of relevant chunks to retrieve (1-5)">Top-K Chunks</label>
         <input type="number" min="1" max="5" class="oa-text" @bind="Dashboard.SettingsService.RagTopK" @bind:event="oninput">
@@ -52,4 +50,4 @@
         <input type="number" min="0.3" max="0.8" step="0.05" class="oa-text" @bind="Dashboard.SettingsService.RagMinRelevanceScore" @bind:event="oninput">
         <small class="oa-hint">Minimum similarity score (0.3=loose, 0.8=strict)</small>
     </div>
-</section>
+</CollapsibleSection>

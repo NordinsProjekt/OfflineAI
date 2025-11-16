@@ -1,7 +1,6 @@
 @inject DashboardState Dashboard
 
-<section class="oa-card">
-    <div class="oa-card-title">Model</div>
+<CollapsibleSection SectionKey="model" Title="Model">
     <div class="oa-field">
         <label>Current Model</label>
         <select class="oa-text" @bind="Dashboard.ModelService.CurrentModel" @bind:after="OnModelChanged">
@@ -12,7 +11,7 @@
         </select>
     </div>
     <div class="oa-note">Model switches automatically when selected.</div>
-</section>
+</CollapsibleSection>
 
 @code {
     private async Task OnModelChanged()

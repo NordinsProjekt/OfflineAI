@@ -1,7 +1,6 @@
 @inject DashboardState Dashboard
 
-<section class="oa-card">
-    <div class="oa-card-title">Modes</div>
+<CollapsibleSection SectionKey="modes" Title="Modes">
     <label class="oa-switch-row">
         <input type="checkbox" @bind="Dashboard.SettingsService.RagMode">
         <span class="oa-switch"></span>
@@ -17,4 +16,4 @@
         <span class="oa-switch"></span>
         <span>Debug Mode</span>
     </label>
-</section>
+</CollapsibleSection>

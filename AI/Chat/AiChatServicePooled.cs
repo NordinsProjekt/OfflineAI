@@ -1,6 +1,7 @@
 ﻿using System.Text;
 using System.Diagnostics;
 using Application.AI.Models;
+using Application.AI.Pooling;
 using Application.AI.Utilities;
 using Entities;
 using Services.Configuration;
@@ -18,18 +19,18 @@ namespace Application.AI.Chat;
 public class AiChatServicePooled(
     ILlmMemory memory,
     ILlmMemory conversationMemory,
-    Application.AI.Pooling.ModelInstancePool modelPool,
+    IModelInstancePool modelPool,
     GenerationSettings generationSettings,
     bool debugMode = false,
     bool enableRag = true,
     bool showPerformanceMetrics = false,
-    DomainDetector? domainDetector = null)
+    IDomainDetector? domainDetector = null)
 {
     private readonly ILlmMemory _memory = memory ?? throw new ArgumentNullException(nameof(memory));
     private readonly ILlmMemory _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
-    private readonly Application.AI.Pooling.ModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
+    private readonly IModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
     private readonly GenerationSettings _generationSettings = generationSettings ?? throw new ArgumentNullException(nameof(generationSettings));
-    private readonly DomainDetector? _domainDetector = domainDetector;
+    private readonly IDomainDetector? _domainDetector = domainDetector;
     private readonly bool _enableRag = enableRag;
     private readonly bool _debugMode = debugMode;
     private readonly bool _showPerformanceMetrics = showPerformanceMetrics;

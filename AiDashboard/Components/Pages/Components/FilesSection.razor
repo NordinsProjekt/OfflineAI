@@ -1,8 +1,6 @@
 @inject DashboardState Dashboard
 
-<section class="oa-card">
-    <div class="oa-card-title">Files</div>
-    
+<CollapsibleSection SectionKey="files" Title="Files">
     <div class="oa-field">
         <label>Inbox</label>
         <input type="text" class="oa-text" value="@(Dashboard.InboxService?.CurrentStatus ?? "Not configured")" readonly>
@@ -15,4 +13,4 @@
             disabled="@(Dashboard.InboxService?.IsProcessing == true)">
         Reload Inbox
     </button>
-</section>
+</CollapsibleSection>

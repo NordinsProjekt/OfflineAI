@@ -1,16 +1,24 @@
 @page "/domains"
 @rendermode InteractiveServer
 @using Application.AI.Utilities
-@inject DomainDetector DomainDetector
+@inject IDomainDetector DomainDetector
 @inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
 @implements IDisposable
 
 <PageTitle>Knowledge Domains</PageTitle>
 
 <div class="domain-management-container">
     <div class="page-header">
-        <h2>??? Knowledge Domains</h2>
-        <p class="subtitle">Manage knowledge domains and their search keywords for intelligent filtering</p>
+        <div class="header-content">
+            <div>
+                <h2>?? Knowledge Domains</h2>
+                <p class="subtitle">Manage knowledge domains and their search keywords for intelligent filtering</p>
+            </div>
+            <button class="btn-back" @onclick="NavigateToHome">
+                ? Back to Chat
+            </button>
+        </div>
     </div>
 
     @if (!string.IsNullOrWhiteSpace(statusMessage))
@@ -19,18 +27,6 @@
             @statusMessage
         </div>
     }
-
-    <!-- Category Filter -->
-    <div class="category-filter">
-        <label>Filter by Category:</label>
-        <select @bind="selectedCategory" @bind:after="FilterDomains" class="form-select">
-            <option value="">All Categories</option>
-            @foreach (var category in categories.OrderBy(c => c))
-            {
-                <option value="@category">@FormatCategoryName(category)</option>
-            }
-        </select>
-    </div>
 
     <div class="management-layout">
         <!-- Left Panel: Domain List -->
@@ -53,38 +49,25 @@
             {
                 <div class="empty-state">
                     <div class="empty-icon">??</div>
-                    <h4>No domains @(string.IsNullOrEmpty(selectedCategory) ? "registered yet" : $"in category '{FormatCategoryName(selectedCategory)}'")</h4>
+                    <h4>No domains registered yet</h4>
                     <p>Add your first domain using the form on the right</p>
                 </div>
             }
             else
             {
-                <!-- Group by category if showing all -->
-                @if (string.IsNullOrEmpty(selectedCategory))
+                @foreach (var categoryGroup in filteredDomains.GroupBy(d => d.Category).OrderBy(g => g.Key))
                 {
-                    @foreach (var categoryGroup in filteredDomains.GroupBy(d => d.Category).OrderBy(g => g.Key))
-                    {
-                        <div class="category-group">
-                            <div class="category-header">
-                                <h4>@GetCategoryIcon(categoryGroup.Key) @FormatCategoryName(categoryGroup.Key)</h4>
-                                <span class="count-badge">@categoryGroup.Count()</span>
-                            </div>
-                            <div class="domain-list">
-                                @foreach (var domain in categoryGroup.OrderBy(d => d.DisplayName))
-                                {
-                                    @RenderDomainCard(domain)
-                                }
-                            </div>
+                    <div class="category-group">
+                        <div class="category-header">
+                            <h4>@GetCategoryIcon(categoryGroup.Key) @FormatCategoryName(categoryGroup.Key)</h4>
+                            <span class="count-badge">@categoryGroup.Count()</span>
                         </div>
-                    }
-                }
-                else
-                {
-                    <div class="domain-list">
-                        @foreach (var domain in filteredDomains.OrderBy(d => d.DisplayName))
-                        {
-                            @RenderDomainCard(domain)
-                        }
+                        <div class="domain-list">
+                            @foreach (var domain in categoryGroup.OrderBy(d => d.DisplayName))
+                            {
+                                @RenderDomainCard(domain)
+                            }
+                        </div>
                     </div>
                 }
             }
@@ -100,81 +83,81 @@
                 }
             </div>
 
-            <div class="form-group">
-                <label for="domainId">Domain ID <span class="required">*</span></label>
-                <input type="text" 
-                       id="domainId" 
-                       class="form-control" 
-                       @bind="formDomainId" 
-                       placeholder="e.g., gloomhaven, iphone-15, project-alpha"
-                       disabled="@isEditMode" />
-                <small class="form-text">Lowercase with hyphens, used for internal identification</small>
-            </div>
-
-            <div class="form-group">
-                <label for="displayName">Display Name <span class="required">*</span></label>
-                <input type="text" 
-                       id="displayName" 
-                       class="form-control" 
-                       @bind="formDisplayName" 
-                       placeholder="e.g., Gloomhaven, iPhone 15, Project Alpha" />
-                <small class="form-text">User-friendly name shown in the UI</small>
-            </div>
-
-            <div class="form-group">
-                <label for="category">Category <span class="required">*</span></label>
-                <select id="category" class="form-control" @bind="formCategory">
-                    <option value="">Select a category...</option>
-                    <option value="board-game">?? Board Game</option>
-                    <option value="product">?? Product</option>
-                    <option value="project">?? Project</option>
-                    <option value="academic">?? Academic</option>
-                    <option value="technical">?? Technical</option>
-                    <option value="internal">?? Internal</option>
-                    <option value="general">?? General</option>
-                    <option value="custom">? Custom</option>
-                </select>
-                @if (formCategory == "custom")
-                {
+            <div class="form-content">
+                <div class="form-group">
+                    <label for="domainId">Domain ID <span class="required">*</span></label>
                     <input type="text" 
-                           class="form-control mt-2" 
-                           @bind="formCustomCategory" 
-                           placeholder="Enter custom category name" />
-                }
-                <small class="form-text">Organize domains by type for easier filtering</small>
-            </div>
+                           id="domainId" 
+                           class="form-control" 
+                           @bind="formDomainId" 
+                           placeholder="e.g., gloomhaven, iphone-15, project-alpha"
+                           disabled="@isEditMode" />
+                    <small class="form-text">Lowercase with hyphens, used for internal identification</small>
+                </div>
 
-            <div class="form-group">
-                <label for="variants">Search Keywords <span class="required">*</span></label>
-                <textarea id="variants" 
-                          class="form-control" 
-                          rows="6" 
-                          @bind="formVariants" 
-                          placeholder="Enter search keywords (one per line):
+                <div class="form-group">
+                    <label for="displayName">Display Name <span class="required">*</span></label>
+                    <input type="text" 
+                           id="displayName" 
+                           class="form-control" 
+                           @bind="formDisplayName" 
+                           placeholder="e.g., Gloomhaven, iPhone 15, Project Alpha" />
+                    <small class="form-text">User-friendly name shown in the UI</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="category">Category <span class="required">*</span></label>
+                    <select id="category" class="form-control" @bind="formCategory">
+                        <option value="">Select a category...</option>
+                        <option value="board-game">?? Board Game</option>
+                        <option value="product">?? Product</option>
+                        <option value="project">?? Project</option>
+                        <option value="academic">?? Academic</option>
+                        <option value="technical">?? Technical</option>
+                        <option value="internal">?? Internal</option>
+                        <option value="general">?? General</option>
+                        <option value="custom">? Custom</option>
+                    </select>
+                    @if (formCategory == "custom")
+                    {
+                        <input type="text" 
+                               class="form-control mt-2" 
+                               @bind="formCustomCategory" 
+                               placeholder="Enter custom category name" />
+                    }
+                    <small class="form-text">Organize domains by type for easier filtering</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="variants">Search Keywords <span class="required">*</span></label>
+                    <textarea id="variants" 
+                              class="form-control" 
+                              rows="4" 
+                              @bind="formVariants" 
+                              placeholder="Enter search keywords (one per line):
 gloomhaven
 gloom haven
-gh
-gloomhaven game"></textarea>
-                <small class="form-text">Text patterns to match in user queries (one per line)</small>
-            </div>
+gh"></textarea>
+                    <small class="form-text">Text patterns to match in user queries (one per line)</small>
+                </div>
 
-            <div class="form-actions">
-                <button class="btn-primary" @onclick="SaveDomain" disabled="@(!IsFormValid() || isSaving)">
-                    @if (isSaving)
+                <div class="form-actions">
+                    <button class="btn-primary" @onclick="SaveDomain" disabled="@(!IsFormValid() || isSaving)">
+                        @if (isSaving)
+                        {
+                            <span class="spinner-small"></span>
+                        }
+                        @(isEditMode ? "Update Domain" : "Add Domain")
+                    </button>
+                    @if (isEditMode)
                     {
-                        <span class="spinner-small"></span>
+                        <button class="btn-secondary" @onclick="CancelEdit">Cancel</button>
                     }
-                    @(isEditMode ? "Update Domain" : "Add Domain")
-                </button>
-                @if (isEditMode)
-                {
-                    <button class="btn-secondary" @onclick="CancelEdit">Cancel</button>
-                }
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Bottom Panel: Keyword Details (when domain selected) -->
     @if (!string.IsNullOrWhiteSpace(selectedDomainId) && selectedDomainKeywords.Any())
     {
         <div class="keywords-panel">
@@ -222,7 +205,6 @@ gloomhaven game"></textarea>
     private List<(string DomainId, string DisplayName, string Category)> domains = new();
     private List<(string DomainId, string DisplayName, string Category)> filteredDomains = new();
     private List<string> categories = new();
-    private string selectedCategory = "";
     
     private string? selectedDomainId = null;
     private string? selectedDomainDisplayName = null;
@@ -244,6 +226,11 @@ gloomhaven game"></textarea>
         await RefreshDomains();
     }
 
+    private void NavigateToHome()
+    {
+        Navigation.NavigateTo("/");
+    }
+
     private async Task RefreshDomains()
     {
         isLoading = true;
@@ -254,7 +241,7 @@ gloomhaven game"></textarea>
         {
             domains = await DomainDetector.GetAllDomainsAsync();
             categories = await DomainDetector.GetCategoriesAsync();
-            FilterDomains();
+            filteredDomains = domains;
             statusMessage = $"[OK] Loaded {domains.Count} domain(s) in {categories.Count} categor{(categories.Count == 1 ? "y" : "ies")}";
         }
         catch (Exception ex)
@@ -268,26 +255,12 @@ gloomhaven game"></textarea>
         }
     }
 
-    private void FilterDomains()
-    {
-        if (string.IsNullOrEmpty(selectedCategory))
-        {
-            filteredDomains = domains;
-        }
-        else
-        {
-            filteredDomains = domains.Where(d => d.Category == selectedCategory).ToList();
-        }
-        StateHasChanged();
-    }
-
     private async Task SelectDomain(string domainId)
     {
         selectedDomainId = domainId;
         var domain = domains.FirstOrDefault(d => d.DomainId == domainId);
         selectedDomainDisplayName = domain.DisplayName;
         
-        // Load keywords by refreshing cache
         await DomainDetector.RefreshCacheAsync();
         
         selectedDomainKeywords = new List<string>();
