@@ -37,7 +37,6 @@ public class AiChatServicePooled(
     // Performance tuning constants for TinyLlama
     private const int MaxContextChars = 1500;        // Reduced from ~2771 to prevent overload
     private const int MaxFragmentChars = 400;       // Truncate individual fragments
-    private const int TopKResults = 3;              // Reduced from 5
 
     /// <summary>
     /// Last performance metrics from generation
@@ -198,9 +197,9 @@ public class AiChatServicePooled(
         {
             relevantMemory = await searchableMemory.SearchRelevantMemoryAsync(
                 queryForSearch,
-                topK: TopKResults,
-                minRelevanceScore: 0.3,
-                gameFilter: detectedDomains.Count > 0 ? detectedDomains : null,
+                topK: _generationSettings.RagTopK,
+                minRelevanceScore: _generationSettings.RagMinRelevanceScore,
+                domainFilter: detectedDomains.Count > 0 ? detectedDomains : null,
                 maxCharsPerFragment: MaxFragmentChars,
                 includeMetadata: false);
         }

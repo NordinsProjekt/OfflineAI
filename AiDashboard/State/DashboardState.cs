@@ -319,23 +319,17 @@ public class DashboardState
 
     public async Task LoadCollectionAsync(string collectionName)
     {
-        if (CollectionService == null || ChatService == null)
+        if (CollectionService == null)
         {
-            StatusMessage = "[ERROR] Services not available";
+            StatusMessage = "[ERROR] Collection service not available";
             return;
         }
 
-        var (success, message, memory) = await CollectionService.LoadCollectionAsync(collectionName);
+        var (success, message) = await CollectionService.ValidateCollectionAsync(collectionName);
         
-        if (success && memory != null)
-        {
-            ChatService.SetVectorMemory(memory);
-            StatusMessage = $"[OK] {message}";
-        }
-        else
-        {
-            StatusMessage = $"[ERROR] {message}";
-        }
+        StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
+        
+        // Note: DatabaseVectorMemory queries collections on-demand, no need to load into memory
     }
 
     // Inbox operations (delegating to InboxService)

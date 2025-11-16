@@ -11,7 +11,7 @@ public interface ISearchableMemory : ILlmMemory
     /// <param name="query">The search query</param>
     /// <param name="topK">Number of top results to return</param>
     /// <param name="minRelevanceScore">Minimum similarity score (0-1)</param>
-    /// <param name="gameFilter">Optional list of game IDs to filter by</param>
+    /// <param name="domainFilter">Optional list of domain IDs to filter by</param>
     /// <param name="maxCharsPerFragment">Optional maximum characters per fragment</param>
     /// <param name="includeMetadata">Include relevance scores and categories in output</param>
     /// <returns>Formatted string containing relevant fragments, or null if none found</returns>
@@ -19,7 +19,7 @@ public interface ISearchableMemory : ILlmMemory
         string query,
         int topK = 5,
         double minRelevanceScore = 0.5,
-        List<string>? gameFilter = null,
+        List<string>? domainFilter = null,
         int? maxCharsPerFragment = null,
         bool includeMetadata = true);
 }

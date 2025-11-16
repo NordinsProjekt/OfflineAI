@@ -123,13 +123,13 @@ public class CollectionManagementService
     }
 
     /// <summary>
-    /// Load a collection from the database into vector memory for RAG queries
+    /// Check collection status - collections are accessed on-demand, no loading needed
     /// </summary>
-    public async Task<(bool Success, string Message, ILlmMemory? Memory)> LoadCollectionAsync(string collectionName)
+    public async Task<(bool Success, string Message)> ValidateCollectionAsync(string collectionName)
     {
         if (string.IsNullOrWhiteSpace(collectionName))
         {
-            return (false, "Collection name is required", null);
+            return (false, "Collection name is required");
         }
 
         try
@@ -137,18 +137,20 @@ public class CollectionManagementService
             var exists = await _repository.CollectionExistsAsync(collectionName);
             if (!exists)
             {
-                return (false, $"Collection '{collectionName}' does not exist", null);
+                return (false, $"Collection '{collectionName}' does not exist");
             }
 
-            var vectorMemory = await _persistenceService.LoadVectorMemoryAsync(collectionName);
+            var count = await _repository.GetCountAsync(collectionName);
+            var hasEmbeddings = await _repository.HasEmbeddingsAsync(collectionName);
+            
             CurrentCollection = collectionName;
             NotifyStateChanged();
             
-            return (true, $"Loaded collection '{collectionName}' with {vectorMemory.Count} fragments", vectorMemory);
+            return (true, $"Collection '{collectionName}' ready: {count} fragments, Embeddings: {(hasEmbeddings ? "Yes" : "No")}");
         }
         catch (Exception ex)
         {
-            return (false, $"Failed to load collection: {ex.Message}", null);
+            return (false, $"Failed to validate collection: {ex.Message}");
         }
     }
 

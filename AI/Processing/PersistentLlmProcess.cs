@@ -97,6 +97,9 @@ public class PersistentLlmProcess : IDisposable
             // Add the prompt directly to arguments
             processInfo.Arguments += $" -p \"{fullPrompt}\"";
             
+            // Set context size to prevent memory issues (2048 tokens = ~1500 chars of context)
+            processInfo.Arguments += $" -c 2048";
+            
             // Apply generation parameters
             processInfo.Arguments += $" -n {maxTokens}";
             processInfo.Arguments += $" --temp {temperature:F2}";

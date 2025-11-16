@@ -127,6 +127,20 @@ public class GenerationSettings
     /// Range: 0.0-1.0
     /// </summary>
     public float FrequencyPenalty { get; set; } = 0.2f;
+
+    /// <summary>
+    /// Number of relevant chunks to retrieve for RAG
+    /// Default: 3
+    /// Range: 1-5 (optimal for context window management)
+    /// </summary>
+    public int RagTopK { get; set; } = 3;
+
+    /// <summary>
+    /// Minimum relevance score for RAG chunks (cosine similarity)
+    /// Default: 0.5
+    /// Range: 0.3-0.8 (lower = more results, higher = stricter filtering)
+    /// </summary>
+    public double RagMinRelevanceScore { get; set; } = 0.5;
 }
 
 public class EmbeddingSettings

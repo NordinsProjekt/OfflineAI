@@ -138,7 +138,7 @@ public class Program
         // Register DomainDetector (requires KnowledgeDomainRepository)
         builder.Services.AddSingleton<Application.AI.Utilities.DomainDetector>();
 
-        // Register empty VectorMemory as ILlmMemory for knowledge base (no database dependency)
+        // Register memory for knowledge base
         builder.Services.AddSingleton<ILlmMemory>(sp =>
         {
             var embeddingService = sp.GetService<ITextEmbeddingGenerationService>();
@@ -147,20 +147,14 @@ public class Program
 
             if (embeddingService != null && repository != null)
             {
-                // Use database-backed vector memory for on-demand queries
+                // Use database-backed vector memory for RAG queries
                 Console.WriteLine($"? Database vector memory initialized (collection: {collectionName})");
                 return new DatabaseVectorMemory(embeddingService, repository, collectionName);
             }
-            else if (embeddingService != null)
-            {
-                // Fallback to in-memory vector memory
-                Console.WriteLine("? Vector memory initialized (in-memory)");
-                return new VectorMemory(embeddingService, "dashboard-kb");
-            }
             else
             {
-                // Fallback to simple string memory if embeddings not available
-                Console.WriteLine("? Simple memory initialized (RAG not available)");
+                // Fallback to simple string memory (RAG not available)
+                Console.WriteLine("? Simple memory initialized (RAG not available - database or embedding service missing)");
                 return new StringJoinMemory();
             }
         });

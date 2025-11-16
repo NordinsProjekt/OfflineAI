@@ -143,6 +143,34 @@ public class GenerationSettingsService
         }
     }
 
+    private int _ragTopK = 3;
+    public int RagTopK
+    {
+        get => _ragTopK;
+        set
+        {
+            // Clamp between 1 and 5
+            var clampedValue = Math.Clamp(value, 1, 5);
+            if (_ragTopK == clampedValue) return;
+            _ragTopK = clampedValue;
+            NotifyStateChanged();
+        }
+    }
+
+    private double _ragMinRelevanceScore = 0.5;
+    public double RagMinRelevanceScore
+    {
+        get => _ragMinRelevanceScore;
+        set
+        {
+            // Clamp between 0.3 and 0.8
+            var clampedValue = Math.Clamp(value, 0.3, 0.8);
+            if (Math.Abs(_ragMinRelevanceScore - clampedValue) < 0.001) return;
+            _ragMinRelevanceScore = clampedValue;
+            NotifyStateChanged();
+        }
+    }
+
     /// <summary>
     /// Create a GenerationSettings object from current settings
     /// </summary>
@@ -156,7 +184,9 @@ public class GenerationSettingsService
             TopP = (float)TopP,
             RepeatPenalty = (float)RepeatPenalty,
             PresencePenalty = (float)PresencePenalty,
-            FrequencyPenalty = (float)FrequencyPenalty
+            FrequencyPenalty = (float)FrequencyPenalty,
+            RagTopK = RagTopK,
+            RagMinRelevanceScore = RagMinRelevanceScore
         };
     }
 
@@ -172,6 +202,8 @@ public class GenerationSettingsService
         RepeatPenalty = settings.RepeatPenalty;
         PresencePenalty = settings.PresencePenalty;
         FrequencyPenalty = settings.FrequencyPenalty;
+        RagTopK = settings.RagTopK;
+        RagMinRelevanceScore = settings.RagMinRelevanceScore;
     }
 
     /// <summary>
@@ -190,6 +222,8 @@ public class GenerationSettingsService
         RagMode = true;
         PerformanceMetrics = false;
         DebugMode = false;
+        RagTopK = 3;
+        RagMinRelevanceScore = 0.5;
     }
 
     private void NotifyStateChanged() => OnChange?.Invoke();

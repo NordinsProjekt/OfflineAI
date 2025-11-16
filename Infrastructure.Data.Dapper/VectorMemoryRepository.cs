@@ -343,6 +343,58 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     }
     
     /// <summary>
+    /// Load fragments for a collection filtered by domain IDs.
+    /// This is more efficient than loading all fragments and filtering in memory.
+    /// Uses SQL LIKE to match domain patterns in the Category field.
+    /// </summary>
+    public async Task<List<MemoryFragmentEntity>> LoadByCollectionAndDomainsAsync(
+        string collectionName, 
+        List<string> domainFilter)
+    {
+        if (domainFilter == null || domainFilter.Count == 0)
+        {
+            // No filter - return all
+            return await LoadByCollectionAsync(collectionName);
+        }
+
+        // Build WHERE clause with OR conditions for each domain
+        // Example: (Category LIKE '%munchkin-panic%' OR Category LIKE '%munchkin panic%')
+        var domainConditions = new List<string>();
+        var parameters = new Dictionary<string, object>
+        {
+            { "CollectionName", collectionName }
+        };
+
+        for (int i = 0; i < domainFilter.Count; i++)
+        {
+            var domainId = domainFilter[i];
+            var domainWithSpaces = domainId.Replace("-", " ");
+            
+            var paramNameDash = $"Domain{i}Dash";
+            var paramNameSpace = $"Domain{i}Space";
+            
+            domainConditions.Add($"(Category LIKE @{paramNameDash} OR Category LIKE @{paramNameSpace})");
+            parameters[paramNameDash] = $"%{domainId}%";
+            parameters[paramNameSpace] = $"%{domainWithSpaces}%";
+        }
+
+        var whereClause = string.Join(" OR ", domainConditions);
+        
+        var sql = $@"
+            SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension,
+                   CreatedAt, UpdatedAt, SourceFile, ChunkIndex
+            FROM [{_tableName}]
+            WHERE CollectionName = @CollectionName
+              AND ({whereClause})
+            ORDER BY ChunkIndex, CreatedAt";
+        
+        using var connection = new SqlConnection(_connectionString);
+        var results = await connection.QueryAsync<MemoryFragmentEntity>(sql, parameters);
+        
+        return results.AsList();
+    }
+    
+    /// <summary>
     /// Load fragments with pagination support.
     /// </summary>
     public async Task<List<MemoryFragmentEntity>> LoadByCollectionPagedAsync(

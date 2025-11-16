@@ -64,6 +64,17 @@ public interface IVectorMemoryRepository
     Task<List<MemoryFragmentEntity>> LoadByCollectionAsync(string collectionName);
     
     /// <summary>
+    /// Load fragments for a collection filtered by domain IDs.
+    /// This is more efficient than loading all fragments and filtering in memory.
+    /// </summary>
+    /// <param name="collectionName">Collection to load from</param>
+    /// <param name="domainFilter">List of domain IDs to filter by (e.g., "munchkin-panic")</param>
+    /// <returns>Filtered list of fragments with embeddings</returns>
+    Task<List<MemoryFragmentEntity>> LoadByCollectionAndDomainsAsync(
+        string collectionName, 
+        List<string> domainFilter);
+    
+    /// <summary>
     /// Load fragments with pagination support.
     /// </summary>
     Task<List<MemoryFragmentEntity>> LoadByCollectionPagedAsync(
