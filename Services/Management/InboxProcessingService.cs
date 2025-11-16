@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -14,14 +14,16 @@ namespace Services.Management;
 /// Handles file discovery, fragment extraction, embedding generation, and archival.
 /// Supports TXT, MD, and PDF files.
 /// </summary>
-public class InboxProcessingService
+public class InboxProcessingService(
+    VectorMemoryPersistenceService persistenceService,
+    AppConfiguration appConfig)
 {
     // Progress notification for UI components
     public event Action<string>? OnProgressUpdate;
     public event Action? OnProcessingComplete;
 
-    private readonly VectorMemoryPersistenceService _persistenceService;
-    private readonly AppConfiguration _appConfig;
+    private readonly VectorMemoryPersistenceService _persistenceService = persistenceService ?? throw new ArgumentNullException(nameof(persistenceService));
+    private readonly AppConfiguration _appConfig = appConfig ?? throw new ArgumentNullException(nameof(appConfig));
 
     private bool _isProcessing = false;
     public bool IsProcessing => _isProcessing;
@@ -29,13 +31,11 @@ public class InboxProcessingService
     private string _currentStatus = string.Empty;
     public string CurrentStatus => _currentStatus;
 
-    public InboxProcessingService(
-        VectorMemoryPersistenceService persistenceService,
-        AppConfiguration appConfig)
-    {
-        _persistenceService = persistenceService ?? throw new ArgumentNullException(nameof(persistenceService));
-        _appConfig = appConfig ?? throw new ArgumentNullException(nameof(appConfig));
-    }
+    /// <summary>
+    /// Optional callback for domain registration.
+    /// Takes category string and category type (e.g., "game", "product").
+    /// </summary>
+    public Func<string, string, Task>? OnDomainDiscovered { get; set; }
 
     /// <summary>
     /// Process all files in the inbox folder and save to the specified collection.
@@ -71,16 +71,19 @@ public class InboxProcessingService
             var fileWatcher = new MultiFormatFileWatcher(inboxFolder, archiveFolder, pdfProcessor);
             var newFiles = await fileWatcher.DiscoverNewFilesAsync();
 
-            if (!newFiles.Any())
+            if (newFiles.Count == 0)
             {
                 return (true, "No new files found in inbox", 0, 0);
             }
 
             UpdateStatus($"Found {newFiles.Count} file(s) (.txt, .md, .pdf). Processing fragments...");
 
-            // Collect fragments from files
-            var allFragments = new List<MemoryFragment>();
-            int fileIndex = 0;
+            // Process and save each file individually
+            var totalFragmentsCreated = 0;
+            var filesProcessed = 0;
+            var filesFailed = 0;
+            var fileIndex = 0;
+            var errorMessages = new List<string>();
             
             foreach (var (documentName, filePath) in newFiles)
             {
@@ -92,51 +95,109 @@ public class InboxProcessingService
                 
                 try
                 {
+                    // Process the file
                     var fragments = await fileWatcher.ProcessFileAsync(documentName, filePath);
-                    allFragments.AddRange(fragments);
+                    
+                    if (fragments.Count == 0)
+                    {
+                        UpdateStatus($"⚠  No fragments extracted from {fileName}. Skipping...");
+                        filesFailed++;
+                        errorMessages.Add($"{fileName}: No fragments extracted");
+                        continue;
+                    }
+                    
+                    UpdateStatus($"Extracted {fragments.Count} fragment(s) from {fileName}");
+                    
+                    // Auto-register domain from the first fragment's category (if callback provided)
+                    if (OnDomainDiscovered != null && fragments.Count > 0)
+                    {
+                        try
+                        {
+                            // Extract domain name from first fragment's category
+                            // Categories are typically: "Game Name - Section" or just "Game Name"
+                            var firstCategory = fragments[0].Category;
+                            await OnDomainDiscovered(firstCategory, "game");
+                            UpdateStatus($"✓ Registered domain from: {firstCategory}");
+                        }
+                        catch (Exception domainEx)
+                        {
+                            // Don't fail the whole process if domain registration fails
+                            UpdateStatus($"⚠  Could not register domain: {domainEx.Message}");
+                        }
+                    }
+                    
+                    // Save fragments for this specific file
+                    UpdateStatus($"Generating embeddings for {fragments.Count} fragments from {fileName}...");
+                    
+                    try
+                    {
+                        await _persistenceService.SaveFragmentsAsync(
+                            fragments,
+                            collectionName,
+                            sourceFile: fileName,  // Use individual filename
+                            replaceExisting: false);
+                        
+                        totalFragmentsCreated += fragments.Count;
+                        UpdateStatus($"✓ Saved {fragments.Count} fragment(s) from {fileName}");
+                    }
+                    catch (Exception saveEx)
+                    {
+                        UpdateStatus($"✗  Failed to save fragments from {fileName}: {saveEx.Message}");
+                        filesFailed++;
+                        errorMessages.Add($"{fileName}: Save failed - {saveEx.Message}");
+                        continue; // Don't archive if save failed
+                    }
+                    
+                    // Archive the file after successful processing and saving
+                    try
+                    {
+                        UpdateStatus($"Archiving {fileName}...");
+                        await fileWatcher.ArchiveFileAsync(filePath);
+                        filesProcessed++;
+                        UpdateStatus($"✓ Completed {fileName}: {fragments.Count} fragments saved and archived");
+                    }
+                    catch (Exception archiveEx)
+                    {
+                        UpdateStatus($"⚠  Failed to archive {fileName}: {archiveEx.Message}");
+                        errorMessages.Add($"{fileName}: Archive failed - {archiveEx.Message}");
+                        filesProcessed++; // Still count as processed since data was saved
+                    }
                 }
                 catch (NotImplementedException ex) when (ex.Message.Contains("PDF"))
                 {
-                    UpdateStatus($"??  PDF support not configured: {fileName}. Install PDF library (e.g., UglyToad.PdfPig)");
-                    // Continue processing other files
+                    UpdateStatus($"⚠  PDF support not configured: {fileName}. Install PDF library (e.g., UglyToad.PdfPig)");
+                    filesFailed++;
+                    errorMessages.Add($"{fileName}: PDF support not configured");
                 }
                 catch (Exception ex)
                 {
-                    UpdateStatus($"??  Failed to process {fileName}: {ex.Message}");
-                    // Continue processing other files
+                    UpdateStatus($"✗  Failed to process {fileName}: {ex.Message}");
+                    filesFailed++;
+                    errorMessages.Add($"{fileName}: {ex.Message}");
                 }
             }
 
-            if (!allFragments.Any())
+            // Build final status message
+            var resultMessage = $"Processed {filesProcessed} file(s), {totalFragmentsCreated} fragments saved";
+            if (filesFailed > 0)
             {
-                return (false, "No fragments could be extracted from files", newFiles.Count, 0);
+                resultMessage += $". {filesFailed} file(s) failed.";
             }
-
-            // Save to database
-            UpdateStatus($"Generating embeddings for {allFragments.Count} fragments...");
             
-            await _persistenceService.SaveFragmentsAsync(
-                allFragments,
-                collectionName,
-                sourceFile: string.Join(", ", newFiles.Keys),
-                replaceExisting: false);
-
-            // Archive processed files
-            UpdateStatus("Archiving processed files...");
+            UpdateStatus($"✓ {resultMessage}");
             
-            foreach (var filePath in newFiles.Values)
+            if (errorMessages.Count != 0)
             {
-                await fileWatcher.ArchiveFileAsync(filePath);
+                UpdateStatus($"Errors: {string.Join("; ", errorMessages)}");
             }
-
-            UpdateStatus($"? Processed {newFiles.Count} file(s), {allFragments.Count} fragments saved to '{collectionName}'");
+            
             OnProcessingComplete?.Invoke();
             
-            return (true, $"Processed {newFiles.Count} file(s), {allFragments.Count} fragments saved", newFiles.Count, allFragments.Count);
+            return (true, resultMessage, filesProcessed, totalFragmentsCreated);
         }
         catch (Exception ex)
         {
-            UpdateStatus($"? Failed to process inbox: {ex.Message}");
+            UpdateStatus($"✗ Failed to process inbox: {ex.Message}");
             return (false, $"Failed to process inbox: {ex.Message}", 0, 0);
         }
         finally

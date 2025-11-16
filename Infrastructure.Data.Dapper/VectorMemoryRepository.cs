@@ -346,6 +346,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// Load fragments for a collection filtered by domain IDs.
     /// This is more efficient than loading all fragments and filtering in memory.
     /// Uses SQL LIKE to match domain patterns in the Category field.
+    /// Handles singular/plural variations by matching individual words.
     /// </summary>
     public async Task<List<MemoryFragmentEntity>> LoadByCollectionAndDomainsAsync(
         string collectionName, 
@@ -358,7 +359,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         }
 
         // Build WHERE clause with OR conditions for each domain
-        // Example: (Category LIKE '%munchkin-panic%' OR Category LIKE '%munchkin panic%')
+        // For each domain, we'll match by individual significant words to handle singular/plural
         var domainConditions = new List<string>();
         var parameters = new Dictionary<string, object>
         {
@@ -370,12 +371,53 @@ public class VectorMemoryRepository : IVectorMemoryRepository
             var domainId = domainFilter[i];
             var domainWithSpaces = domainId.Replace("-", " ");
             
-            var paramNameDash = $"Domain{i}Dash";
-            var paramNameSpace = $"Domain{i}Space";
+            // Extract significant words (3+ characters) from the domain
+            var words = domainWithSpaces
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Where(w => w.Length >= 3) // Ignore short words like "of", "the"
+                .Select(w => w.ToLowerInvariant())
+                .ToList();
             
-            domainConditions.Add($"(Category LIKE @{paramNameDash} OR Category LIKE @{paramNameSpace})");
-            parameters[paramNameDash] = $"%{domainId}%";
-            parameters[paramNameSpace] = $"%{domainWithSpaces}%";
+            if (!words.Any())
+            {
+                // Fallback to original behavior if no significant words
+                var paramNameDash = $"Domain{i}Dash";
+                var paramNameSpace = $"Domain{i}Space";
+                
+                domainConditions.Add($"(Category LIKE @{paramNameDash} OR Category LIKE @{paramNameSpace})");
+                parameters[paramNameDash] = $"%{domainId}%";
+                parameters[paramNameSpace] = $"%{domainWithSpaces}%";
+            }
+            else
+            {
+                // Match if ALL significant words appear in the category (order-independent)
+                // This handles: "mansion madness" matching "Mansions Of Madness" or "Mansion of Madness"
+                var wordConditions = new List<string>();
+                
+                foreach (var word in words)
+                {
+                    var paramName = $"Domain{i}Word{words.IndexOf(word)}";
+                    
+                    // Match the word with optional 's' at the end for plural handling
+                    // "mansion" matches "mansion" or "mansions"
+                    // "madness" matches "madness"
+                    wordConditions.Add($"(Category LIKE @{paramName} OR Category LIKE @{paramName}s)");
+                    parameters[paramName] = $"%{word}%";
+                    parameters[$"{paramName}s"] = $"%{word}s%";
+                }
+                
+                // All words must match (AND)
+                if (wordConditions.Any())
+                {
+                    domainConditions.Add($"({string.Join(" AND ", wordConditions)})");
+                }
+            }
+        }
+
+        if (!domainConditions.Any())
+        {
+            // No valid conditions, return empty
+            return new List<MemoryFragmentEntity>();
         }
 
         var whereClause = string.Join(" OR ", domainConditions);
