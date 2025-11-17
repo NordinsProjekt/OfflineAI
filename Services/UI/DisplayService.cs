@@ -284,12 +284,19 @@ public static class DisplayService
         }
 
         Console.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
-        Console.WriteLine("║  SYSTEM PROMPT SENT TO LLM                                   ║");
+        Console.WriteLine("║  SYSTEM PROMPT SENT TO LLM (DEBUG MODE)                      ║");
         Console.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
-        Console.WriteLine($"Relevant Memory Length: {relevantMemory.Length} characters");
-        Console.WriteLine($"\nFirst 500 chars of context:");
-        Console.WriteLine(relevantMemory.Substring(0, Math.Min(500, relevantMemory.Length)));
-        Console.WriteLine($"\n... (total {relevantMemory.Length} chars)");
+        Console.WriteLine($"Total Length: {relevantMemory.Length} characters");
+        Console.WriteLine($"Estimated Tokens: ~{relevantMemory.Length / 4} tokens\n");
+        Console.WriteLine("─────────────────────────────────────────────────────────────────");
+        Console.WriteLine("FULL CONTEXT BEING SENT TO LLM:");
+        Console.WriteLine("─────────────────────────────────────────────────────────────────\n");
+        
+        // Display the FULL relevant memory content without truncation
+        Console.WriteLine(relevantMemory);
+        
+        Console.WriteLine("\n─────────────────────────────────────────────────────────────────");
+        Console.WriteLine($"End of context ({relevantMemory.Length} chars)");
         Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
     }
 
