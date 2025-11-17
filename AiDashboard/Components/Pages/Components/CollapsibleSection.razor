@@ -2,56 +2,54 @@
 @implements IDisposable
 
 <section class="oa-card @(IsCollapsed ? "oa-collapsed" : "")">
-    <div class="oa-card-title oa-collapsible-header" @onclick="Toggle">
-        <span>@Title</span>
-        <button type="button" class="oa-collapse-btn" aria-label="@(IsCollapsed ? "Expand" : "Collapse")">
-            @if (IsCollapsed)
-            {
-                <span>?</span>
-            }
-            else
-            {
-                <span>?</span>
-            }
-        </button>
-    </div>
-    @if (!IsCollapsed)
-    {
-        <div class="oa-card-content">
-            @ChildContent
-        </div>
-    }
+	<div class="oa-card-title oa-collapsible-header" @onclick="Toggle">
+		<span>@Title</span>
+		<button type="button" class="oa-collapse-btn" aria-label="@(IsCollapsed ? "Expand" : "Collapse")">
+			@if (IsCollapsed)
+			{
+				<span>&gt;</span>
+			}
+			else
+			{
+				<span>&lt;</span>
+			}
+		</button>
+	</div>
+	@if (!IsCollapsed)
+	{
+		<div class="oa-card-content">
+			@ChildContent
+		</div>
+	}
 </section>
 
 @code {
-    [Parameter, EditorRequired]
-    public string SectionKey { get; set; } = string.Empty;
+	[Parameter, EditorRequired] public string SectionKey { get; set; } = string.Empty;
 
-    [Parameter, EditorRequired]
-    public string Title { get; set; } = string.Empty;
+	[Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
 
-    [Parameter]
-    public RenderFragment? ChildContent { get; set; }
+	[Parameter] public RenderFragment? ChildContent { get; set; }
 
-    private bool IsCollapsed => Dashboard.IsSectionCollapsed(SectionKey);
+	private bool IsCollapsed => Dashboard.IsSectionCollapsed(SectionKey);
 
-    private void Toggle()
-    {
-        Dashboard.ToggleSection(SectionKey);
-    }
+	private void Toggle()
+	{
+		Dashboard.ToggleSection(SectionKey);
+	}
 
-    protected override void OnInitialized()
-    {
-        Dashboard.OnChange += HandleStateChanged;
-    }
+	protected override void OnInitialized()
+	{
+		Dashboard.OnChange += HandleStateChanged;
+	}
 
-    private void HandleStateChanged()
-    {
-        _ = InvokeAsync(StateHasChanged);
-    }
+	private void HandleStateChanged()
+	{
+		_ = InvokeAsync(StateHasChanged);
+	}
 
-    public void Dispose()
-    {
-        Dashboard.OnChange -= HandleStateChanged;
-    }
+	public void Dispose()
+	{
+		Dashboard.OnChange -= HandleStateChanged;
+	}
+
 }
