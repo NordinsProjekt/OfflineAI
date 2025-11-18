@@ -94,14 +94,17 @@ public class DatabaseVectorMemory(
 
         // Build result string
         var sb = new StringBuilder();
+        int totalContentLength = 0;
+        
         foreach (var result in results)
         {
             var content = result.Entity.Content;
 
             // Truncate individual fragments if limit specified
+            // BUT ensure we don't cut mid-sentence and preserve minimum context
             if (maxCharsPerFragment.HasValue && content.Length > maxCharsPerFragment.Value)
             {
-                content = TruncateString(content, maxCharsPerFragment.Value);
+                content = TruncateAtSentenceBoundary(content, maxCharsPerFragment.Value);
             }
 
             if (includeMetadata)
@@ -112,16 +115,97 @@ public class DatabaseVectorMemory(
 
             sb.AppendLine(content);
             sb.AppendLine();
+            
+            totalContentLength += content.Length;
         }
 
-        return sb.ToString();
+        var resultText = sb.ToString();
+        
+        // EDGE CASE FIX: Check if total retrieved content is too small (< 200 chars)
+        // This happens when fragments are heavily truncated or very small
+        if (totalContentLength < 200)
+        {
+            Console.WriteLine($"[!] WARNING: Retrieved context is too small ({totalContentLength} chars)");
+            Console.WriteLine($"[*] Attempting to retrieve more context by lowering threshold...");
+            
+            // Try again with lower threshold and more results
+            var expandedResults = scoredFragments
+                .Where(x => x.Score >= Math.Max(0.3, minRelevanceScore - 0.15)) // Lower threshold by 0.15
+                .Take(Math.Min(topK + 2, 5)) // Get 2 more fragments (max 5 total)
+                .ToList();
+            
+            if (expandedResults.Count > results.Count)
+            {
+                Console.WriteLine($"[*] Expanded to {expandedResults.Count} fragments with lower threshold");
+                
+                // Rebuild with expanded results
+                sb.Clear();
+                totalContentLength = 0;
+                
+                foreach (var result in expandedResults)
+                {
+                    var content = result.Entity.Content;
+
+                    if (maxCharsPerFragment.HasValue && content.Length > maxCharsPerFragment.Value)
+                    {
+                        content = TruncateAtSentenceBoundary(content, maxCharsPerFragment.Value);
+                    }
+
+                    if (includeMetadata)
+                    {
+                        sb.AppendLine($"[Relevance: {result.Score:F3}]");
+                        sb.AppendLine($"[{result.Entity.Category}]");
+                    }
+
+                    sb.AppendLine(content);
+                    sb.AppendLine();
+                    
+                    totalContentLength += content.Length;
+                }
+                
+                resultText = sb.ToString();
+                Console.WriteLine($"[*] Expanded context to {totalContentLength} chars");
+            }
+            
+            // Still too small? Return null to trigger "insufficient context" message
+            if (totalContentLength < 150)
+            {
+                Console.WriteLine($"[!] Context still too small ({totalContentLength} chars) - insufficient information");
+                return null;
+            }
+        }
+
+        return resultText;
     }
 
-    private static string TruncateString(string text, int maxLength)
+    private static string TruncateAtSentenceBoundary(string text, int maxLength)
     {
         if (string.IsNullOrEmpty(text) || text.Length <= maxLength)
             return text;
 
-        return text.Substring(0, maxLength - 3) + "...";
+        // Try to find last complete sentence before maxLength
+        var truncated = text.Substring(0, maxLength);
+        
+        // Look for sentence endings (., !, ?)
+        var lastPeriod = truncated.LastIndexOf(". ", StringComparison.Ordinal);
+        var lastQuestion = truncated.LastIndexOf("? ", StringComparison.Ordinal);
+        var lastExclamation = truncated.LastIndexOf("! ", StringComparison.Ordinal);
+        
+        var lastSentenceEnd = Math.Max(lastPeriod, Math.Max(lastQuestion, lastExclamation));
+        
+        // If we found a sentence boundary and it's not too far back (within last 30% of truncated text)
+        if (lastSentenceEnd > maxLength * 0.7)
+        {
+            return text.Substring(0, lastSentenceEnd + 2).Trim(); // +2 to include ". "
+        }
+        
+        // Otherwise truncate at word boundary
+        var lastSpace = truncated.LastIndexOf(' ');
+        if (lastSpace > maxLength - 50) // Only use word boundary if not too far back
+        {
+            truncated = truncated.Substring(0, lastSpace);
+        }
+
+        return truncated.Trim() + "...";
     }
 }

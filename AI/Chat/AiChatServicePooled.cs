@@ -207,7 +207,7 @@ public class AiChatServicePooled(
         
         if (relevantMemory == null)
         {
-            // If we detected a domain but found no results
+            // If we detected a domain but found no results OR context was too small
             if (detectedDomains.Count > 0 && _domainDetector != null)
             {
                 var domainNames = new List<string>();
@@ -217,6 +217,28 @@ public class AiChatServicePooled(
                 }
                 return $"NO_RESULTS_FOR_DOMAIN:{string.Join(", ", domainNames)}";
             }
+            
+            // No domain detected - general insufficient context
+            DisplayService.WriteLine($"[!] Insufficient context found - returning null");
+            return null;
+        }
+
+        // Check if retrieved context is suspiciously small (this is a backup check)
+        if (relevantMemory.Length < 150)
+        {
+            DisplayService.WriteLine($"[!] Retrieved context is too small ({relevantMemory.Length} chars) - may not provide meaningful answer");
+            
+            // Return a special marker to indicate insufficient context
+            if (detectedDomains.Count > 0 && _domainDetector != null)
+            {
+                var domainNames = new List<string>();
+                foreach (var domainId in detectedDomains)
+                {
+                    domainNames.Add(await _domainDetector.GetDisplayNameAsync(domainId));
+                }
+                return $"NO_RESULTS_FOR_DOMAIN:{string.Join(", ", domainNames)}";
+            }
+            
             return null;
         }
 
@@ -227,15 +249,18 @@ public class AiChatServicePooled(
         // Example: "How to win in Gloomhaven?" is clearer than "How to win?"
         // The retrieved fragments already contain Gloomhaven-specific context
 
+        // Show debug output BEFORE truncation (if enabled) to see full retrieved context
+        if (_debugMode)
+        {
+            DisplayService.ShowSystemPromptDebug(relevantMemory, debug: true);
+        }
+
         // Truncate context if too long
         if (relevantMemory.Length > MaxContextChars)
         {
-            DisplayService.WriteLine($"[*] Context truncated from {relevantMemory.Length} to {MaxContextChars} chars");
+            DisplayService.WriteLine($"[*] Context truncated from {relevantMemory.Length} to {MaxContextChars} chars for LLM");
             relevantMemory = TruncateAtWordBoundary(relevantMemory, MaxContextChars);
         }
-
-        // Show debug output if enabled
-        DisplayService.ShowSystemPromptDebug(relevantMemory, debugMode);
 
         // Simple prompt format - use the ORIGINAL question with domain name intact
         var prompt = new StringBuilder();

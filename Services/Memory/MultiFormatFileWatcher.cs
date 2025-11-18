@@ -85,6 +85,19 @@ public class MultiFormatFileWatcher
     /// Process plain text file.
     /// Game name is extracted from FIRST LINE of the file.
     /// Categories format: "GameName - SectionHeader"
+    /// 
+    /// SUPPORTED PAGE NUMBER FORMATS:
+    /// - [Page: 5]
+    /// - [Page 5]
+    /// - --- Page 5 ---
+    /// - Page 5
+    /// 
+    /// HEADER DETECTION RULES:
+    /// - Must be on its own line
+    /// - < 60 characters
+    /// - Title Case (most words start with capital)
+    /// - No sentence-ending punctuation (., !, ?)
+    /// - Not a bullet point (-, *, •)
     /// </summary>
     private async Task<List<MemoryFragment>> ProcessTextFileAsync(string _, string filePath)
     {
@@ -116,9 +129,10 @@ public class MultiFormatFileWatcher
             return fragments;
         }
         
-        // Process sections with headers
+        // Process sections with headers and page numbers
         int lineIndex = 1; // Start after game name
         string? currentHeader = null;
+        int? currentPageNumber = null;
         var currentContent = new List<string>();
         
         while (lineIndex < lines.Length)
@@ -127,45 +141,50 @@ public class MultiFormatFileWatcher
             
             if (string.IsNullOrWhiteSpace(line))
             {
+                // Empty line - just skip, don't treat as content
                 lineIndex++;
                 continue;
             }
             
-            bool isMarkdownHeader = line.StartsWith("#");
-            bool isPlainHeader = !isMarkdownHeader &&
-                                line.Length < 80 &&
-                                !line.Contains(": ") &&
-                                line.Count(c => c == ',') < 2 &&
-                                !line.EndsWith('.') &&
-                                !line.EndsWith(',') &&
-                                !line.EndsWith(';') &&
-                                !line.StartsWith("- ") &&
-                                !line.StartsWith("* ");
-            
-            bool isHeader = isMarkdownHeader || isPlainHeader;
-            
-            if (isHeader && currentHeader != null)
+            // Check if this line is a page number marker
+            var pageNumber = ExtractPageNumber(line);
+            if (pageNumber.HasValue)
             {
-                if (currentContent.Count > 0)
+                // Update current page number but don't create new fragment
+                currentPageNumber = pageNumber.Value;
+                lineIndex++;
+                continue;
+            }
+            
+            // Check if this line is a header
+            bool isHeader = IsTextFileHeader(line);
+            
+            if (isHeader)
+            {
+                // Save previous section if exists
+                if (currentHeader != null && currentContent.Count > 0)
                 {
                     var content_text = string.Join(Environment.NewLine, currentContent).Trim();
                     if (!string.IsNullOrWhiteSpace(content_text))
                     {
+                        // Add page number to content if available
+                        if (currentPageNumber.HasValue)
+                        {
+                            content_text = $"[Page: {currentPageNumber.Value}]\n\n{content_text}";
+                        }
+                        
                         // Category format: "GameName - SectionHeader"
                         fragments.Add(new MemoryFragment($"{gameName} - {currentHeader}", content_text));
                     }
                 }
                 
-                currentHeader = isMarkdownHeader ? line.TrimStart('#').Trim() : line;
-                currentContent.Clear();
-            }
-            else if (isHeader && currentHeader == null)
-            {
-                currentHeader = isMarkdownHeader ? line.TrimStart('#').Trim() : line;
+                // Start new section
+                currentHeader = line.TrimStart('#').Trim();
                 currentContent.Clear();
             }
             else
             {
+                // This is content, not a header
                 currentContent.Add(line);
             }
             
@@ -178,6 +197,12 @@ public class MultiFormatFileWatcher
             var content_text = string.Join(Environment.NewLine, currentContent).Trim();
             if (!string.IsNullOrWhiteSpace(content_text))
             {
+                // Add page number to content if available
+                if (currentPageNumber.HasValue)
+                {
+                    content_text = $"[Page: {currentPageNumber.Value}]\n\n{content_text}";
+                }
+                
                 fragments.Add(new MemoryFragment($"{gameName} - {currentHeader}", content_text));
             }
         }
@@ -194,6 +219,36 @@ public class MultiFormatFileWatcher
 
         DisplayService.ShowCollectedSections(fragments.Count, gameName);
         return fragments;
+    }
+
+    /// <summary>
+    /// Extracts page number from common page marker formats:
+    /// - [Page: 5]
+    /// - [Page 5]
+    /// - --- Page 5 ---
+    /// - Page 5 (if on its own line)
+    /// </summary>
+    private static int? ExtractPageNumber(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return null;
+        
+        // Pattern 1: [Page: 5] or [Page 5]
+        var match1 = System.Text.RegularExpressions.Regex.Match(line, @"^\[Page:?\s*(\d+)\]$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (match1.Success && int.TryParse(match1.Groups[1].Value, out int page1))
+            return page1;
+        
+        // Pattern 2: --- Page 5 ---
+        var match2 = System.Text.RegularExpressions.Regex.Match(line, @"^-+\s*Page\s+(\d+)\s*-+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (match2.Success && int.TryParse(match2.Groups[1].Value, out int page2))
+            return page2;
+        
+        // Pattern 3: Page 5 (standalone, not part of content)
+        var match3 = System.Text.RegularExpressions.Regex.Match(line, @"^Page\s+(\d+)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (match3.Success && int.TryParse(match3.Groups[1].Value, out int page3))
+            return page3;
+        
+        return null;
     }
 
     /// <summary>
@@ -349,5 +404,75 @@ public class MultiFormatFileWatcher
             ext => ext,
             ext => Directory.GetFiles(_inboxFolder, $"*{ext}", SearchOption.TopDirectoryOnly).Length
         );
+    }
+
+    /// <summary>
+    /// Determines if a line is a section header (not content).
+    /// 
+    /// RULES:
+    /// 1. Markdown headers (starts with #) are ALWAYS headers
+    /// 2. For plain text:
+    ///    - Must be < 60 characters
+    ///    - Must NOT end with sentence punctuation (., !, ?)
+    ///    - Must NOT start with bullet points (-, *, •)
+    ///    - Must NOT contain sentence indicators (: followed by space, or multiple commas)
+    ///    - At least 50% of words should start with uppercase (Title Case)
+    /// </summary>
+    private static bool IsTextFileHeader(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return false;
+        
+        // Rule 1: Markdown headers
+        if (line.StartsWith("#"))
+            return true;
+        
+        // Rule 2: Plain text header checks
+        
+        // Length check - headers should be relatively short
+        if (line.Length > 60)
+            return false;
+        
+        // Must not end with sentence punctuation
+        if (line.EndsWith('.') || line.EndsWith('!') || line.EndsWith('?') || 
+            line.EndsWith(',') || line.EndsWith(';'))
+            return false;
+        
+        // Must not start with bullet points
+        if (line.StartsWith("- ") || line.StartsWith("* ") || line.StartsWith("• "))
+            return false;
+        
+        // Must not contain colon followed by space (e.g., "Note: this is...")
+        if (line.Contains(": "))
+            return false;
+        
+        // Must not have too many commas (likely a list or sentence)
+        if (line.Count(c => c == ',') >= 2)
+            return false;
+        
+        // Title Case check - at least 50% of words should start with capital letter
+        var words = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0)
+            return false;
+        
+        // Single word headers are likely headers if they start with capital
+        if (words.Length == 1)
+            return char.IsUpper(words[0][0]);
+        
+        // For multiple words, check if most start with capitals
+        var capitalizedWords = words.Count(w => w.Length > 0 && char.IsUpper(w[0]));
+        var titleCasePercentage = (double)capitalizedWords / words.Length;
+        
+        // At least 50% of words should be capitalized for it to be a header
+        // This allows headers like "Items and Equipment" (2 of 3 = 66%)
+        // But rejects sentences like "When an investigator becomes Insane" (4 of 5 = 80% but has sentence-like structure)
+        
+        // Additional check: Reject if starts with common sentence-starting words
+        var firstWord = words[0].ToLowerInvariant();
+        var sentenceStarters = new[] { "when", "if", "an", "the", "to", "for", "with", "by", "each", "any", "all" };
+        if (sentenceStarters.Contains(firstWord))
+            return false;
+        
+        return titleCasePercentage >= 0.5;
     }
 }
