@@ -19,7 +19,7 @@ public class MultiFormatFileWatcher
     private readonly PdfFragmentProcessor? _pdfProcessor;
 
     // Supported file extensions
-    private static readonly string[] SupportedExtensions = { ".txt", ".pdf", ".md" };
+    private static readonly string[] SupportedExtensions = { ".txt", ".pdf", ".md", ".json" };
 
     public MultiFormatFileWatcher(
         string inboxFolder, 
@@ -64,6 +64,10 @@ public class MultiFormatFileWatcher
     /// - Game name comes from first line of file
     /// - Categories are "GameName - SectionHeader"
     /// 
+    /// For JSON files:
+    /// - Structured format with game name, sections, and page numbers
+    /// - Categories are "GameName - SectionHeader"
+    /// 
     /// For PDF files:
     /// - Game name extracted from filename
     /// - Categories are "FileName - Chunk N" or "FileName - SectionTitle"
@@ -76,6 +80,7 @@ public class MultiFormatFileWatcher
         {
             ".txt" => await ProcessTextFileAsync(documentName, filePath),
             ".md" => await ProcessMarkdownFileAsync(documentName, filePath),
+            ".json" => await ProcessJsonFileAsync(documentName, filePath),
             ".pdf" => await ProcessPdfFileAsync(documentName, filePath),
             _ => throw new NotSupportedException($"File type '{extension}' is not supported")
         };
@@ -249,6 +254,130 @@ public class MultiFormatFileWatcher
             return page3;
         
         return null;
+    }
+
+    /// <summary>
+    /// Process JSON file with structured game knowledge format.
+    /// 
+    /// Expected JSON structure:
+    /// {
+    ///   "domainName": "Mansion of Madness",
+    ///   "sourceFile": "Rules Reference.pdf",
+    ///   "sections": [
+    ///     {
+    ///       "heading": "Insane Condition",
+    ///       "pageNumber": 12,
+    ///       "content": "If an investigator has suffered Horror..."
+    ///     }
+    ///   ]
+    /// }
+    /// </summary>
+    private async Task<List<MemoryFragment>> ProcessJsonFileAsync(string _, string filePath)
+    {
+        var fragments = new List<MemoryFragment>();
+
+        try
+        {
+            // Read and parse JSON
+            var jsonContent = await File.ReadAllTextAsync(filePath);
+            var jsonDoc = System.Text.Json.JsonDocument.Parse(jsonContent);
+            var root = jsonDoc.RootElement;
+
+            // Extract domain name (required)
+            if (!root.TryGetProperty("domainName", out var domainNameElement))
+            {
+                throw new InvalidOperationException("JSON file must contain 'domainName' property");
+            }
+
+            var domainName = domainNameElement.GetString();
+            if (string.IsNullOrWhiteSpace(domainName))
+            {
+                throw new InvalidOperationException("'domainName' property cannot be empty");
+            }
+
+            // Extract source file (required)
+            if (!root.TryGetProperty("sourceFile", out var sourceFileElement))
+            {
+                throw new InvalidOperationException("JSON file must contain 'sourceFile' property");
+            }
+
+            var sourceFile = sourceFileElement.GetString();
+            if (string.IsNullOrWhiteSpace(sourceFile))
+            {
+                throw new InvalidOperationException("'sourceFile' property cannot be empty");
+            }
+
+            DisplayService.ShowLoadingFile($"{domainName} ({sourceFile})", filePath);
+
+            // Extract sections
+            if (!root.TryGetProperty("sections", out var sectionsElement) || sectionsElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                throw new InvalidOperationException("JSON file must contain 'sections' array");
+            }
+
+            foreach (var section in sectionsElement.EnumerateArray())
+            {
+                // Extract section heading
+                if (!section.TryGetProperty("heading", out var headingElement))
+                {
+                    Console.WriteLine("[!] Skipping section without 'heading' property");
+                    continue;
+                }
+
+                var heading = headingElement.GetString();
+                if (string.IsNullOrWhiteSpace(heading))
+                {
+                    Console.WriteLine("[!] Skipping section with empty heading");
+                    continue;
+                }
+
+                // Extract content
+                if (!section.TryGetProperty("content", out var contentElement))
+                {
+                    Console.WriteLine($"[!] Skipping section '{heading}' without 'content' property");
+                    continue;
+                }
+
+                var content = contentElement.GetString();
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    Console.WriteLine($"[!] Skipping section '{heading}' with empty content");
+                    continue;
+                }
+
+                // Extract optional page number
+                int? pageNumber = null;
+                if (section.TryGetProperty("pageNumber", out var pageElement))
+                {
+                    if (pageElement.ValueKind == System.Text.Json.JsonValueKind.Number)
+                    {
+                        pageNumber = pageElement.GetInt32();
+                    }
+                }
+
+                // Build fragment content with source and page info
+                var fragmentContent = new System.Text.StringBuilder();
+                
+                // Add source metadata
+                fragmentContent.AppendLine($"[Source: {sourceFile}]");
+                if (pageNumber.HasValue)
+                {
+                    fragmentContent.AppendLine($"[Page: {pageNumber.Value}]");
+                }
+                fragmentContent.AppendLine();
+                fragmentContent.Append(content);
+
+                // Create fragment with category: "DomainName - Heading"
+                fragments.Add(new MemoryFragment($"{domainName} - {heading}", fragmentContent.ToString()));
+            }
+
+            DisplayService.ShowCollectedSections(fragments.Count, domainName);
+            return fragments;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            throw new InvalidOperationException($"Failed to parse JSON file: {ex.Message}", ex);
+        }
     }
 
     /// <summary>
