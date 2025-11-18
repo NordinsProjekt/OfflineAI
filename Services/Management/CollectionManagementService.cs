@@ -12,13 +12,15 @@ namespace Services.Management;
 /// Service for managing vector memory collections.
 /// Handles CRUD operations for collections in the vector database.
 /// </summary>
-public class CollectionManagementService
+public class CollectionManagementService(
+    IVectorMemoryRepository repository,
+    VectorMemoryPersistenceService persistenceService)
 {
     // Change notification for UI components
     public event Action? OnChange;
 
-    private readonly IVectorMemoryRepository _repository;
-    private readonly VectorMemoryPersistenceService _persistenceService;
+    private readonly IVectorMemoryRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+    private readonly VectorMemoryPersistenceService _persistenceService = persistenceService ?? throw new ArgumentNullException(nameof(persistenceService));
 
     private List<string> _availableCollections = new();
     public IReadOnlyList<string> AvailableCollections => _availableCollections.AsReadOnly();
@@ -33,14 +35,6 @@ public class CollectionManagementService
             _currentCollection = value;
             NotifyStateChanged();
         }
-    }
-
-    public CollectionManagementService(
-        IVectorMemoryRepository repository,
-        VectorMemoryPersistenceService persistenceService)
-    {
-        _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-        _persistenceService = persistenceService ?? throw new ArgumentNullException(nameof(persistenceService));
     }
 
     /// <summary>

@@ -30,10 +30,7 @@ public class AiChatServicePooled(
     private readonly ILlmMemory _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
     private readonly IModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
     private readonly GenerationSettings _generationSettings = generationSettings ?? throw new ArgumentNullException(nameof(generationSettings));
-    private readonly IDomainDetector? _domainDetector = domainDetector;
     private readonly bool _enableRag = enableRag;
-    private readonly bool _debugMode = debugMode;
-    private readonly bool _showPerformanceMetrics = showPerformanceMetrics;
 
     // Performance tuning constants for TinyLlama
     private const int MaxContextChars = 1500;        // Reduced from ~2771 to prevent overload
@@ -136,7 +133,7 @@ public class AiChatServicePooled(
             LastMetrics = metrics;
             
             // Display performance metrics if enabled (even for empty responses)
-            if (_showPerformanceMetrics)
+            if (showPerformanceMetrics)
             {
                 DisplayService.WriteLine(metrics.ToString());
             }
@@ -170,16 +167,16 @@ public class AiChatServicePooled(
         // Detect domains mentioned in the query
         List<string> detectedDomains = new();
         
-        if (_domainDetector != null)
+        if (domainDetector != null)
         {
-            detectedDomains = await _domainDetector.DetectDomainsAsync(question);
+            detectedDomains = await domainDetector.DetectDomainsAsync(question);
             
             if (detectedDomains.Count > 0)
             {
                 var domainNames = new List<string>();
                 foreach (var domainId in detectedDomains)
                 {
-                    domainNames.Add(await _domainDetector.GetDisplayNameAsync(domainId));
+                    domainNames.Add(await domainDetector.GetDisplayNameAsync(domainId));
                 }
                 DisplayService.WriteLine($"[*] Detected domain(s): {string.Join(", ", domainNames)}");
             }
@@ -208,12 +205,12 @@ public class AiChatServicePooled(
         if (relevantMemory == null)
         {
             // If we detected a domain but found no results OR context was too small
-            if (detectedDomains.Count > 0 && _domainDetector != null)
+            if (detectedDomains.Count > 0 && domainDetector != null)
             {
                 var domainNames = new List<string>();
                 foreach (var domainId in detectedDomains)
                 {
-                    domainNames.Add(await _domainDetector.GetDisplayNameAsync(domainId));
+                    domainNames.Add(await domainDetector.GetDisplayNameAsync(domainId));
                 }
                 return $"NO_RESULTS_FOR_DOMAIN:{string.Join(", ", domainNames)}";
             }
@@ -229,12 +226,12 @@ public class AiChatServicePooled(
             DisplayService.WriteLine($"[!] Retrieved context is too small ({relevantMemory.Length} chars) - may not provide meaningful answer");
             
             // Return a special marker to indicate insufficient context
-            if (detectedDomains.Count > 0 && _domainDetector != null)
+            if (detectedDomains.Count > 0 && domainDetector != null)
             {
                 var domainNames = new List<string>();
                 foreach (var domainId in detectedDomains)
                 {
-                    domainNames.Add(await _domainDetector.GetDisplayNameAsync(domainId));
+                    domainNames.Add(await domainDetector.GetDisplayNameAsync(domainId));
                 }
                 return $"NO_RESULTS_FOR_DOMAIN:{string.Join(", ", domainNames)}";
             }
@@ -250,7 +247,7 @@ public class AiChatServicePooled(
         // The retrieved fragments already contain Gloomhaven-specific context
 
         // Show debug output BEFORE truncation (if enabled) to see full retrieved context
-        if (_debugMode)
+        if (debugMode)
         {
             DisplayService.ShowSystemPromptDebug(relevantMemory, debug: true);
         }
