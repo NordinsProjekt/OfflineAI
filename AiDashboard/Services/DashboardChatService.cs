@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using Application.AI.Chat;
 using Application.AI.Extensions;
@@ -6,6 +7,7 @@ using Application.AI.Pooling;
 using Application.AI.Utilities;
 using Services.Configuration;
 using Services.Interfaces;
+using Services.Repositories;
 using Services.UI;
 
 namespace AiDashboard.Services
@@ -20,18 +22,36 @@ namespace AiDashboard.Services
         private readonly ILlmMemory _conversationMemory;
         private readonly IModelInstancePool _modelPool;
         private readonly IDomainDetector? _domainDetector;
+        private readonly IQuestionRepository? _questionRepository;
+        private readonly ILlmRepository? _llmRepository;
+        private Func<string?>? _getCurrentModelName;
         private bool _disposed;
 
         public DashboardChatService(
             ILlmMemory memory,
             ILlmMemory conversationMemory,
             IModelInstancePool modelPool,
-            IDomainDetector? domainDetector = null)
+            IDomainDetector? domainDetector = null,
+            IQuestionRepository? questionRepository = null,
+            ILlmRepository? llmRepository = null,
+            Func<string?>? getCurrentModelName = null)
         {
             _memory = memory ?? throw new ArgumentNullException(nameof(memory));
             _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
             _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
             _domainDetector = domainDetector;
+            _questionRepository = questionRepository;
+            _llmRepository = llmRepository;
+            _getCurrentModelName = getCurrentModelName;
+        }
+
+        /// <summary>
+        /// Set the provider that returns the current model name.
+        /// This allows the chat service to get the latest model name dynamically.
+        /// </summary>
+        public void SetCurrentModelNameProvider(Func<string?> getCurrentModelName)
+        {
+            _getCurrentModelName = getCurrentModelName ?? throw new ArgumentNullException(nameof(getCurrentModelName));
         }
 
         /// <summary>
@@ -114,6 +134,9 @@ namespace AiDashboard.Services
                 // Clean up model-specific artifacts using extension method
                 response = response.CleanModelArtifacts();
 
+                // Save question and answer to database
+                await SaveQuestionAnswerAsync(message, response);
+
                 // Append performance metrics to response if enabled
                 if (showPerformanceMetrics && chatService.LastMetrics != null)
                 {
@@ -135,6 +158,41 @@ namespace AiDashboard.Services
                 return ExceptionMessageService.MessageProcessingError(
                     ex.GetType().Name, 
                     ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Save the question and answer to the database with the current LLM.
+        /// </summary>
+        private async Task SaveQuestionAnswerAsync(string question, string answer)
+        {
+            // Only save if repositories are available
+            if (_questionRepository == null || _llmRepository == null)
+            {
+                return;
+            }
+
+            try
+            {
+                // Get current model name dynamically
+                var currentModelFileName = _getCurrentModelName?.Invoke();
+                
+                if (string.IsNullOrWhiteSpace(currentModelFileName))
+                {
+                    Console.WriteLine("[WARNING] Cannot save question/answer: current model name is not available");
+                    return;
+                }
+
+                // Get or create LLM entry
+                var llmId = await _llmRepository.AddOrGetLlmAsync(currentModelFileName);
+
+                // Save question and answer
+                await _questionRepository.SaveQuestionAsync(question, answer, llmId);
+            }
+            catch (Exception ex)
+            {
+                // Log error but don't fail the chat operation
+                Console.WriteLine($"[WARNING] Failed to save question/answer: {ex.Message}");
             }
         }
 
