@@ -6,9 +6,7 @@ using Application.AI.Utilities;
 using Entities;
 using Services.Configuration;
 using Services.Interfaces;
-using Services.Memory;
 using Services.UI;
-using Services.Utilities;
 
 namespace Application.AI.Chat;
 
