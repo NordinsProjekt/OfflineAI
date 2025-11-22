@@ -37,6 +37,7 @@ public static class EmbeddingExtensions
     /// <summary>
     /// Calculates cosine similarity between two embedding vectors.
     /// Both vectors should be normalized for accurate results.
+    /// Returns dot product for normalized vectors.
     /// </summary>
     /// <param name="embedding1">First embedding</param>
     /// <param name="embedding2">Second embedding</param>
@@ -108,5 +109,132 @@ public static class EmbeddingExtensions
     {
         var magnitude = embedding.GetMagnitude();
         return Math.Abs(magnitude - 1.0f) < tolerance;
+    }
+
+    /// <summary>
+    /// Calculate weighted similarity using multiple embedding types.
+    /// Uses category (40%), content (30%), and combined (30%) embeddings for optimal matching.
+    /// Falls back gracefully if some embeddings are missing.
+    /// </summary>
+    /// <param name="queryEmbedding">The query embedding vector</param>
+    /// <param name="categoryEmbedding">Category-only embedding (weight: 0.4)</param>
+    /// <param name="contentEmbedding">Content-only embedding (weight: 0.3)</param>
+    /// <param name="combinedEmbedding">Combined category+content embedding (weight: 0.3)</param>
+    /// <returns>Weighted cosine similarity score between 0 and 1</returns>
+    public static double WeightedCosineSimilarity(
+        ReadOnlyMemory<float> queryEmbedding,
+        ReadOnlyMemory<float> categoryEmbedding,
+        ReadOnlyMemory<float> contentEmbedding,
+        ReadOnlyMemory<float> combinedEmbedding)
+    {
+        var weights = new List<(double similarity, double weight)>();
+        
+        // Category embedding (weight: 0.4) - highest weight for domain/topic matching
+        if (!categoryEmbedding.IsEmpty && categoryEmbedding.Length == queryEmbedding.Length)
+        {
+            var catSim = queryEmbedding.CosineSimilarityWithNormalization(categoryEmbedding);
+            weights.Add((catSim, 0.4));
+        }
+        
+        // Content embedding (weight: 0.3) - for detailed content matching
+        if (!contentEmbedding.IsEmpty && contentEmbedding.Length == queryEmbedding.Length)
+        {
+            var contentSim = queryEmbedding.CosineSimilarityWithNormalization(contentEmbedding);
+            weights.Add((contentSim, 0.3));
+        }
+        
+        // Combined embedding (weight: 0.3) - fallback/balance
+        if (!combinedEmbedding.IsEmpty && combinedEmbedding.Length == queryEmbedding.Length)
+        {
+            var combinedSim = queryEmbedding.CosineSimilarityWithNormalization(combinedEmbedding);
+            weights.Add((combinedSim, 0.3));
+        }
+        
+        // If no embeddings available, return 0
+        if (weights.Count == 0)
+        {
+            return 0;
+        }
+        
+        // Calculate weighted average
+        var totalWeight = weights.Sum(w => w.weight);
+        var weightedSum = weights.Sum(w => w.similarity * w.weight);
+        
+        return weightedSum / totalWeight;
+    }
+    
+    /// <summary>
+    /// Calculate weighted similarity with custom weights.
+    /// </summary>
+    public static double WeightedCosineSimilarity(
+        ReadOnlyMemory<float> queryEmbedding,
+        ReadOnlyMemory<float> categoryEmbedding,
+        ReadOnlyMemory<float> contentEmbedding,
+        ReadOnlyMemory<float> combinedEmbedding,
+        double categoryWeight = 0.4,
+        double contentWeight = 0.3,
+        double combinedWeight = 0.3)
+    {
+        var weights = new List<(double similarity, double weight)>();
+        
+        if (!categoryEmbedding.IsEmpty && categoryEmbedding.Length == queryEmbedding.Length)
+        {
+            var catSim = queryEmbedding.CosineSimilarityWithNormalization(categoryEmbedding);
+            weights.Add((catSim, categoryWeight));
+        }
+        
+        if (!contentEmbedding.IsEmpty && contentEmbedding.Length == queryEmbedding.Length)
+        {
+            var contentSim = queryEmbedding.CosineSimilarityWithNormalization(contentEmbedding);
+            weights.Add((contentSim, contentWeight));
+        }
+        
+        if (!combinedEmbedding.IsEmpty && combinedEmbedding.Length == queryEmbedding.Length)
+        {
+            var combinedSim = queryEmbedding.CosineSimilarityWithNormalization(combinedEmbedding);
+            weights.Add((combinedSim, combinedWeight));
+        }
+        
+        if (weights.Count == 0)
+        {
+            return 0;
+        }
+        
+        var totalWeight = weights.Sum(w => w.weight);
+        var weightedSum = weights.Sum(w => w.similarity * w.weight);
+        
+        return weightedSum / totalWeight;
+    }
+
+    /// <summary>
+    /// Normalize a vector to unit length (L2 normalization).
+    /// </summary>
+    public static ReadOnlyMemory<float> Normalize(ReadOnlyMemory<float> vector)
+    {
+        var span = vector.Span;
+        var magnitude = 0.0;
+
+        // Calculate magnitude
+        for (int i = 0; i < span.Length; i++)
+        {
+            magnitude += span[i] * span[i];
+        }
+
+        magnitude = Math.Sqrt(magnitude);
+
+        // Avoid division by zero
+        if (magnitude == 0)
+        {
+            return vector;
+        }
+
+        // Normalize
+        var normalized = new float[span.Length];
+        for (int i = 0; i < span.Length; i++)
+        {
+            normalized[i] = (float)(span[i] / magnitude);
+        }
+
+        return new ReadOnlyMemory<float>(normalized);
     }
 }

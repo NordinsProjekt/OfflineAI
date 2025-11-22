@@ -12,8 +12,13 @@
         <span>Performance Metrics</span>
     </label>
     <label class="oa-switch-row">
-        <input type="checkbox" @bind="Dashboard.SettingsService.DebugMode">
+	    <input type="checkbox" @bind="Dashboard.SettingsService.DebugMode">
+	    <span class="oa-switch"></span>
+	    <span>Debug Mode</span>
+    </label>
+    <label class="oa-switch-row">
+        <input type="checkbox" @bind="Dashboard.SettingsService.UseGpu">
         <span class="oa-switch"></span>
-        <span>Debug Mode</span>
+        <span>Use GPU (34 layers)</span>
     </label>
 </CollapsibleSection>

@@ -60,7 +60,9 @@ public class AiChatServicePooledTests
             It.IsAny<float>(),
             It.IsAny<float>(),
             It.IsAny<float>(),
-            It.IsAny<float>()))
+            It.IsAny<float>(),
+            It.IsAny<bool>(),
+            It.IsAny<int>()))
             .ReturnsAsync(response);
 
         configure?.Invoke(mockProcess);
@@ -199,7 +201,9 @@ public class AiChatServicePooledTests
             It.IsAny<float>(),
             It.IsAny<float>(),
             It.IsAny<float>(),
-            It.IsAny<float>()))
+            It.IsAny<float>(),
+            It.IsAny<bool>(),
+            It.IsAny<int>()))
             .ReturnsAsync("Paris is the capital of France.");
 
         var mockPooledInstance = CreateMockPooledInstance("Paris is the capital of France.");
@@ -385,7 +389,9 @@ public class AiChatServicePooledTests
             It.IsAny<float>(),
             It.IsAny<float>(),
             It.IsAny<float>(),
-            It.IsAny<float>()))
+            It.IsAny<float>(),
+            It.IsAny<bool>(),
+            It.IsAny<int>()))
             .ThrowsAsync(new TimeoutException("Query timed out"));
 
         var mockPooledInstance = new PooledInstance(mockProcess.Object, _mockModelPool.Object);
@@ -432,7 +438,9 @@ public class AiChatServicePooledTests
             It.IsAny<float>(),
             It.IsAny<float>(),
             It.IsAny<float>(),
-            It.IsAny<float>()))
+            It.IsAny<float>(),
+            It.IsAny<bool>(),
+            It.IsAny<int>()))
             .ThrowsAsync(new InvalidOperationException("Process failed"));
 
         var mockPooledInstance = new PooledInstance(mockProcess.Object, _mockModelPool.Object);
@@ -558,9 +566,11 @@ public class AiChatServicePooledTests
             It.IsAny<float>(),
             It.IsAny<float>(),
             It.IsAny<float>(),
-            It.IsAny<float>()))
-            .Callback<string, string, int, float, int, float, float, float, float>(
-                (sysPrompt, userQ, _, _, _, _, _, _, _) => capturedSystemPrompt = sysPrompt)
+            It.IsAny<float>(),
+            It.IsAny<bool>(),
+            It.IsAny<int>()))
+            .Callback<string, string, int, float, int, float, float, float, float, bool, int>(
+                (sysPrompt, userQ, _, _, _, _, _, _, _, _, _) => capturedSystemPrompt = sysPrompt)
             .ReturnsAsync(response);
 
         var mockPooledInstance = new PooledInstance(mockProcess.Object, _mockModelPool.Object);
@@ -753,9 +763,11 @@ public class AiChatServicePooledTests
             It.IsAny<float>(),
             It.IsAny<float>(),
             It.IsAny<float>(),
-            It.IsAny<float>()))
-            .Callback<string, string, int, float, int, float, float, float, float>(
-                (sysPrompt, _, _, _, _, _, _, _, _) => capturedSystemPrompt = sysPrompt)
+            It.IsAny<float>(),
+            It.IsAny<bool>(),
+            It.IsAny<int>()))
+            .Callback<string, string, int, float, int, float, float, float, float, bool, int>(
+                (sysPrompt, _, _, _, _, _, _, _, _, _, _) => capturedSystemPrompt = sysPrompt)
             .ReturnsAsync("Response");
 
         var mockPooledInstance = new PooledInstance(mockProcess.Object, _mockModelPool.Object);
@@ -957,9 +969,11 @@ public class AiChatServicePooledTests
             It.IsAny<float>(),
             It.IsAny<float>(),
             It.IsAny<float>(),
-            It.IsAny<float>()))
-            .Callback<string, string, int, float, int, float, float, float, float>(
-                (_, _, maxTokens, temp, topK, topP, repeatP, presenceP, freqP) =>
+            It.IsAny<float>(),
+            It.IsAny<bool>(),
+            It.IsAny<int>()))
+            .Callback<string, string, int, float, int, float, float, float, float, bool, int>(
+                (_, _, maxTokens, temp, topK, topP, repeatP, presenceP, freqP, _, _) =>
                 {
                     capturedMaxTokens = maxTokens;
                     capturedTemperature = temp;

@@ -10,6 +10,7 @@ namespace Services.Memory;
 /// <summary>
 /// Database-backed vector memory that queries on-demand instead of loading all fragments into memory.
 /// Suitable for large knowledge bases and web scenarios.
+/// Uses weighted similarity with multiple embeddings for improved matching.
 /// </summary>
 public class DatabaseVectorMemory(
     ITextEmbeddingGenerationService embeddingService,
@@ -29,6 +30,7 @@ public class DatabaseVectorMemory(
 
     /// <summary>
     /// Search the database for relevant fragments based on semantic similarity.
+    /// Uses weighted similarity combining category, content, and combined embeddings.
     /// </summary>
     public async Task<string?> SearchRelevantMemoryAsync(
         string query,
@@ -68,12 +70,43 @@ public class DatabaseVectorMemory(
             return null;
         }
 
-        // Calculate similarity scores
+        // Calculate similarity scores using weighted strategy
         var scoredFragments = allFragments
-            .Select(entity => new
+            .Select(entity =>
             {
-                Entity = entity,
-                Score = entity.Embedding != null ? queryEmbedding.CosineSimilarityWithNormalization(entity.GetEmbeddingAsMemory()) : 0.0
+                double score;
+                
+                // Try weighted similarity if multiple embeddings available
+                var categoryEmb = entity.GetCategoryEmbeddingAsMemory();
+                var contentEmb = entity.GetContentEmbeddingAsMemory();
+                var combinedEmb = entity.GetEmbeddingAsMemory();
+                
+                if (!categoryEmb.IsEmpty || !contentEmb.IsEmpty)
+                {
+                    // Use weighted similarity (category: 40%, content: 30%, combined: 30%)
+                    score = VectorExtensions.WeightedCosineSimilarity(
+                        queryEmbedding,
+                        categoryEmb,
+                        contentEmb,
+                        combinedEmb);
+                    
+                    Console.WriteLine($"[DEBUG] Weighted score for '{entity.Category}': {score:F3}");
+                }
+                else if (!combinedEmb.IsEmpty)
+                {
+                    // Fallback to combined embedding only (legacy)
+                    score = queryEmbedding.CosineSimilarityWithNormalization(combinedEmb);
+                }
+                else
+                {
+                    score = 0.0;
+                }
+                
+                return new
+                {
+                    Entity = entity,
+                    Score = score
+                };
             })
             .OrderByDescending(x => x.Score)
             .ToList();
@@ -101,7 +134,6 @@ public class DatabaseVectorMemory(
             var content = result.Entity.Content;
 
             // Truncate individual fragments if limit specified
-            // BUT ensure we don't cut mid-sentence and preserve minimum context
             if (maxCharsPerFragment.HasValue && content.Length > maxCharsPerFragment.Value)
             {
                 content = TruncateAtSentenceBoundary(content, maxCharsPerFragment.Value);
@@ -122,7 +154,6 @@ public class DatabaseVectorMemory(
         var resultText = sb.ToString();
         
         // EDGE CASE FIX: Check if total retrieved content is too small (< 200 chars)
-        // This happens when fragments are heavily truncated or very small
         if (totalContentLength < 200)
         {
             Console.WriteLine($"[!] WARNING: Retrieved context is too small ({totalContentLength} chars)");
@@ -130,8 +161,8 @@ public class DatabaseVectorMemory(
             
             // Try again with lower threshold and more results
             var expandedResults = scoredFragments
-                .Where(x => x.Score >= Math.Max(0.3, minRelevanceScore - 0.15)) // Lower threshold by 0.15
-                .Take(Math.Min(topK + 2, 5)) // Get 2 more fragments (max 5 total)
+                .Where(x => x.Score >= Math.Max(0.3, minRelevanceScore - 0.15))
+                .Take(Math.Min(topK + 2, 5))
                 .ToList();
             
             if (expandedResults.Count > results.Count)
@@ -196,12 +227,12 @@ public class DatabaseVectorMemory(
         // If we found a sentence boundary and it's not too far back (within last 30% of truncated text)
         if (lastSentenceEnd > maxLength * 0.7)
         {
-            return text.Substring(0, lastSentenceEnd + 2).Trim(); // +2 to include ". "
+            return text.Substring(0, lastSentenceEnd + 2).Trim();
         }
         
         // Otherwise truncate at word boundary
         var lastSpace = truncated.LastIndexOf(' ');
-        if (lastSpace > maxLength - 50) // Only use word boundary if not too far back
+        if (lastSpace > maxLength - 50)
         {
             truncated = truncated.Substring(0, lastSpace);
         }

@@ -437,6 +437,8 @@ public class DashboardState
                 SettingsService.DebugMode,
                 SettingsService.PerformanceMetrics,
                 genSettings,
+                SettingsService.UseGpu,
+                SettingsService.GpuLayers,
                 SettingsService.TimeoutSeconds);
         }
         catch (Exception ex)

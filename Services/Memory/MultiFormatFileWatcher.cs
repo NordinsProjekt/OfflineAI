@@ -21,6 +21,9 @@ public class MultiFormatFileWatcher
     // Supported file extensions
     private static readonly string[] SupportedExtensions = { ".txt", ".pdf", ".md", ".json" };
 
+    // Maximum chunk size for TXT file embedding (no minimum enforced)
+    private const int MaxChunkSize = 1500;
+
     public MultiFormatFileWatcher(
         string inboxFolder, 
         string archiveFolder,
@@ -103,6 +106,8 @@ public class MultiFormatFileWatcher
     /// - Title Case (most words start with capital)
     /// - No sentence-ending punctuation (., !, ?)
     /// - Not a bullet point (-, *, •)
+    /// 
+    /// CHUNK SIZE: Maximum 1500 characters per fragment, no minimum enforced
     /// </summary>
     private async Task<List<MemoryFragment>> ProcessTextFileAsync(string _, string filePath)
     {
@@ -128,8 +133,10 @@ public class MultiFormatFileWatcher
             var singleFragmentContent = string.Join(Environment.NewLine, lines).Trim();
             if (!string.IsNullOrWhiteSpace(singleFragmentContent))
             {
-                fragments.Add(new MemoryFragment(gameName, singleFragmentContent));
-                DisplayService.ShowCollectedSections(1, gameName);
+                // Split into chunks if content is too large
+                var chunkedFragments = SplitIntoChunks(singleFragmentContent, gameName, gameName);
+                fragments.AddRange(chunkedFragments);
+                DisplayService.ShowCollectedSections(fragments.Count, gameName);
             }
             return fragments;
         }
@@ -179,7 +186,11 @@ public class MultiFormatFileWatcher
                         }
                         
                         // Category format: "GameName - SectionHeader"
-                        fragments.Add(new MemoryFragment($"{gameName} - {currentHeader}", content_text));
+                        var category = $"{gameName} - {currentHeader}";
+                        
+                        // Split into chunks if content is too large
+                        var chunkedFragments = SplitIntoChunks(content_text, gameName, category);
+                        fragments.AddRange(chunkedFragments);
                     }
                 }
                 
@@ -208,7 +219,11 @@ public class MultiFormatFileWatcher
                     content_text = $"[Page: {currentPageNumber.Value}]\n\n{content_text}";
                 }
                 
-                fragments.Add(new MemoryFragment($"{gameName} - {currentHeader}", content_text));
+                var category = $"{gameName} - {currentHeader}";
+                
+                // Split into chunks if content is too large
+                var chunkedFragments = SplitIntoChunks(content_text, gameName, category);
+                fragments.AddRange(chunkedFragments);
             }
         }
         
@@ -218,11 +233,61 @@ public class MultiFormatFileWatcher
             var allContent = string.Join(Environment.NewLine, lines.Skip(1)).Trim();
             if (!string.IsNullOrWhiteSpace(allContent))
             {
-                fragments.Add(new MemoryFragment(gameName, allContent));
+                var chunkedFragments = SplitIntoChunks(allContent, gameName, gameName);
+                fragments.AddRange(chunkedFragments);
             }
         }
 
         DisplayService.ShowCollectedSections(fragments.Count, gameName);
+        return fragments;
+    }
+
+    /// <summary>
+    /// Splits content into chunks of maximum 1500 characters while preserving sentence boundaries.
+    /// Each chunk is a separate MemoryFragment.
+    /// No minimum chunk size enforced - allows small fragments.
+    /// </summary>
+    private List<MemoryFragment> SplitIntoChunks(string content, string gameName, string baseCategory)
+    {
+        var fragments = new List<MemoryFragment>();
+        
+        // If content fits in one chunk, return it as-is
+        if (content.Length <= MaxChunkSize)
+        {
+            fragments.Add(new MemoryFragment(baseCategory, content));
+            return fragments;
+        }
+        
+        // Split into sentences to avoid breaking mid-sentence
+        var sentences = System.Text.RegularExpressions.Regex.Split(content, @"(?<=[.!?])\s+");
+        
+        var currentChunk = new System.Text.StringBuilder();
+        int chunkIndex = 1;
+        
+        foreach (var sentence in sentences)
+        {
+            // If adding this sentence would exceed max size, save current chunk
+            if (currentChunk.Length > 0 && currentChunk.Length + sentence.Length + 1 > MaxChunkSize)
+            {
+                var category = fragments.Count == 0 ? baseCategory : $"{baseCategory} (Part {chunkIndex})";
+                fragments.Add(new MemoryFragment(category, currentChunk.ToString().Trim()));
+                currentChunk.Clear();
+                chunkIndex++;
+            }
+            
+            // Add sentence to current chunk
+            if (currentChunk.Length > 0)
+                currentChunk.Append(' ');
+            currentChunk.Append(sentence);
+        }
+        
+        // Save final chunk
+        if (currentChunk.Length > 0)
+        {
+            var category = fragments.Count == 0 ? baseCategory : $"{baseCategory} (Part {chunkIndex})";
+            fragments.Add(new MemoryFragment(category, currentChunk.ToString().Trim()));
+        }
+        
         return fragments;
     }
 

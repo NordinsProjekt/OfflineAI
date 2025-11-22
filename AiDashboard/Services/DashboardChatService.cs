@@ -96,6 +96,8 @@ namespace AiDashboard.Services
             bool debugMode,
             bool showPerformanceMetrics,
             GenerationSettings generationSettings,
+            bool useGpu = false,
+            int gpuLayers = 0,
             int timeoutSeconds = 30)
         {
             if (string.IsNullOrWhiteSpace(message))
@@ -117,12 +119,20 @@ namespace AiDashboard.Services
 
             try
             {
+                // Create LLM settings with GPU configuration
+                var llmSettings = new LlmSettings
+                {
+                    UseGpu = useGpu,
+                    GpuLayers = gpuLayers
+                };
+
                 // Create chat service with current settings
                 var chatService = new AiChatServicePooled(
                     _memory,
                     _conversationMemory,
                     _modelPool,
                     generationSettings,
+                    llmSettings,
                     debugMode: debugMode,
                     enableRag: ragMode,
                     showPerformanceMetrics: showPerformanceMetrics,

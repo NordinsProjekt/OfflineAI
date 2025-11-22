@@ -54,7 +54,21 @@
     color: #9ec7ff;
 }
 
+.oa-badge.purple {
+    border-color: #4a2c6f;
+    background: #1c1426;
+    color: #d8b4fe;
+}
+
+.oa-badge.orange {
+    border-color: #6f4a2c;
+    background: #261c14;
+    color: #fdba74;
+}
+
 .oa-badge.gray {
+    border-color: #2a2f3a;
+    background: #12151b;
     color: #c4cbd8;
 }
 
