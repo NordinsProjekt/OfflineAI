@@ -11,7 +11,7 @@ public class GenerationSettingsService
     // Change notification for UI components
     public event Action? OnChange;
 
-    private double _temperature = 0.7;
+    private double _temperature = 0.3;
     public double Temperature
     {
         get => _temperature;
@@ -171,6 +171,23 @@ public class GenerationSettingsService
         }
     }
 
+    private bool _useGpu = true;
+    public bool UseGpu
+    {
+        get => _useGpu;
+        set
+        {
+            if (_useGpu == value) return;
+            _useGpu = value;
+            NotifyStateChanged();
+        }
+    }
+
+    /// <summary>
+    /// Get GPU layers based on UseGpu toggle (34 layers when ON, 0 when OFF)
+    /// </summary>
+    public int GpuLayers => UseGpu ? 34 : 0;
+
     /// <summary>
     /// Create a GenerationSettings object from current settings
     /// </summary>
@@ -211,7 +228,7 @@ public class GenerationSettingsService
     /// </summary>
     public void ResetToDefaults()
     {
-        Temperature = 0.7;
+        Temperature = 0.3;
         MaxTokens = 512;
         TopK = 40;
         TopP = 0.95;
@@ -224,6 +241,7 @@ public class GenerationSettingsService
         DebugMode = false;
         RagTopK = 3;
         RagMinRelevanceScore = 0.5;
+        UseGpu = true; // Default to GPU enabled with 34 layers
     }
 
     private void NotifyStateChanged() => OnChange?.Invoke();

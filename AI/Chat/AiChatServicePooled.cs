@@ -21,6 +21,7 @@ public class AiChatServicePooled(
     ILlmMemory conversationMemory,
     IModelInstancePool modelPool,
     GenerationSettings generationSettings,
+    LlmSettings? llmSettings = null,
     bool debugMode = false,
     bool enableRag = true,
     bool showPerformanceMetrics = false,
@@ -30,6 +31,7 @@ public class AiChatServicePooled(
     private readonly ILlmMemory _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
     private readonly IModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
     private readonly GenerationSettings _generationSettings = generationSettings ?? throw new ArgumentNullException(nameof(generationSettings));
+    private readonly LlmSettings? _llmSettings = llmSettings; // Can be null for tests
     private readonly bool _enableRag = enableRag;
 
     // Performance tuning constants for TinyLlama
@@ -117,7 +119,9 @@ public class AiChatServicePooled(
                 topP: _generationSettings.TopP,
                 repeatPenalty: _generationSettings.RepeatPenalty,
                 presencePenalty: _generationSettings.PresencePenalty,
-                frequencyPenalty: _generationSettings.FrequencyPenalty);
+                frequencyPenalty: _generationSettings.FrequencyPenalty,
+                useGpu: _llmSettings?.UseGpu ?? false,
+                gpuLayers: _llmSettings?.GpuLayers ?? 0);
 
             stopwatch.Stop();
 

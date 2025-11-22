@@ -75,7 +75,9 @@ public class PersistentLlmProcess : IPersistentLlmProcess
         float topP = 0.85f,
         float repeatPenalty = 1.15f,
         float presencePenalty = 0.2f,
-        float frequencyPenalty = 0.2f)
+        float frequencyPenalty = 0.2f,
+        bool useGpu = false,
+        int gpuLayers = 0)
     {
         if (_disposed)
             throw new ObjectDisposedException(nameof(PersistentLlmProcess));
@@ -99,6 +101,19 @@ public class PersistentLlmProcess : IPersistentLlmProcess
             
             // Set context size to prevent memory issues (2048 tokens = ~1500 chars of context)
             processInfo.Arguments += $" -c 2048";
+            
+            // Configure GPU offloading
+            // -ngl 0 = CPU only (no GPU layers)
+            // -ngl > 0 = offload that many layers to GPU
+            if (useGpu && gpuLayers > 0)
+            {
+                processInfo.Arguments += $" -ngl {gpuLayers}";
+            }
+            else
+            {
+                // Force CPU-only execution
+                processInfo.Arguments += $" -ngl 0";
+            }
             
             // Apply generation parameters
             processInfo.Arguments += $" -n {maxTokens}";
