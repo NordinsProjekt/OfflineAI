@@ -35,7 +35,22 @@ public class DashboardState
     public ModelManagementService ModelService { get; }
     public CollectionManagementService? CollectionService { get; private set; }
     public InboxProcessingService? InboxService { get; private set; }
-    public DashboardChatService? ChatService { get; set; }
+    
+    private DashboardChatService? _chatService;
+    public DashboardChatService? ChatService 
+    { 
+        get => _chatService;
+        set
+        {
+            _chatService = value;
+            
+            // If we have a chat service, inject the model name provider
+            if (_chatService != null)
+            {
+                _chatService.SetCurrentModelNameProvider(() => ModelService.CurrentModel);
+            }
+        }
+    }
 
     // UI-specific state
     private bool _collapsed;
@@ -389,6 +404,18 @@ public class DashboardState
             await RefreshCollectionsAsync();
         }
 
+        StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
+    }
+
+    public async Task ConvertPdfToTxtInInboxAsync()
+    {
+        if (InboxService == null)
+        {
+            StatusMessage = "[ERROR] Inbox service not available";
+            return;
+        }
+
+        var (success, message, filesConverted) = await InboxService.ConvertPdfToTxtAsync();
         StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
     }
 

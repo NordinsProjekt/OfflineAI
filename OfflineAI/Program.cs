@@ -10,6 +10,7 @@ using Services.Configuration;
 using Infrastructure.Data.Dapper;
 using Microsoft.SemanticKernel.Embeddings;
 using System.Diagnostics;
+using Services.Management;
 
 namespace OfflineAI
 {
@@ -30,6 +31,12 @@ namespace OfflineAI
             
             DisplayService.ShowVectorMemoryDatabaseHeader();
             DisplayService.WriteLine("\n🚀 Starting OfflineAI with BERT Embeddings + SQL Database...\n");
+            
+            // Initialize LLM and Question repositories
+            await InitializeLlmAndQuestionTablesAsync(host.Services);
+            
+            // Sync LLMs from folder to database
+            await SyncLlmsAsync(host.Services, appConfig);
             
             // Only one mode: Database persistence with BERT embeddings
             await RunVectorMemoryWithDatabaseMode.RunAsync(host.Services);
@@ -58,8 +65,10 @@ namespace OfflineAI
                     // Validate configuration
                     ValidateConfiguration(appConfig);
                     
-                    // Register Dapper repository (only option now - EF Core removed)
+                    // Register Dapper repositories
                     services.AddDapperVectorMemoryRepository(dbConfig.ConnectionString, dbConfig.ActiveTableName);
+                    services.AddDapperLlmRepository(dbConfig.ConnectionString);
+                    services.AddDapperQuestionRepository(dbConfig.ConnectionString);
                     
                     // Register embedding service (both as concrete type and interface)
                     services.AddSingleton(provider => 
@@ -75,6 +84,18 @@ namespace OfflineAI
                     // Register persistence service
                     services.AddSingleton<VectorMemoryPersistenceService>();
                     
+                    // Register LLM sync service
+                    services.AddSingleton(provider =>
+                    {
+                        var llmRepository = provider.GetRequiredService<Services.Repositories.ILlmRepository>();
+                        var modelPath = appConfig.Llm.ModelPath;
+                        var llmFolderPath = string.IsNullOrWhiteSpace(modelPath) 
+                            ? string.Empty 
+                            : Path.GetDirectoryName(modelPath) ?? string.Empty;
+                        
+                        return new LlmSyncService(llmRepository, llmFolderPath);
+                    });
+                    
                     // Register model pool
                     services.AddSingleton(provider => 
                         new ModelInstancePool(
@@ -83,6 +104,39 @@ namespace OfflineAI
                             maxInstances: appConfig.Pool.MaxInstances,
                             timeoutMs: appConfig.Pool.TimeoutMs));
                 });
+        }
+        
+        private static async Task InitializeLlmAndQuestionTablesAsync(IServiceProvider services)
+        {
+            var llmRepository = services.GetRequiredService<Services.Repositories.ILlmRepository>();
+            var questionRepository = services.GetRequiredService<Services.Repositories.IQuestionRepository>();
+            
+            DisplayService.WriteLine("[*] Initializing LLM and Question tables...");
+            
+            await llmRepository.InitializeDatabaseAsync();
+            await questionRepository.InitializeDatabaseAsync();
+            
+            DisplayService.WriteLine("[+] LLM and Question tables ready");
+        }
+        
+        private static async Task SyncLlmsAsync(IServiceProvider services, AppConfiguration appConfig)
+        {
+            var llmSyncService = services.GetRequiredService<LlmSyncService>();
+            
+            try
+            {
+                var (added, existing, total) = await llmSyncService.SyncLlmsAsync();
+                
+                if (total == 0)
+                {
+                    DisplayService.WriteLine("[!] Warning: No LLM models found in folder");
+                    DisplayService.WriteLine($"    Expected folder: {Path.GetDirectoryName(appConfig.Llm.ModelPath)}");
+                }
+            }
+            catch (Exception ex)
+            {
+                DisplayService.WriteLine($"[!] Error syncing LLMs: {ex.Message}");
+            }
         }
         
         private static void ValidateConfiguration(AppConfiguration config)
