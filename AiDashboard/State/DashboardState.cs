@@ -407,6 +407,18 @@ public class DashboardState
         StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
     }
 
+    public async Task ConvertPdfToTxtInInboxAsync()
+    {
+        if (InboxService == null)
+        {
+            StatusMessage = "[ERROR] Inbox service not available";
+            return;
+        }
+
+        var (success, message, filesConverted) = await InboxService.ConvertPdfToTxtAsync();
+        StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
+    }
+
     // Chat operations
     public async Task<string> SendMessageAsync(string message)
     {
