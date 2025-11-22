@@ -65,6 +65,8 @@ public class VectorMemoryRepository : IVectorMemoryRepository
                     Content NVARCHAR(MAX) NOT NULL,
                     ContentLength INT NOT NULL DEFAULT 0,
                     Embedding VARBINARY(MAX) NULL,
+                    CategoryEmbedding VARBINARY(MAX) NULL,
+                    ContentEmbedding VARBINARY(MAX) NULL,
                     EmbeddingDimension INT NULL,
                     CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
                     UpdatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
@@ -182,6 +184,8 @@ public class VectorMemoryRepository : IVectorMemoryRepository
                     Content NVARCHAR(MAX) NOT NULL,
                     ContentLength INT NOT NULL DEFAULT 0,
                     Embedding VARBINARY(MAX) NULL,
+                    CategoryEmbedding VARBINARY(MAX) NULL,
+                    ContentEmbedding VARBINARY(MAX) NULL,
                     EmbeddingDimension INT NULL,
                     CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
                     UpdatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
@@ -206,6 +210,18 @@ public class VectorMemoryRepository : IVectorMemoryRepository
                     
                     -- Create index on the new column
                     CREATE INDEX IX_{_tableName}_ContentLength ON [{_tableName}](ContentLength);
+                END;
+                
+                -- Add CategoryEmbedding column if it doesn't exist (migration for weighted embeddings)
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('{_tableName}') AND name = 'CategoryEmbedding')
+                BEGIN
+                    ALTER TABLE [{_tableName}] ADD CategoryEmbedding VARBINARY(MAX) NULL;
+                END;
+                
+                -- Add ContentEmbedding column if it doesn't exist (migration for weighted embeddings)
+                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('{_tableName}') AND name = 'ContentEmbedding')
+                BEGIN
+                    ALTER TABLE [{_tableName}] ADD ContentEmbedding VARBINARY(MAX) NULL;
                 END;
             END";
         
@@ -294,10 +310,10 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     {
         var sql = $@"
             INSERT INTO [{_tableName}] 
-                (Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension, 
+                (Id, CollectionName, Category, Content, ContentLength, Embedding, CategoryEmbedding, ContentEmbedding, EmbeddingDimension, 
                  CreatedAt, UpdatedAt, SourceFile, ChunkIndex)
             VALUES 
-                (@Id, @CollectionName, @Category, @Content, @ContentLength, @Embedding, @EmbeddingDimension,
+                (@Id, @CollectionName, @Category, @Content, @ContentLength, @Embedding, @CategoryEmbedding, @ContentEmbedding, @EmbeddingDimension,
                  @CreatedAt, @UpdatedAt, @SourceFile, @ChunkIndex)";
         
         using var connection = new SqlConnection(_connectionString);
@@ -314,10 +330,10 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     {
         var sql = $@"
             INSERT INTO [{_tableName}] 
-                (Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension, 
+                (Id, CollectionName, Category, Content, ContentLength, Embedding, CategoryEmbedding, ContentEmbedding, EmbeddingDimension, 
                  CreatedAt, UpdatedAt, SourceFile, ChunkIndex)
             VALUES 
-                (@Id, @CollectionName, @Category, @Content, @ContentLength, @Embedding, @EmbeddingDimension,
+                (@Id, @CollectionName, @Category, @Content, @ContentLength, @Embedding, @CategoryEmbedding, @ContentEmbedding, @EmbeddingDimension,
                  @CreatedAt, @UpdatedAt, @SourceFile, @ChunkIndex)";
         
         using var connection = new SqlConnection(_connectionString);
@@ -330,7 +346,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     public async Task<List<MemoryFragmentEntity>> LoadByCollectionAsync(string collectionName)
     {
         var sql = $@"
-            SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension,
+            SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, CategoryEmbedding, ContentEmbedding, EmbeddingDimension,
                    CreatedAt, UpdatedAt, SourceFile, ChunkIndex
             FROM [{_tableName}]
             WHERE CollectionName = @CollectionName
@@ -423,7 +439,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         var whereClause = string.Join(" OR ", domainConditions);
         
         var sql = $@"
-            SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension,
+            SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, CategoryEmbedding, ContentEmbedding, EmbeddingDimension,
                    CreatedAt, UpdatedAt, SourceFile, ChunkIndex
             FROM [{_tableName}]
             WHERE CollectionName = @CollectionName
@@ -445,7 +461,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         int pageSize)
     {
         var sql = $@"
-            SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, EmbeddingDimension,
+            SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, CategoryEmbedding, ContentEmbedding, EmbeddingDimension,
                    CreatedAt, UpdatedAt, SourceFile, ChunkIndex
             FROM [{_tableName}]
             WHERE CollectionName = @CollectionName
