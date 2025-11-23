@@ -171,6 +171,28 @@ public class DatabaseVectorMemory(
 
         var resultText = sb.ToString();
         
+        // ?? DEBUG: Check for EOS/EOF markers in database results
+        var dbReport = EosEofDebugger.ScanForMarkers(resultText, "Database Search Results");
+        EosEofDebugger.LogReport(dbReport, onlyIfDirty: true);
+        
+        if (!dbReport.IsClean)
+        {
+            Console.WriteLine("??  WARNING: EOS/EOF markers found in database - cleaning...");
+            resultText = EosEofDebugger.CleanMarkers(resultText);
+            
+            // Verify cleaning
+            var verifyReport = EosEofDebugger.ScanForMarkers(resultText, "Database Results After Cleaning");
+            if (!verifyReport.IsClean)
+            {
+                Console.WriteLine("? ERROR: Failed to clean markers from database results!");
+                EosEofDebugger.LogReport(verifyReport, onlyIfDirty: false);
+            }
+            else
+            {
+                Console.WriteLine("? Database results cleaned successfully");
+            }
+        }
+        
         // EDGE CASE FIX: Check if total retrieved content is too small (< 200 chars)
         if (totalContentLength < 200)
         {

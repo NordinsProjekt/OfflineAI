@@ -250,6 +250,19 @@ public class DashboardState
             return;
         }
 
+        // Hook up domain auto-registration callback BEFORE processing files
+        // This ensures "Webhallen" gets registered when importing "Webhallen - Köpvillkor" fragments
+        InboxService.OnDomainDiscovered = async (category, categoryType) =>
+        {
+            // Extract domain name from category (e.g., "Webhallen" from "##Webhallen - Köpvillkor")
+            // The DomainDetector will strip the "##" prefix
+            var domainDetector = _chatService?.DomainDetector;
+            if (domainDetector != null)
+            {
+                await domainDetector.RegisterDomainFromCategoryAsync(category, categoryType);
+            }
+        };
+
         var (success, message, filesProcessed, fragmentsCreated) = 
             await InboxService.ProcessInboxAsync(CollectionService.CurrentCollection);
 

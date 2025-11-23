@@ -28,6 +28,11 @@ namespace AiDashboard.Services
         private readonly ILlmRepository? _llmRepository;
         private Func<string?>? _getCurrentModelName;
         private bool _disposed;
+        
+        /// <summary>
+        /// Get the domain detector for domain registration.
+        /// </summary>
+        public IDomainDetector? DomainDetector => _domainDetector;
 
         public DashboardChatService(
             ILlmMemory memory,

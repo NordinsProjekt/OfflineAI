@@ -14,6 +14,7 @@ namespace Services.Memory;
 /// <summary>
 /// Processes PDF files into semantic chunks suitable for embedding.
 /// Extracts text using UglyToad.PdfPig, preserves structure, and creates meaningful fragments.
+/// Automatically cleans extracted text to remove special tokens and control characters.
 /// </summary>
 public class PdfFragmentProcessor
 {
@@ -57,7 +58,7 @@ public class PdfFragmentProcessor
         {
             MaxChunkSize = _chunkOptions.MaxChunkSize,
             OverlapSize = _chunkOptions.OverlapSize,
-            MinChunkSize = 200,  // ? Reduced from 500 to allow smaller sections
+            MinChunkSize = 200,  // Reduced from 500 to allow smaller sections
             KeepHeaders = _chunkOptions.KeepHeaders,
             AddMetadata = _chunkOptions.AddMetadata
         };
@@ -101,6 +102,10 @@ public class PdfFragmentProcessor
                 var metadataHeader = $"[Source: {fileName}.pdf, Total Pages: {metadata.TotalPages}]\n\n";
                 enhancedContent = metadataHeader + chunk.Content;
             }
+            
+            // CLEAN the text to remove special tokens and control characters
+            category = MemoryFragmentCleaner.CleanText(category);
+            enhancedContent = MemoryFragmentCleaner.CleanText(enhancedContent);
             
             var fragment = new MemoryFragment(
                 category: category,

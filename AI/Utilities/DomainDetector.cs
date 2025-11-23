@@ -109,7 +109,10 @@ public class DomainDetector(IKnowledgeDomainRepository domainRepository) : IDoma
     /// </summary>
     public async Task RegisterDomainFromCategoryAsync(string category, string categoryType = "general")
     {
-        var domainName = ExtractDomainNameFromCategory(category);
+        // Clean markdown headers (##) from category before processing
+        var cleanCategory = category?.Replace("##", "").Trim();
+        
+        var domainName = ExtractDomainNameFromCategory(cleanCategory ?? string.Empty);
         
         if (string.IsNullOrWhiteSpace(domainName))
             return;
