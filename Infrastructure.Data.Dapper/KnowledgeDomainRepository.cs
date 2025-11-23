@@ -374,6 +374,6 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
             category: "board-game",
             source: "seed");
 
-        Console.WriteLine("[?] Seeded default knowledge domains");
+        Console.WriteLine("[+] Seeded default knowledge domains");
     }
 }

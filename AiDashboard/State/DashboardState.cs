@@ -35,6 +35,7 @@ public class DashboardState
     public ModelManagementService ModelService { get; }
     public CollectionManagementService? CollectionService { get; private set; }
     public InboxProcessingService? InboxService { get; private set; }
+    public BotPersonalityService? PersonalityService { get; private set; }
     
     private DashboardChatService? _chatService;
     public DashboardChatService? ChatService 
@@ -69,10 +70,11 @@ public class DashboardState
     private readonly Dictionary<string, bool> _sectionCollapseState = new()
     {
         { "modes", true },           // Collapsed by default
+        { "personality", false },    // Expanded by default (new feature!)
         { "generation", true },      // Collapsed by default
         { "rag", true },            // Collapsed by default
         { "model", false },         // Expanded by default (keep visible)
-        { "collection", true },     // Collapsed by default
+        { "collection", false },    // Expanded by default (needed for bot selection)
         { "domains", true },        // Collapsed by default
         { "files", true },          // Collapsed by default
         { "knowledge", true },      // Collapsed by default
@@ -135,7 +137,8 @@ public class DashboardState
     public void InitializeServices(
         IVectorMemoryRepository? repository,
         VectorMemoryPersistenceService? persistenceService,
-        AppConfiguration? appConfig)
+        AppConfiguration? appConfig,
+        BotPersonalityService? personalityService = null)
     {
         VectorRepository = repository;
 
@@ -154,6 +157,12 @@ public class DashboardState
             };
             InboxService.OnProcessingComplete += NotifyStateChanged;
         }
+        
+        if (personalityService != null)
+        {
+            PersonalityService = personalityService;
+            PersonalityService.OnChange += NotifyStateChanged;
+        }
     }
 
     // UI actions
@@ -169,167 +178,6 @@ public class DashboardState
     {
         var (success, message) = await ModelService.SwitchModelAsync();
         StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
-    }
-
-    // Table operations (delegating to repository)
-    public async Task ListTablesAsync()
-    {
-        if (VectorRepository == null)
-        {
-            StatusMessage = "[ERROR] Repository not available";
-            return;
-        }
-
-        try
-        {
-            var tables = await VectorRepository.GetAllTablesAsync();
-            StatusMessage = $"[INFO] Found {tables.Count} tables: {string.Join(", ", tables)}";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"[ERROR] Failed to list tables: {ex.Message}";
-        }
-    }
-
-    public async Task InfoTableAsync()
-    {
-        if (VectorRepository == null)
-        {
-            StatusMessage = "[ERROR] Repository not available";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(ActiveTable))
-        {
-            StatusMessage = "[ERROR] No table name specified";
-            return;
-        }
-
-        try
-        {
-            var exists = await VectorRepository.TableExistsAsync(ActiveTable);
-            if (!exists)
-            {
-                StatusMessage = $"[ERROR] Table '{ActiveTable}' does not exist";
-                return;
-            }
-
-            var count = await VectorRepository.GetCountAsync(ActiveTable);
-            var collections = await VectorRepository.GetCollectionsAsync();
-            var hasEmbeddings = await VectorRepository.HasEmbeddingsAsync(ActiveTable);
-
-            StatusMessage = $"[INFO] Table: {ActiveTable} | Fragments: {count} | Collections: {collections.Count} | Embeddings: {(hasEmbeddings ? "Yes" : "No")}";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"[ERROR] Failed to get table info: {ex.Message}";
-        }
-    }
-
-    public async Task CreateTableAsync()
-    {
-        if (VectorRepository == null)
-        {
-            StatusMessage = "[ERROR] Repository not available";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(ActiveTable))
-        {
-            StatusMessage = "[ERROR] No table name specified";
-            return;
-        }
-
-        try
-        {
-            var exists = await VectorRepository.TableExistsAsync(ActiveTable);
-            if (exists)
-            {
-                StatusMessage = $"[WARN] Table '{ActiveTable}' already exists";
-                return;
-            }
-
-            await VectorRepository.CreateTableAsync(ActiveTable);
-            StatusMessage = $"[OK] Created table: {ActiveTable}";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"[ERROR] Failed to create table: {ex.Message}";
-        }
-    }
-
-    public async Task SwitchTableAsync()
-    {
-        if (VectorRepository == null)
-        {
-            StatusMessage = "[ERROR] Repository not available";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(ActiveTable))
-        {
-            StatusMessage = "[ERROR] No table name specified";
-            return;
-        }
-
-        try
-        {
-            var exists = await VectorRepository.TableExistsAsync(ActiveTable);
-            if (!exists)
-            {
-                StatusMessage = $"[ERROR] Table '{ActiveTable}' does not exist";
-                return;
-            }
-
-            VectorRepository.SetActiveTable(ActiveTable);
-            StatusMessage = $"[OK] Switched to table: {ActiveTable}";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"[ERROR] Failed to switch table: {ex.Message}";
-        }
-    }
-
-    public async Task DeleteTableAsync()
-    {
-        if (VectorRepository == null)
-        {
-            StatusMessage = "[ERROR] Repository not available";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(ActiveTable))
-        {
-            StatusMessage = "[ERROR] No table name specified";
-            return;
-        }
-
-        // Don't allow deleting the default table
-        if (ActiveTable.Equals("MemoryFragments", StringComparison.OrdinalIgnoreCase))
-        {
-            StatusMessage = "[WARN] Cannot delete default table 'MemoryFragments'";
-            return;
-        }
-
-        try
-        {
-            var exists = await VectorRepository.TableExistsAsync(ActiveTable);
-            if (!exists)
-            {
-                StatusMessage = $"[ERROR] Table '{ActiveTable}' does not exist";
-                return;
-            }
-
-            await VectorRepository.DeleteTableAsync(ActiveTable);
-            StatusMessage = $"[OK] Deleted table: {ActiveTable}";
-
-            // Reset to default table
-            ActiveTable = "MemoryFragments";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"[ERROR] Failed to delete table: {ex.Message}";
-        }
     }
 
     // Collection operations (delegating to CollectionService)
@@ -382,6 +230,12 @@ public class DashboardState
 
         var (success, message) = await CollectionService.ValidateCollectionAsync(collectionName);
         
+        // IMPORTANT: Update the DatabaseVectorMemory to use the new collection
+        if (success && ChatService != null)
+        {
+            ChatService.UpdateCollectionName(collectionName);
+        }
+        
         StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
         
         // Note: DatabaseVectorMemory queries collections on-demand, no need to load into memory
@@ -418,6 +272,43 @@ public class DashboardState
         var (success, message, filesConverted) = await InboxService.ConvertPdfToTxtAsync();
         StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
     }
+    
+    // Personality operations
+    public async Task RefreshPersonalitiesAsync()
+    {
+        if (PersonalityService == null)
+        {
+            StatusMessage = "[ERROR] Personality service not available";
+            return;
+        }
+
+        var (success, message) = await PersonalityService.RefreshPersonalitiesAsync();
+        if (!success)
+        {
+            StatusMessage = $"[ERROR] {message}";
+        }
+    }
+    
+    public async Task SelectPersonalityAsync(string personalityId)
+    {
+        if (PersonalityService == null)
+        {
+            StatusMessage = "[ERROR] Personality service not available";
+            return;
+        }
+
+        var (success, message) = await PersonalityService.SelectPersonalityAsync(personalityId);
+        
+        // If a personality with a default collection is selected, switch to that collection
+        if (success && PersonalityService.CurrentPersonality?.DefaultCollection != null && CollectionService != null)
+        {
+            var collectionName = PersonalityService.CurrentPersonality.DefaultCollection;
+            CollectionService.CurrentCollection = collectionName;
+            await LoadCollectionAsync(collectionName);
+        }
+        
+        StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
+    }
 
     // Chat operations
     public async Task<string> SendMessageAsync(string message)
@@ -437,6 +328,7 @@ public class DashboardState
                 SettingsService.DebugMode,
                 SettingsService.PerformanceMetrics,
                 genSettings,
+                PersonalityService?.CurrentPersonality,
                 SettingsService.UseGpu,
                 SettingsService.GpuLayers,
                 SettingsService.TimeoutSeconds);

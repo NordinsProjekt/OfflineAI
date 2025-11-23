@@ -1,0 +1,358 @@
+@page "/personalities"
+@inject DashboardState Dashboard
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<PageTitle>Bot Personalities</PageTitle>
+
+<div class="personalities-page">
+    <div class="page-header">
+        <h1>?? Bot Personalities</h1>
+        <p>Manage different bot personalities for specialized interactions</p>
+    </div>
+
+    @if (Dashboard.PersonalityService == null)
+    {
+        <div class="alert alert-warning">
+            <strong>?? Personality service not available</strong>
+            <p>Please check your configuration.</p>
+        </div>
+    }
+    else
+    {
+        <div class="actions-bar">
+            <button class="btn btn-primary" @onclick="ShowCreateModal">
+                ? Create New Personality
+            </button>
+            <button class="btn btn-secondary" @onclick="RefreshPersonalities">
+                ?? Refresh
+            </button>
+        </div>
+
+        @if (personalities.Count == 0)
+        {
+            <div class="alert alert-info">
+                <strong>?? No personalities found</strong>
+                <p>Create your first bot personality to get started!</p>
+            </div>
+        }
+        else
+        {
+            <!-- Group by category -->
+            @foreach (var category in personalities.GroupBy(p => p.Category).OrderBy(g => g.Key))
+            {
+                <div class="personality-category">
+                    <h2>@category.Key</h2>
+                    <div class="personality-grid">
+                        @foreach (var personality in category)
+                        {
+                            <div class="personality-card @(personality.IsActive ? "" : "inactive")">
+                                <div class="card-header">
+                                    <div class="card-title">
+                                        @if (!string.IsNullOrWhiteSpace(personality.Icon))
+                                        {
+                                            <span class="personality-icon">@personality.Icon</span>
+                                        }
+                                        <h3>@personality.DisplayName</h3>
+                                    </div>
+                                    <div class="card-actions">
+                                        <button class="btn-icon" title="Edit" @onclick="() => EditPersonality(personality)">??</button>
+                                        <button class="btn-icon" title="Delete" @onclick="() => DeletePersonality(personality)">???</button>
+                                    </div>
+                                </div>
+                                <p class="personality-description">@personality.Description</p>
+                                <div class="personality-details">
+                                    <div class="detail-item">
+                                        <strong>ID:</strong> @personality.PersonalityId
+                                    </div>
+                                    @if (!string.IsNullOrWhiteSpace(personality.DefaultCollection))
+                                    {
+                                        <div class="detail-item">
+                                            <strong>Collection:</strong> @personality.DefaultCollection
+                                        </div>
+                                    }
+                                    @if (personality.Temperature.HasValue)
+                                    {
+                                        <div class="detail-item">
+                                            <strong>Temperature:</strong> @personality.Temperature.Value.ToString("F1")
+                                        </div>
+                                    }
+                                    <div class="detail-item">
+                                        <strong>RAG:</strong> @(personality.EnableRag ? "? Enabled" : "? Disabled")
+                                    </div>
+                                    <div class="detail-item">
+                                        <strong>Status:</strong> @(personality.IsActive ? "? Active" : "? Inactive")
+                                    </div>
+                                </div>
+                                <button class="btn btn-primary btn-block" @onclick="() => SelectPersonality(personality)">
+                                    Use This Bot
+                                </button>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        }
+    }
+
+    <!-- Status message -->
+    @if (!string.IsNullOrWhiteSpace(Dashboard.StatusMessage))
+    {
+        <div class="status-message">@Dashboard.StatusMessage</div>
+    }
+</div>
+
+<style>
+    .personalities-page {
+        padding: 20px;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+    
+    .page-header {
+        margin-bottom: 30px;
+    }
+    
+    .page-header h1 {
+        margin: 0 0 10px 0;
+        color: #fff;
+    }
+    
+    .page-header p {
+        color: rgba(255, 255, 255, 0.7);
+        margin: 0;
+    }
+    
+    .actions-bar {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+    }
+    
+    .personality-category {
+        margin-bottom: 40px;
+    }
+    
+    .personality-category h2 {
+        color: #fff;
+        margin-bottom: 15px;
+        text-transform: capitalize;
+        border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+        padding-bottom: 10px;
+    }
+    
+    .personality-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 20px;
+    }
+    
+    .personality-card {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 20px;
+        transition: all 0.3s ease;
+    }
+    
+    .personality-card:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.2);
+        transform: translateY(-2px);
+    }
+    
+    .personality-card.inactive {
+        opacity: 0.5;
+    }
+    
+    .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 15px;
+    }
+    
+    .card-title {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    
+    .card-title h3 {
+        margin: 0;
+        color: #fff;
+        font-size: 1.2em;
+    }
+    
+    .personality-icon {
+        font-size: 2em;
+    }
+    
+    .card-actions {
+        display: flex;
+        gap: 5px;
+    }
+    
+    .btn-icon {
+        background: transparent;
+        border: none;
+        font-size: 1.2em;
+        cursor: pointer;
+        padding: 5px;
+        opacity: 0.7;
+        transition: opacity 0.2s;
+    }
+    
+    .btn-icon:hover {
+        opacity: 1;
+    }
+    
+    .personality-description {
+        color: rgba(255, 255, 255, 0.7);
+        margin-bottom: 15px;
+        line-height: 1.5;
+    }
+    
+    .personality-details {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 15px;
+        padding: 10px;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 4px;
+    }
+    
+    .detail-item {
+        font-size: 0.9em;
+        color: rgba(255, 255, 255, 0.8);
+    }
+    
+    .detail-item strong {
+        color: rgba(255, 255, 255, 0.5);
+        margin-right: 5px;
+    }
+    
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 1em;
+        transition: all 0.2s;
+    }
+    
+    .btn-primary {
+        background: #0d6efd;
+        color: white;
+    }
+    
+    .btn-primary:hover {
+        background: #0b5ed7;
+    }
+    
+    .btn-secondary {
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+    }
+    
+    .btn-secondary:hover {
+        background: rgba(255, 255, 255, 0.15);
+    }
+    
+    .btn-block {
+        width: 100%;
+    }
+    
+    .alert {
+        padding: 15px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+    }
+    
+    .alert-warning {
+        background: rgba(255, 193, 7, 0.2);
+        border: 1px solid rgba(255, 193, 7, 0.5);
+        color: #ffc107;
+    }
+    
+    .alert-info {
+        background: rgba(13, 202, 240, 0.2);
+        border: 1px solid rgba(13, 202, 240, 0.5);
+        color: #0dcaf0;
+    }
+    
+    .status-message {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.9);
+        color: white;
+        padding: 15px 20px;
+        border-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        max-width: 400px;
+        word-wrap: break-word;
+    }
+</style>
+
+@code {
+    private List<Entities.BotPersonalityEntity> personalities = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        Dashboard.OnChange += HandleStateChanged;
+        await RefreshPersonalities();
+    }
+
+    private void HandleStateChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Dashboard.OnChange -= HandleStateChanged;
+    }
+
+    private async Task RefreshPersonalities()
+    {
+        if (Dashboard.PersonalityService != null)
+        {
+            personalities = await Dashboard.PersonalityService.GetAllPersonalitiesAsync(includeInactive: true);
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void ShowCreateModal()
+    {
+        // TODO: Implement create modal
+        Dashboard.StatusMessage = "[INFO] Create personality feature coming soon!";
+    }
+
+    private void EditPersonality(Entities.BotPersonalityEntity personality)
+    {
+        // TODO: Implement edit modal
+        Dashboard.StatusMessage = $"[INFO] Edit '{personality.DisplayName}' - feature coming soon!";
+    }
+
+    private async Task DeletePersonality(Entities.BotPersonalityEntity personality)
+    {
+        if (Dashboard.PersonalityService != null)
+        {
+            var (success, message) = await Dashboard.PersonalityService.DeletePersonalityAsync(personality.PersonalityId);
+            Dashboard.StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
+            
+            if (success)
+            {
+                await RefreshPersonalities();
+            }
+        }
+    }
+
+    private async Task SelectPersonality(Entities.BotPersonalityEntity personality)
+    {
+        await Dashboard.SelectPersonalityAsync(personality.PersonalityId);
+        Navigation.NavigateTo("/");
+    }
+}

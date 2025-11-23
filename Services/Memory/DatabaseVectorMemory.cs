@@ -20,7 +20,25 @@ public class DatabaseVectorMemory(
 {
     private readonly ITextEmbeddingGenerationService _embeddingService = embeddingService ?? throw new ArgumentNullException(nameof(embeddingService));
     private readonly IVectorMemoryRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-    private readonly string _collectionName = collectionName ?? throw new ArgumentNullException(nameof(collectionName));
+    private string _collectionName = collectionName ?? throw new ArgumentNullException(nameof(collectionName));
+
+    /// <summary>
+    /// Update the collection name that will be used for searches.
+    /// This allows switching between collections without creating a new instance.
+    /// </summary>
+    public void SetCollectionName(string collectionName)
+    {
+        if (string.IsNullOrWhiteSpace(collectionName))
+            throw new ArgumentException("Collection name cannot be null or empty", nameof(collectionName));
+        
+        _collectionName = collectionName;
+        Console.WriteLine($"[*] DatabaseVectorMemory now using collection: {_collectionName}");
+    }
+    
+    /// <summary>
+    /// Get the current collection name.
+    /// </summary>
+    public string GetCollectionName() => _collectionName;
 
     public void ImportMemory(Entities.IMemoryFragment section)
     {

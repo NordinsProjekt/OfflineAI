@@ -5,8 +5,10 @@ using Application.AI.Chat;
 using Application.AI.Extensions;
 using Application.AI.Pooling;
 using Application.AI.Utilities;
+using Entities;
 using Services.Configuration;
 using Services.Interfaces;
+using Services.Memory;
 using Services.Repositories;
 using Services.UI;
 
@@ -86,6 +88,38 @@ namespace AiDashboard.Services
         {
             _memory = newMemory ?? throw new ArgumentNullException(nameof(newMemory));
         }
+        
+        /// <summary>
+        /// Update the collection name if using DatabaseVectorMemory.
+        /// This allows switching between collections without creating a new memory instance.
+        /// </summary>
+        public void UpdateCollectionName(string collectionName)
+        {
+            if (_memory is DatabaseVectorMemory dbMemory)
+            {
+                dbMemory.SetCollectionName(collectionName);
+            }
+            else
+            {
+                Console.WriteLine($"[WARNING] Cannot update collection - memory is not DatabaseVectorMemory");
+            }
+        }
+        
+        /// <summary>
+        /// Apply bot personality settings to generation settings.
+        /// </summary>
+        private void ApplyPersonalitySettings(BotPersonalityEntity? personality, GenerationSettings settings)
+        {
+            if (personality == null) return;
+            
+            // Apply personality-specific temperature if set
+            if (personality.Temperature.HasValue)
+            {
+                settings.Temperature = personality.Temperature.Value;
+            }
+            
+            // Can add more personality-specific settings here
+        }
 
         /// <summary>
         /// Send a message using the current dashboard settings.
@@ -96,6 +130,7 @@ namespace AiDashboard.Services
             bool debugMode,
             bool showPerformanceMetrics,
             GenerationSettings generationSettings,
+            BotPersonalityEntity? personality = null,
             bool useGpu = false,
             int gpuLayers = 0,
             int timeoutSeconds = 30)
@@ -119,6 +154,15 @@ namespace AiDashboard.Services
 
             try
             {
+                // Apply personality settings if provided
+                ApplyPersonalitySettings(personality, generationSettings);
+                
+                // Override RAG mode if personality specifies it
+                if (personality != null)
+                {
+                    ragMode = personality.EnableRag;
+                }
+                
                 // Create LLM settings with GPU configuration
                 var llmSettings = new LlmSettings
                 {
