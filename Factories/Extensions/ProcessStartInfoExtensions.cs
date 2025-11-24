@@ -11,6 +11,12 @@ public static class ProcessStartInfoExtensions
         processStartInfo.RedirectStandardOutput = true;
         processStartInfo.RedirectStandardError = true;
         processStartInfo.CreateNoWindow = true;
+        
+        // CRITICAL: llama.cpp outputs UTF-8, but Windows defaults to Windows-1252
+        // This causes Swedish characters (å, ä, ö) to display as garbage (├Ñ, ├ñ, etc.)
+        // Force UTF-8 encoding for both output and error streams
+        processStartInfo.StandardOutputEncoding = System.Text.Encoding.UTF8;
+        processStartInfo.StandardErrorEncoding = System.Text.Encoding.UTF8;
 
         return processStartInfo;
     }

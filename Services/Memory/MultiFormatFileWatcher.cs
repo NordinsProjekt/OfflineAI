@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Entities;
 using Services.UI;
+using Services.Utilities;
 
 namespace Services.Memory;
 
@@ -246,10 +247,15 @@ public class MultiFormatFileWatcher
     /// Splits content into chunks of maximum 1500 characters while preserving sentence boundaries.
     /// Each chunk is a separate MemoryFragment.
     /// No minimum chunk size enforced - allows small fragments.
+    /// Automatically cleans text to remove special tokens and control characters.
     /// </summary>
     private List<MemoryFragment> SplitIntoChunks(string content, string gameName, string baseCategory)
     {
         var fragments = new List<MemoryFragment>();
+        
+        // Clean the content before processing
+        content = MemoryFragmentCleaner.CleanText(content);
+        baseCategory = MemoryFragmentCleaner.CleanText(baseCategory);
         
         // If content fits in one chunk, return it as-is
         if (content.Length <= MaxChunkSize)

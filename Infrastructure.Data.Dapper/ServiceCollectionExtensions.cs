@@ -84,4 +84,22 @@ public static class ServiceCollectionExtensions
         
         return services;
     }
+    
+    /// <summary>
+    /// Registers BotPersonalityRepository for managing bot personalities
+    /// </summary>
+    public static IServiceCollection AddDapperBotPersonalityRepository(
+        this IServiceCollection services,
+        string connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new ArgumentException("Connection string cannot be null or empty", nameof(connectionString));
+        }
+
+        services.AddSingleton<IBotPersonalityRepository>(sp => 
+            new BotPersonalityRepository(connectionString));
+        
+        return services;
+    }
 }

@@ -6,7 +6,9 @@ using Application.AI.Utilities;
 using Entities;
 using Services.Configuration;
 using Services.Interfaces;
+using Services.Memory;
 using Services.UI;
+using Services.Utilities;
 
 namespace Application.AI.Chat;
 
@@ -122,6 +124,22 @@ public class AiChatServicePooled(
                 gpuLayers: _llmSettings?.GpuLayers ?? 0);
 
             stopwatch.Stop();
+            
+            // 🔍 DEBUG CHECKPOINT 3: After LLM generation - check response for markers
+            if (!string.IsNullOrWhiteSpace(response))
+            {
+                var responseReport = EosEofDebugger.ScanForMarkers(response, "LLM Response");
+                EosEofDebugger.LogReport(responseReport, onlyIfDirty: true);
+                
+                if (!responseReport.IsClean)
+                {
+                    DisplayService.WriteLine("ℹ️  INFO: EOS/EOF markers found in LLM response (expected) - cleaning...");
+                    response = EosEofDebugger.CleanMarkers(response);
+                    
+                    // Note: This is expected - the LLM may generate these markers
+                    // The important thing is that they're cleaned before returning to user
+                }
+            }
 
             // Calculate performance metrics (do this before checking response validity)
             var metrics = new PerformanceMetrics
@@ -180,7 +198,30 @@ public class AiChatServicePooled(
                 {
                     domainNames.Add(await domainDetector.GetDisplayNameAsync(domainId));
                 }
-                DisplayService.WriteLine($"[*] Detected domain(s): {string.Join(", ", domainNames)}");
+                DisplayService.WriteLine($"[*] Detected domain(s) from query: {string.Join(", ", domainNames)}");
+            }
+        }
+        
+        // IMPORTANT: If we're using DatabaseVectorMemory, check if the collection name matches a domain
+        // This ensures that selecting a collection in the UI filters to that domain
+        if (_memory is DatabaseVectorMemory dbMemory && domainDetector != null)
+        {
+            var collectionName = dbMemory.GetCollectionName();
+            
+            // Try to find a domain that matches the collection name
+            var allDomains = await domainDetector.GetAllDomainsAsync();
+            var matchingDomain = allDomains.FirstOrDefault(d => 
+                d.DisplayName.Equals(collectionName, StringComparison.OrdinalIgnoreCase) ||
+                d.DomainId.Equals(collectionName.ToLowerInvariant().Replace(" ", "-"), StringComparison.OrdinalIgnoreCase));
+            
+            if (matchingDomain != default)
+            {
+                // Add collection-based domain if not already detected
+                if (!detectedDomains.Contains(matchingDomain.DomainId))
+                {
+                    detectedDomains.Add(matchingDomain.DomainId);
+                    DisplayService.WriteLine($"[*] Added domain filter from collection: {matchingDomain.DisplayName}");
+                }
             }
         }
 
@@ -204,6 +245,23 @@ public class AiChatServicePooled(
                 includeMetadata: false);
         }
         
+        // 🔍 DEBUG CHECKPOINT 1: After RAG search - check retrieved context
+        if (relevantMemory != null)
+        {
+            var ragReport = EosEofDebugger.ScanForMarkers(relevantMemory, "RAG Retrieved Context");
+            EosEofDebugger.LogReport(ragReport, onlyIfDirty: true);
+            
+            if (!ragReport.IsClean)
+            {
+                DisplayService.WriteLine("⚠️  WARNING: EOS/EOF markers found in RAG context - cleaning...");
+                relevantMemory = EosEofDebugger.CleanMarkers(relevantMemory);
+                
+                // Verify cleaning worked
+                var verifyReport = EosEofDebugger.ScanForMarkers(relevantMemory, "After Cleaning");
+                EosEofDebugger.LogReport(verifyReport, onlyIfDirty: true);
+            }
+        }
+        
         if (relevantMemory == null)
         {
             // If we detected a domain but found no results OR context was too small
@@ -222,32 +280,10 @@ public class AiChatServicePooled(
             return null;
         }
 
-        // Check if retrieved context is suspiciously small (this is a backup check)
-        if (relevantMemory.Length < 150)
-        {
-            DisplayService.WriteLine($"[!] Retrieved context is too small ({relevantMemory.Length} chars) - may not provide meaningful answer");
-            
-            // Return a special marker to indicate insufficient context
-            if (detectedDomains.Count > 0 && domainDetector != null)
-            {
-                var domainNames = new List<string>();
-                foreach (var domainId in detectedDomains)
-                {
-                    domainNames.Add(await domainDetector.GetDisplayNameAsync(domainId));
-                }
-                return $"NO_RESULTS_FOR_DOMAIN:{string.Join(", ", domainNames)}";
-            }
-            
-            return null;
-        }
-
-        // DON'T clean the query - domain names provide important context for the LLM
-        // The domain filtering already happened during the vector search above
-        // Removing domain names can create grammatically incorrect queries
+        // REMOVED: The 150-character minimum check was rejecting valid short answers
+        // Short, precise answers are often BETTER than long context for recycling queries
+        // Example: "Kulspruta → Contact police" (25 chars) is a perfect answer
         
-        // Example: "How to win in Gloomhaven?" is clearer than "How to win?"
-        // The retrieved fragments already contain Gloomhaven-specific context
-
         // Show debug output BEFORE truncation (if enabled) to see full retrieved context
         if (debugMode)
         {
@@ -268,6 +304,34 @@ public class AiChatServicePooled(
         prompt.AppendLine(relevantMemory.Trim());
 
         var finalPrompt = prompt.ToString();
+        
+        // 🔍 DEBUG CHECKPOINT 2: Before sending to LLM - CRITICAL validation
+        try
+        {
+            EosEofDebugger.ValidateCleanBeforeLlm(finalPrompt, "Final System Prompt");
+            DisplayService.WriteLine("✅ System prompt validated - no EOS/EOF markers detected");
+        }
+        catch (InvalidOperationException ex)
+        {
+            // This is critical - log the error and attempt recovery
+            DisplayService.WriteLine(ex.Message);
+            
+            // Attempt automatic cleaning
+            finalPrompt = EosEofDebugger.CleanMarkers(finalPrompt);
+            
+            // Verify cleaning worked
+            try
+            {
+                EosEofDebugger.ValidateCleanBeforeLlm(finalPrompt, "After Emergency Cleaning");
+                DisplayService.WriteLine("✅ Emergency cleaning successful");
+            }
+            catch
+            {
+                throw new InvalidOperationException(
+                    "CRITICAL: Unable to clean EOS/EOF markers from system prompt. " +
+                    "This would corrupt the LLM input. Aborting query.");
+            }
+        }
         
         // Final safety check
         if (finalPrompt.Length > 2500)

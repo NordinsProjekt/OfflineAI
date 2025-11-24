@@ -22,6 +22,7 @@ public static class StringExtensions
         response = CleanChatMLTokens(response);
         response = CleanMistralTokens(response);
         response = CleanLlama2Tokens(response);
+        response = CleanPlainAssistantPrefix(response);
         response = RemoveIncompleteTokens(response);
 
         return response.Trim();
@@ -86,6 +87,29 @@ public static class StringExtensions
     }
 
     /// <summary>
+    /// Remove plain "assistant:" or "assistant" prefix that some models add.
+    /// </summary>
+    private static string CleanPlainAssistantPrefix(string response)
+    {
+        // Trim first
+        response = response.Trim();
+
+        // Check for "assistant:" or "Assistant:" at the start (case-insensitive)
+        if (response.StartsWith("assistant:", StringComparison.OrdinalIgnoreCase))
+        {
+            response = response.Substring("assistant:".Length).TrimStart();
+        }
+        else if (response.StartsWith("assistant", StringComparison.OrdinalIgnoreCase) &&
+                 response.Length > "assistant".Length &&
+                 char.IsWhiteSpace(response["assistant".Length]))
+        {
+            response = response.Substring("assistant".Length).TrimStart();
+        }
+
+        return response;
+    }
+
+    /// <summary>
     /// Remove incomplete sentence markers and trailing artifacts.
     /// </summary>
     private static string RemoveIncompleteTokens(string response)
@@ -97,7 +121,7 @@ public static class StringExtensions
                 response.LastIndexOf('.'),
                 Math.Max(response.LastIndexOf('!'), response.LastIndexOf('?'))
             );
-            
+
             if (lastCompleteStop > 0 && lastCompleteStop < response.Length - 10)
             {
                 response = response.Substring(0, lastCompleteStop + 1);

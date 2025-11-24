@@ -115,8 +115,9 @@ public class InboxProcessingService(
                         {
                             // Extract domain name from first fragment's category
                             // Categories are typically: "Game Name - Section" or just "Game Name"
-                            var firstCategory = fragments[0].Category;
-                            await OnDomainDiscovered(firstCategory, "game");
+                            // Clean any markdown headers (##) that might be present
+                            var firstCategory = fragments[0].Category.Replace("##", "").Trim();
+                            await OnDomainDiscovered(firstCategory, "general");
                             UpdateStatus($"✓ Registered domain from: {firstCategory}");
                         }
                         catch (Exception domainEx)
