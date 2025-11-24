@@ -280,32 +280,10 @@ public class AiChatServicePooled(
             return null;
         }
 
-        // Check if retrieved context is suspiciously small (this is a backup check)
-        if (relevantMemory.Length < 150)
-        {
-            DisplayService.WriteLine($"[!] Retrieved context is too small ({relevantMemory.Length} chars) - may not provide meaningful answer");
-            
-            // Return a special marker to indicate insufficient context
-            if (detectedDomains.Count > 0 && domainDetector != null)
-            {
-                var domainNames = new List<string>();
-                foreach (var domainId in detectedDomains)
-                {
-                    domainNames.Add(await domainDetector.GetDisplayNameAsync(domainId));
-                }
-                return $"NO_RESULTS_FOR_DOMAIN:{string.Join(", ", domainNames)}";
-            }
-            
-            return null;
-        }
-
-        // DON'T clean the query - domain names provide important context for the LLM
-        // The domain filtering already happened during the vector search above
-        // Removing domain names can create grammatically incorrect queries
+        // REMOVED: The 150-character minimum check was rejecting valid short answers
+        // Short, precise answers are often BETTER than long context for recycling queries
+        // Example: "Kulspruta → Contact police" (25 chars) is a perfect answer
         
-        // Example: "How to win in Gloomhaven?" is clearer than "How to win?"
-        // The retrieved fragments already contain Gloomhaven-specific context
-
         // Show debug output BEFORE truncation (if enabled) to see full retrieved context
         if (debugMode)
         {

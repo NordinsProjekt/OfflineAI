@@ -98,7 +98,7 @@ public class DatabaseVectorMemory(
             return null;
         }
 
-        // Calculate similarity scores using weighted strategy
+        // Calculate similarity scores using weighted strategy + exact string matching
         var scoredFragments = allFragments
             .Select(entity =>
             {
@@ -126,6 +126,31 @@ public class DatabaseVectorMemory(
                 else
                 {
                     score = 0.0;
+                }
+                
+                // HYBRID SEARCH: Boost exact string matches (for weak Swedish embeddings)
+                // If the search query appears in the category, add a significant boost
+                var categoryLower = entity.Category.ToLowerInvariant();
+                var queryLower = searchQuery.ToLowerInvariant();
+                
+                double originalScore = score;
+                
+                if (categoryLower.Contains(queryLower))
+                {
+                    // Exact match boost: +0.3 (this will push exact matches to the top)
+                    score += 0.3;
+                    
+                    // Extra boost if it's at the word boundary (not substring)
+                    var words = categoryLower.Split(new[] { ' ', '-', ',' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (words.Contains(queryLower))
+                    {
+                        score += 0.2; // Total +0.5 boost for exact word match
+                        Console.WriteLine($"[BOOST] '{entity.Category}' exact word match: {originalScore:F3} ? {score:F3} (+0.5)");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[BOOST] '{entity.Category}' substring match: {originalScore:F3} ? {score:F3} (+0.3)");
+                    }
                 }
                 
                 return new
@@ -217,50 +242,8 @@ public class DatabaseVectorMemory(
         
         // EDGE CASE FIX: Check if total retrieved content is too small
         // For short, precise answers (like "Kulspruta"), even 50 chars is enough!
-        if (totalContentLength < 100 && results.Count < 3)
-        {
-            Console.WriteLine($"[!] WARNING: Retrieved context is small ({totalContentLength} chars with {results.Count} fragments)");
-            Console.WriteLine($"[*] Attempting to retrieve more context by lowering threshold...");
-            
-            // Try again with lower threshold and more results
-            var expandedResults = scoredFragments
-                .Where(x => x.Score >= Math.Max(0.3, minRelevanceScore - 0.2))
-                .Take(Math.Min(topK + 3, 7))
-                .ToList();
-            
-            if (expandedResults.Count > results.Count)
-            {
-                Console.WriteLine($"[*] Expanded to {expandedResults.Count} fragments with lower threshold");
-                
-                // Rebuild with expanded results
-                sb.Clear();
-                totalContentLength = 0;
-                
-                foreach (var result in expandedResults)
-                {
-                    var content = result.Entity.Content;
-
-                    if (maxCharsPerFragment.HasValue && content.Length > maxCharsPerFragment.Value)
-                    {
-                        content = TruncateAtSentenceBoundary(content, maxCharsPerFragment.Value);
-                    }
-
-                    if (includeMetadata)
-                    {
-                        sb.AppendLine($"[Relevance: {result.Score:F3}]");
-                        sb.AppendLine($"[{result.Entity.Category}]");
-                    }
-
-                    sb.AppendLine(content);
-                    sb.AppendLine();
-                    
-                    totalContentLength += content.Length;
-                }
-                
-                resultText = sb.ToString();
-                Console.WriteLine($"[*] Expanded context to {totalContentLength} chars");
-            }
-        }
+        // REMOVED: This check was rejecting valid short answers
+        // The LLM can work with any amount of relevant context
         
         // Accept any context with at least 1 relevant fragment, even if very short
         // Short answers are often the BEST answers for recycling queries:
@@ -269,7 +252,7 @@ public class DatabaseVectorMemory(
         // DON'T reject short but correct answers!
         if (results.Count == 0 || string.IsNullOrWhiteSpace(resultText))
         {
-            Console.WriteLine($"[!] No valid context found after expansion");
+            Console.WriteLine($"[!] No valid context found");
             return null;
         }
         

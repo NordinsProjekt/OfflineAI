@@ -503,4 +503,48 @@ public class WeightedEmbeddingSearchTests
                 "Partial match 'kula' should score significantly lower than exact match 'kulspruta'");
         }
     }
+
+    [Fact]
+    public void WeightedSearch_ShortButCorrectAnswer_ShouldNotBeRejected()
+    {
+        // Arrange - Real-world scenario: short recycling instructions
+        var fragments = new List<MockMemoryFragment>
+        {
+            new MockMemoryFragment
+            {
+                Category = "Sopsortering - Kulspruta",
+                Content = "Kontakta polisen.",  // Only 18 characters - but this IS the answer!
+                CategoryEmbedding = CreateEmbedding(1.0f, similarity: 1.0f),
+                ContentEmbedding = CreateEmbedding(1.1f, similarity: 0.95f),
+                CombinedEmbedding = CreateEmbedding(1.05f, similarity: 0.98f)
+            }
+        };
+        
+        var queryEmbedding = CreateEmbedding(1.0f, similarity: 1.0f);
+        var minRelevanceScore = 0.5;
+        
+        // Act
+        var results = fragments
+            .Select(fragment => new
+            {
+                Fragment = fragment,
+                Score = WeightedCosineSimilarity(
+                    queryEmbedding,
+                    fragment.CategoryEmbedding,
+                    fragment.ContentEmbedding,
+                    fragment.CombinedEmbedding)
+            })
+            .Where(x => x.Score >= minRelevanceScore)
+            .ToList();
+        
+        // Assert - Short content should NOT be rejected if it's relevant
+        results.Should().HaveCount(1);
+        results[0].Fragment.Content.Should().Be("Kontakta polisen.");
+        results[0].Score.Should().BeGreaterThan(0.90);
+        
+        // The key point: content length is only 18 chars, but it's the CORRECT answer
+        results[0].Fragment.ContentLength.Should().BeLessThan(50);
+        
+        // This validates that the fix removed the arbitrary 100-150 char minimum
+    }
 }
