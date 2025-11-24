@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using Application.AI.Models;
 using Application.AI.Pooling;
+using Application.AI.Processing;
 using Application.AI.Utilities;
 using Entities;
 using Services.Configuration;
@@ -32,12 +33,8 @@ public class AiChatServicePooled(
     private readonly IModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
     private readonly GenerationSettings _generationSettings = generationSettings ?? throw new ArgumentNullException(nameof(generationSettings));
 
-    // Can be null for tests
-    private readonly bool _enableRag = enableRag;
-
-    // Performance tuning constants for TinyLlama
-    private const int MaxContextChars = 1500;        // Reduced from ~2771 to prevent overload
-    private const int MaxFragmentChars = 400;       // Truncate individual fragments
+    private const int MaxContextChars = 1500;
+    private const int MaxFragmentChars = 400;
 
     /// <summary>
     /// Last performance metrics from generation
@@ -51,123 +48,89 @@ public class AiChatServicePooled(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(question);
 
-        // Display generation settings being used for this query
-        DisplayService.ShowGenerationSettings(_generationSettings, enableRag);
-        DisplayService.WriteLine($"[*] User question: \"{question}\"");
-
-        // Store user question in conversation history
+        DisplayGenerationInfo(question);
         _conversationMemory.ImportMemory(new MemoryFragment("User", question));
 
-        // Build system prompt with context (or skip RAG if disabled)
-        string systemPromptResult;
-        
-        if (_enableRag)
+        var systemPrompt = await PrepareSystemPromptAsync(question);
+        if (IsErrorResponse(systemPrompt, out var errorMessage))
         {
-            // RAG mode: search knowledge base for context
-            var ragResult = await BuildSystemPromptAsync(question);
-            
-            // Check if we found any relevant context
-            if (ragResult == null)
-            {
-                return "I don't have any relevant information in my knowledge base to answer that question. " +
-                       "Please make sure your question relates to the loaded documents, or add more knowledge files to the inbox folder.";
-            }
-            
-            // Handle special case where game was detected but no results found
-            if (ragResult.StartsWith("NO_RESULTS_FOR_DOMAIN:"))
-            {
-                var domainName = ragResult.Substring("NO_RESULTS_FOR_DOMAIN:".Length);
-                return $"I don't have information about {domainName} loaded in my knowledge base. " +
-                       $"Please add documents for {domainName} to the inbox folder, or ask about a different topic.";
-            }
-            
-            systemPromptResult = ragResult;
-        }
-        else
-        {
-            // Non-RAG mode: Simple, direct instruction
-            // Balance between preventing dialogues and allowing useful responses
-            systemPromptResult = "Answer the question directly in one paragraph.";
+            return errorMessage;
         }
 
-        // Acquire a process from the pool
+        return await GenerateResponseAsync(systemPrompt, question, cancellationToken);
+    }
+
+    /// <summary>
+    /// Display generation settings and user question.
+    /// </summary>
+    private void DisplayGenerationInfo(string question)
+    {
+        DisplayService.ShowGenerationSettings(_generationSettings, enableRag);
+        DisplayService.WriteLine($"[*] User question: \"{question}\"");
+    }
+
+    /// <summary>
+    /// Prepare the system prompt with RAG context or direct instruction.
+    /// </summary>
+    private async Task<string> PrepareSystemPromptAsync(string question)
+    {
+        if (!enableRag)
+        {
+            return "Answer the question directly in one paragraph.";
+        }
+
+        var ragResult = await BuildSystemPromptAsync(question);
+        return ragResult ?? "NO_RAG_CONTEXT";
+    }
+
+    /// <summary>
+    /// Check if the system prompt represents an error condition.
+    /// </summary>
+    private static bool IsErrorResponse(string systemPrompt, out string errorMessage)
+    {
+        if (systemPrompt == "NO_RAG_CONTEXT")
+        {
+            errorMessage = "I don't have any relevant information in my knowledge base to answer that question. " +
+                          "Please make sure your question relates to the loaded documents, or add more knowledge files to the inbox folder.";
+            return true;
+        }
+
+        if (systemPrompt.StartsWith("NO_RESULTS_FOR_DOMAIN:"))
+        {
+            var domainName = systemPrompt.Substring("NO_RESULTS_FOR_DOMAIN:".Length);
+            errorMessage = $"I don't have information about {domainName} loaded in my knowledge base. " +
+                          $"Please add documents for {domainName} to the inbox folder, or ask about a different topic.";
+            return true;
+        }
+
+        errorMessage = string.Empty;
+        return false;
+    }
+
+    /// <summary>
+    /// Generate a response from the LLM using the prepared system prompt.
+    /// </summary>
+    private async Task<string> GenerateResponseAsync(string systemPrompt, string question, CancellationToken cancellationToken)
+    {
         using var pooledInstance = await _modelPool.AcquireAsync(cancellationToken);
 
         try
         {
-            // Use configured max tokens - don't limit for non-RAG mode
-            var maxTokens = _generationSettings.MaxTokens;
+            DisplayQueryMode();
             
-            // Query the persistent process
-            if (_enableRag)
-            {
-                DisplayService.WriteLine("[*] Querying with RAG context...");
-            }
-            else
-            {
-                DisplayService.WriteLine("[*] Querying in direct mode...");
-            }
-            
-            // Start performance tracking
             var stopwatch = Stopwatch.StartNew();
-            
-            var response = await pooledInstance.Process.QueryAsync(
-                systemPromptResult, 
-                question,
-                maxTokens: maxTokens,
-                temperature: _generationSettings.Temperature,
-                topK: _generationSettings.TopK,
-                topP: _generationSettings.TopP,
-                repeatPenalty: _generationSettings.RepeatPenalty,
-                presencePenalty: _generationSettings.PresencePenalty,
-                frequencyPenalty: _generationSettings.FrequencyPenalty,
-                useGpu: llmSettings?.UseGpu ?? false,
-                gpuLayers: llmSettings?.GpuLayers ?? 0);
-
+            var response = await QueryLlmAsync(pooledInstance.Process, systemPrompt, question);
             stopwatch.Stop();
-            
-            // 🔍 DEBUG CHECKPOINT 3: After LLM generation - check response for markers
-            if (!string.IsNullOrWhiteSpace(response))
-            {
-                var responseReport = EosEofDebugger.ScanForMarkers(response, "LLM Response");
-                EosEofDebugger.LogReport(responseReport, onlyIfDirty: true);
-                
-                if (!responseReport.IsClean)
-                {
-                    DisplayService.WriteLine("ℹ️  INFO: EOS/EOF markers found in LLM response (expected) - cleaning...");
-                    response = EosEofDebugger.CleanMarkers(response);
-                    
-                    // Note: This is expected - the LLM may generate these markers
-                    // The important thing is that they're cleaned before returning to user
-                }
-            }
 
-            // Calculate performance metrics (do this before checking response validity)
-            var metrics = new PerformanceMetrics
-            {
-                TotalTimeMs = stopwatch.Elapsed.TotalMilliseconds,
-                CompletionTokens = string.IsNullOrWhiteSpace(response) ? 0 : EstimateTokenCount(response),
-                PromptTokens = EstimateTokenCount(systemPromptResult + " " + question),
-                ModelName = null // Model name not available from PersistentLlmProcess
-            };
-            
-            LastMetrics = metrics;
-            
-            // Display performance metrics if enabled (even for empty responses)
-            if (showPerformanceMetrics)
-            {
-                DisplayService.WriteLine(metrics.ToString());
-            }
+            response = CleanLlmResponse(response);
+            RecordPerformanceMetrics(stopwatch, response, systemPrompt, question);
 
-            // Check if response is empty or just whitespace
             if (string.IsNullOrWhiteSpace(response))
             {
                 return "[WARNING] Model returned an empty response. The model may be overloaded or the context was too long. Try asking a more specific question.";
             }
 
-            // Store AI response in conversation history
             _conversationMemory.ImportMemory(new MemoryFragment("AI", response));
-
             return response;
         }
         catch (TimeoutException tex)
@@ -180,133 +143,271 @@ public class AiChatServicePooled(
         }
     }
 
+    /// <summary>
+    /// Display the query mode (RAG or direct).
+    /// </summary>
+    private void DisplayQueryMode()
+    {
+        var mode = enableRag ? "RAG context" : "direct mode";
+        DisplayService.WriteLine($"[*] Querying with {mode}...");
+    }
+
+    /// <summary>
+    /// Query the LLM process with the system prompt and question.
+    /// </summary>
+    private async Task<string> QueryLlmAsync(IPersistentLlmProcess process, string systemPrompt, string question)
+    {
+        return await process.QueryAsync(
+            systemPrompt,
+            question,
+            maxTokens: _generationSettings.MaxTokens,
+            temperature: _generationSettings.Temperature,
+            topK: _generationSettings.TopK,
+            topP: _generationSettings.TopP,
+            repeatPenalty: _generationSettings.RepeatPenalty,
+            presencePenalty: _generationSettings.PresencePenalty,
+            frequencyPenalty: _generationSettings.FrequencyPenalty,
+            useGpu: llmSettings?.UseGpu ?? false,
+            gpuLayers: llmSettings?.GpuLayers ?? 0);
+    }
+
+    /// <summary>
+    /// Clean EOS/EOF markers from LLM response.
+    /// </summary>
+    private static string CleanLlmResponse(string response)
+    {
+        if (string.IsNullOrWhiteSpace(response))
+        {
+            return response;
+        }
+
+        var responseReport = EosEofDebugger.ScanForMarkers(response, "LLM Response");
+        EosEofDebugger.LogReport(responseReport, onlyIfDirty: true);
+
+        if (!responseReport.IsClean)
+        {
+            DisplayService.WriteLine("ℹ️  INFO: EOS/EOF markers found in LLM response (expected) - cleaning...");
+            response = EosEofDebugger.CleanMarkers(response);
+        }
+
+        return response;
+    }
+
+    /// <summary>
+    /// Record performance metrics and optionally display them.
+    /// </summary>
+    private void RecordPerformanceMetrics(Stopwatch stopwatch, string response, string systemPrompt, string question)
+    {
+        var metrics = new PerformanceMetrics
+        {
+            TotalTimeMs = stopwatch.Elapsed.TotalMilliseconds,
+            CompletionTokens = string.IsNullOrWhiteSpace(response) ? 0 : EstimateTokenCount(response),
+            PromptTokens = EstimateTokenCount(systemPrompt + " " + question),
+            ModelName = null
+        };
+
+        LastMetrics = metrics;
+
+        if (showPerformanceMetrics)
+        {
+            DisplayService.WriteLine(metrics.ToString());
+        }
+    }
+
+    /// <summary>
+    /// Build system prompt with RAG context from knowledge base.
+    /// </summary>
     private async Task<string?> BuildSystemPromptAsync(string question)
     {
-        // Simplified prompt optimized for tiny models
         const string basePrompt = "Answer the question using only the information below.\n";
 
-        // Detect domains mentioned in the query
-        List<string> detectedDomains = new();
-        
-        if (domainDetector != null)
-        {
-            detectedDomains = await domainDetector.DetectDomainsAsync(question);
-            
-            if (detectedDomains.Count > 0)
-            {
-                var domainNames = new List<string>();
-                foreach (var domainId in detectedDomains)
-                {
-                    domainNames.Add(await domainDetector.GetDisplayNameAsync(domainId));
-                }
-                DisplayService.WriteLine($"[*] Detected domain(s) from query: {string.Join(", ", domainNames)}");
-            }
-        }
-        
-        // IMPORTANT: If we're using DatabaseVectorMemory, check if the collection name matches a domain
-        // This ensures that selecting a collection in the UI filters to that domain
-        if (_memory is DatabaseVectorMemory dbMemory && domainDetector != null)
-        {
-            var collectionName = dbMemory.GetCollectionName();
-            
-            // Try to find a domain that matches the collection name
-            var allDomains = await domainDetector.GetAllDomainsAsync();
-            var matchingDomain = allDomains.FirstOrDefault(d => 
-                d.DisplayName.Equals(collectionName, StringComparison.OrdinalIgnoreCase) ||
-                d.DomainId.Equals(collectionName.ToLowerInvariant().Replace(" ", "-"), StringComparison.OrdinalIgnoreCase));
-            
-            if (matchingDomain != default)
-            {
-                // Add collection-based domain if not already detected
-                if (!detectedDomains.Contains(matchingDomain.DomainId))
-                {
-                    detectedDomains.Add(matchingDomain.DomainId);
-                    DisplayService.WriteLine($"[*] Added domain filter from collection: {matchingDomain.DisplayName}");
-                }
-            }
-        }
+        var detectedDomains = await DetectAndFilterDomainsAsync(question);
+        var relevantMemory = await RetrieveRelevantContextAsync(question, detectedDomains);
 
-        // IMPORTANT: Do NOT remove domain names from the query before database search
-        // Domain names are crucial for matching titles in embeddings
-        // The database search needs the full query INCLUDING domain names to match properly
-        string queryForSearch = question;
-        
-        DisplayService.WriteLine($"[*] Searching database with: '{queryForSearch}'");
-
-        // Use vector search if available
-        string? relevantMemory = null;
-        if (_memory is ISearchableMemory searchableMemory)
-        {
-            relevantMemory = await searchableMemory.SearchRelevantMemoryAsync(
-                queryForSearch,
-                topK: _generationSettings.RagTopK,
-                minRelevanceScore: _generationSettings.RagMinRelevanceScore,
-                domainFilter: detectedDomains.Count > 0 ? detectedDomains : null,
-                maxCharsPerFragment: MaxFragmentChars,
-                includeMetadata: false);
-        }
-        
-        // 🔍 DEBUG CHECKPOINT 1: After RAG search - check retrieved context
-        if (relevantMemory != null)
-        {
-            var ragReport = EosEofDebugger.ScanForMarkers(relevantMemory, "RAG Retrieved Context");
-            EosEofDebugger.LogReport(ragReport, onlyIfDirty: true);
-            
-            if (!ragReport.IsClean)
-            {
-                DisplayService.WriteLine("⚠️  WARNING: EOS/EOF markers found in RAG context - cleaning...");
-                relevantMemory = EosEofDebugger.CleanMarkers(relevantMemory);
-                
-                // Verify cleaning worked
-                var verifyReport = EosEofDebugger.ScanForMarkers(relevantMemory, "After Cleaning");
-                EosEofDebugger.LogReport(verifyReport, onlyIfDirty: true);
-            }
-        }
-        
         if (relevantMemory == null)
         {
-            // If we detected a domain but found no results OR context was too small
-            if (detectedDomains.Count > 0 && domainDetector != null)
-            {
-                var domainNames = new List<string>();
-                foreach (var domainId in detectedDomains)
-                {
-                    domainNames.Add(await domainDetector.GetDisplayNameAsync(domainId));
-                }
-                return $"NO_RESULTS_FOR_DOMAIN:{string.Join(", ", domainNames)}";
-            }
-            
-            // No domain detected - general insufficient context
-            DisplayService.WriteLine($"[!] Insufficient context found - returning null");
-            return null;
+            return await HandleMissingContext(detectedDomains);
         }
 
-        // REMOVED: The 150-character minimum check was rejecting valid short answers
-        // Short, precise answers are often BETTER than long context for recycling queries
-        // Example: "Kulspruta → Contact police" (25 chars) is a perfect answer
+        relevantMemory = CleanAndValidateContext(relevantMemory);
         
-        // Show debug output BEFORE truncation (if enabled) to see full retrieved context
         if (debugMode)
         {
             DisplayService.ShowSystemPromptDebug(relevantMemory, debug: true);
         }
 
-        // Truncate context if too long
+        relevantMemory = TruncateContextIfNeeded(relevantMemory);
+
+        return BuildFinalPrompt(basePrompt, relevantMemory);
+    }
+
+    /// <summary>
+    /// Detect domains from query and add collection-based domain if applicable.
+    /// </summary>
+    private async Task<List<string>> DetectAndFilterDomainsAsync(string question)
+    {
+        var detectedDomains = new List<string>();
+
+        if (domainDetector != null)
+        {
+            detectedDomains = await domainDetector.DetectDomainsAsync(question);
+            await DisplayDetectedDomainsAsync(detectedDomains);
+        }
+
+        await AddCollectionBasedDomainAsync(detectedDomains);
+
+        return detectedDomains;
+    }
+
+    /// <summary>
+    /// Display detected domain names for debugging.
+    /// </summary>
+    private async Task DisplayDetectedDomainsAsync(List<string> detectedDomains)
+    {
+        if (detectedDomains.Count > 0 && domainDetector != null)
+        {
+            var domainNames = new List<string>();
+            foreach (var domainId in detectedDomains)
+            {
+                domainNames.Add(await domainDetector.GetDisplayNameAsync(domainId));
+            }
+            DisplayService.WriteLine($"[*] Detected domain(s) from query: {string.Join(", ", domainNames)}");
+        }
+    }
+
+    /// <summary>
+    /// Add domain filter based on the current collection name if applicable.
+    /// </summary>
+    private async Task AddCollectionBasedDomainAsync(List<string> detectedDomains)
+    {
+        if (_memory is not DatabaseVectorMemory dbMemory || domainDetector == null)
+        {
+            return;
+        }
+
+        var collectionName = dbMemory.GetCollectionName();
+        var allDomains = await domainDetector.GetAllDomainsAsync();
+        
+        var matchingDomain = FindMatchingDomain(allDomains, collectionName);
+
+        if (matchingDomain != default && !detectedDomains.Contains(matchingDomain.DomainId))
+        {
+            detectedDomains.Add(matchingDomain.DomainId);
+            DisplayService.WriteLine($"[*] Added domain filter from collection: {matchingDomain.DisplayName}");
+        }
+    }
+
+    /// <summary>
+    /// Find a domain that matches the collection name.
+    /// </summary>
+    private static (string DomainId, string DisplayName, string Category) FindMatchingDomain(
+        List<(string DomainId, string DisplayName, string Category)> allDomains,
+        string collectionName)
+    {
+        return allDomains.FirstOrDefault(d =>
+            d.DisplayName.Equals(collectionName, StringComparison.OrdinalIgnoreCase) ||
+            d.DomainId.Equals(collectionName.ToLowerInvariant().Replace(" ", "-"), StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Retrieve relevant context from memory using vector search.
+    /// </summary>
+    private async Task<string?> RetrieveRelevantContextAsync(string question, List<string> detectedDomains)
+    {
+        DisplayService.WriteLine($"[*] Searching database with: '{question}'");
+
+        if (_memory is not ISearchableMemory searchableMemory)
+        {
+            return null;
+        }
+
+        var relevantMemory = await searchableMemory.SearchRelevantMemoryAsync(
+            question,
+            topK: _generationSettings.RagTopK,
+            minRelevanceScore: _generationSettings.RagMinRelevanceScore,
+            domainFilter: detectedDomains.Count > 0 ? detectedDomains : null,
+            maxCharsPerFragment: MaxFragmentChars,
+            includeMetadata: false);
+
+        return relevantMemory;
+    }
+
+    /// <summary>
+    /// Handle the case when no relevant context is found.
+    /// </summary>
+    private async Task<string?> HandleMissingContext(List<string> detectedDomains)
+    {
+        if (detectedDomains.Count > 0 && domainDetector != null)
+        {
+            var domainNames = new List<string>();
+            foreach (var domainId in detectedDomains)
+            {
+                domainNames.Add(await domainDetector.GetDisplayNameAsync(domainId));
+            }
+            return $"NO_RESULTS_FOR_DOMAIN:{string.Join(", ", domainNames)}";
+        }
+
+        DisplayService.WriteLine($"[!] Insufficient context found - returning null");
+        return null;
+    }
+
+    /// <summary>
+    /// Clean EOS/EOF markers from retrieved context and validate it.
+    /// </summary>
+    private static string CleanAndValidateContext(string relevantMemory)
+    {
+        var ragReport = EosEofDebugger.ScanForMarkers(relevantMemory, "RAG Retrieved Context");
+        EosEofDebugger.LogReport(ragReport, onlyIfDirty: true);
+
+        if (!ragReport.IsClean)
+        {
+            DisplayService.WriteLine("⚠️  WARNING: EOS/EOF markers found in RAG context - cleaning...");
+            relevantMemory = EosEofDebugger.CleanMarkers(relevantMemory);
+
+            var verifyReport = EosEofDebugger.ScanForMarkers(relevantMemory, "After Cleaning");
+            EosEofDebugger.LogReport(verifyReport, onlyIfDirty: true);
+        }
+
+        return relevantMemory;
+    }
+
+    /// <summary>
+    /// Truncate context if it exceeds the maximum length.
+    /// </summary>
+    private static string TruncateContextIfNeeded(string relevantMemory)
+    {
         if (relevantMemory.Length > MaxContextChars)
         {
             DisplayService.WriteLine($"[*] Context truncated from {relevantMemory.Length} to {MaxContextChars} chars for LLM");
-            relevantMemory = TruncateAtWordBoundary(relevantMemory, MaxContextChars);
+            return TruncateAtWordBoundary(relevantMemory, MaxContextChars);
         }
 
-        // Simple prompt format - use the ORIGINAL question with domain name intact
+        return relevantMemory;
+    }
+
+    /// <summary>
+    /// Build the final system prompt with context and validate it.
+    /// </summary>
+    private static string BuildFinalPrompt(string basePrompt, string relevantMemory)
+    {
         var prompt = new StringBuilder();
         prompt.Append(basePrompt);
         prompt.AppendLine("\nInformation:");
         prompt.AppendLine(relevantMemory.Trim());
 
         var finalPrompt = prompt.ToString();
-        
-        // 🔍 DEBUG CHECKPOINT 2: Before sending to LLM - CRITICAL validation
+
+        ValidatePromptBeforeLlm(finalPrompt);
+        CheckPromptLength(finalPrompt);
+
+        return finalPrompt;
+    }
+
+    /// <summary>
+    /// Validate that the prompt is clean before sending to LLM.
+    /// </summary>
+    private static void ValidatePromptBeforeLlm(string finalPrompt)
+    {
         try
         {
             EosEofDebugger.ValidateCleanBeforeLlm(finalPrompt, "Final System Prompt");
@@ -314,13 +415,10 @@ public class AiChatServicePooled(
         }
         catch (InvalidOperationException ex)
         {
-            // This is critical - log the error and attempt recovery
             DisplayService.WriteLine(ex.Message);
-            
-            // Attempt automatic cleaning
+
             finalPrompt = EosEofDebugger.CleanMarkers(finalPrompt);
-            
-            // Verify cleaning worked
+
             try
             {
                 EosEofDebugger.ValidateCleanBeforeLlm(finalPrompt, "After Emergency Cleaning");
@@ -333,14 +431,17 @@ public class AiChatServicePooled(
                     "This would corrupt the LLM input. Aborting query.");
             }
         }
-        
-        // Final safety check
+    }
+
+    /// <summary>
+    /// Check if prompt length might cause issues.
+    /// </summary>
+    private static void CheckPromptLength(string finalPrompt)
+    {
         if (finalPrompt.Length > 2500)
         {
             DisplayService.WriteLine($"[WARNING] Prompt is {finalPrompt.Length} chars, may cause issues");
         }
-
-        return finalPrompt;
     }
 
     /// <summary>
@@ -353,8 +454,8 @@ public class AiChatServicePooled(
 
         var truncated = text.Substring(0, maxLength);
         var lastSpace = truncated.LastIndexOf(' ');
-        
-        if (lastSpace > maxLength - 50) // Only use word boundary if not too far back
+
+        if (lastSpace > maxLength - 50)
         {
             truncated = truncated.Substring(0, lastSpace);
         }
@@ -370,9 +471,7 @@ public class AiChatServicePooled(
     {
         if (string.IsNullOrWhiteSpace(text))
             return 0;
-        
-        // Rough estimate: ~4 characters per token for English text
-        // This varies by tokenizer but gives a reasonable approximation
+
         return (int)Math.Ceiling(text.Length / 4.0);
     }
 }

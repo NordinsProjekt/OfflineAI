@@ -541,4 +541,63 @@ public class WeightedEmbeddingSearchTests
         
         // This validates that the fix removed the arbitrary 100-150 char minimum
     }
+
+    [Fact]
+    public void WeightedSearch_HowToWinQuery_ShouldMatchHowToWinCategory()
+    {
+        // Arrange - Board game scenario: multi-word phrase "how to win"
+        var fragments = new List<MockMemoryFragment>
+        {
+            new MockMemoryFragment
+            {
+                Category = "Munchkin Treasure Hunt - How to Win",
+                Content = "The player with the most Treasure cards when someone reaches the End wins the game.",
+                CategoryEmbedding = CreateEmbedding(1.0f, similarity: 1.0f),
+                ContentEmbedding = CreateEmbedding(1.1f, similarity: 0.95f),
+                CombinedEmbedding = CreateEmbedding(1.05f, similarity: 0.98f)
+            },
+            new MockMemoryFragment
+            {
+                Category = "Munchkin Treasure Hunt - On Your Turn",
+                Content = "Roll the dice and move your standie. Draw cards based on the space you land on.",
+                CategoryEmbedding = CreateEmbedding(2.0f, similarity: 0.65f),
+                ContentEmbedding = CreateEmbedding(2.1f, similarity: 0.70f),
+                CombinedEmbedding = CreateEmbedding(2.05f, similarity: 0.67f)
+            },
+            new MockMemoryFragment
+            {
+                Category = "Munchkin Treasure Hunt - Game Setup",
+                Content = "Place the board in the center. Each player chooses a standie and places it on Start.",
+                CategoryEmbedding = CreateEmbedding(3.0f, similarity: 0.60f),
+                ContentEmbedding = CreateEmbedding(3.1f, similarity: 0.65f),
+                CombinedEmbedding = CreateEmbedding(3.05f, similarity: 0.62f)
+            }
+        };
+        
+        var queryEmbedding = CreateEmbedding(1.0f, similarity: 1.0f); // "How to win in Munchkin Treasure Hunt?"
+        var minRelevanceScore = 0.5;
+        
+        // Act
+        var results = fragments
+            .Select(fragment => new
+            {
+                Fragment = fragment,
+                Score = WeightedCosineSimilarity(
+                    queryEmbedding,
+                    fragment.CategoryEmbedding,
+                    fragment.ContentEmbedding,
+                    fragment.CombinedEmbedding)
+            })
+            .OrderByDescending(x => x.Score)
+            .Where(x => x.Score >= minRelevanceScore)
+            .ToList();
+        
+        // Assert - "How to Win" category should be top match
+        results.Should().NotBeEmpty();
+        results[0].Fragment.Category.Should().Contain("How to Win");
+        results[0].Score.Should().BeGreaterThan(0.90);
+        
+        // Note: In production, the hybrid search boost will push this even higher
+        // The phrase "how to win" in the query should match "How to Win" in the category
+    }
 }

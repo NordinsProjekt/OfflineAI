@@ -135,6 +135,28 @@ public class DatabaseVectorMemory(
                 
                 double originalScore = score;
                 
+                // PHASE 1: Check for important multi-word phrases in the ORIGINAL query
+                // These phrases are meaningful as complete units (don't rely on keyword extraction)
+                var importantPhrases = new[]
+                {
+                    "how to win", "how to play", "how to setup", "how to fight",
+                    "game setup", "game components", "winning condition", "turn order",
+                    "player turn", "end game", "victory points", "setup instructions"
+                };
+                
+                var originalQueryLower = query.ToLowerInvariant();
+                foreach (var phrase in importantPhrases)
+                {
+                    // Check if phrase appears in BOTH the original query AND the category
+                    if (originalQueryLower.Contains(phrase) && categoryLower.Contains(phrase))
+                    {
+                        score += 0.4; // Strong boost for important phrase match
+                        Console.WriteLine($"[BOOST] '{entity.Category}' phrase match '{phrase}': {originalScore:F3} ? {score:F3} (+0.4)");
+                        break; // Only apply one phrase boost
+                    }
+                }
+                
+                // PHASE 2: Check for full query match in category
                 if (categoryLower.Contains(queryLower))
                 {
                     // Exact match boost: +0.3 (this will push exact matches to the top)
@@ -294,48 +316,95 @@ public class DatabaseVectorMemory(
     
     /// <summary>
     /// Extracts keywords from a query to focus on the object/topic.
-    /// Removes Swedish question words and focuses on nouns.
+    /// Handles both Swedish recycling queries and English game rule queries.
+    /// Preserves important multi-word phrases like "how to win", "how to play".
     /// Examples:
-    ///   "Hur sorterar jag adapter?" ? "adapter"
-    ///   "Var ska airfryer slängas?" ? "airfryer"
-    ///   "adapter" ? "adapter" (unchanged if already simple)
+    ///   Swedish: "Hur sorterar jag adapter?" ? "adapter"
+    ///   English: "How to win in Munchkin?" ? "how to win munchkin" (preserves phrase)
+    ///   Simple: "adapter" ? "adapter" (unchanged if already simple)
     /// </summary>
     private static string ExtractKeywords(string query)
     {
         if (string.IsNullOrWhiteSpace(query))
             return query;
         
-        // Swedish question words and common filler words to remove
-        var stopWords = new[]
+        var lowerQuery = query.ToLowerInvariant();
+        
+        // Detect important multi-word phrases that should be preserved
+        var importantPhrases = new[]
         {
-            "hur", "var", "vad", "när", "varför", "vem", "vilken", "vilket",
-            "ska", "kan", "måste", "bör", "sorterar", "sortera", "slänger", "slänga",
-            "jag", "vi", "du", "ni", "man",
-            "en", "ett", "den", "det", "de",
-            "i", "på", "till", "från", "med", "av",
-            "som", "för", "om", "åt"
+            "how to win", "how to play", "how to setup", "how to fight",
+            "game setup", "game components", "winning condition", "turn order",
+            "player turn", "end game", "victory points", "setup instructions"
         };
         
-        // Remove punctuation and split into words
-        var cleanQuery = query.ToLowerInvariant()
-            .Replace("?", "")
-            .Replace("!", "")
-            .Replace(".", "")
-            .Replace(",", "")
-            .Trim();
+        // Check if query contains any important phrase - if so, use gentler filtering
+        var containsImportantPhrase = importantPhrases.Any(phrase => lowerQuery.Contains(phrase));
         
-        var words = cleanQuery.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-        
-        // Filter out stop words
-        var keywords = words
-            .Where(w => !stopWords.Contains(w) && w.Length > 2)
-            .ToList();
+        if (containsImportantPhrase)
+        {
+            // ENGLISH QUERY MODE: Only remove pure filler words
+            var lightStopWords = new[]
+            {
+                "the", "a", "an", "in", "on", "at", "by", "for", "with", "from",
+                "is", "are", "was", "were", "be", "been", "being"
+            };
+            
+            // Remove punctuation but keep the structure
+            var cleanQuery = lowerQuery
+                .Replace("?", "")
+                .Replace("!", "")
+                .Replace(".", "")
+                .Replace(",", "")
+                .Trim();
+            
+            var words = cleanQuery.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            
+            // Only filter out pure articles/prepositions
+            var keywords = words
+                .Where(w => !lightStopWords.Contains(w) && w.Length > 1)
+                .ToList();
+            
+            if (keywords.Count > 0)
+            {
+                return string.Join(" ", keywords);
+            }
+        }
+        else
+        {
+            // SWEDISH QUERY MODE: Aggressive filtering for recycling queries
+            var stopWords = new[]
+            {
+                "hur", "var", "vad", "när", "varför", "vem", "vilken", "vilket",
+                "ska", "kan", "måste", "bör", "sorterar", "sortera", "slänger", "slänga",
+                "jag", "vi", "du", "ni", "man",
+                "en", "ett", "den", "det", "de",
+                "i", "på", "till", "från", "med", "av",
+                "som", "för", "om", "åt"
+            };
+            
+            // Remove punctuation and split into words
+            var cleanQuery = lowerQuery
+                .Replace("?", "")
+                .Replace("!", "")
+                .Replace(".", "")
+                .Replace(",", "")
+                .Trim();
+            
+            var words = cleanQuery.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            
+            // Filter out stop words
+            var keywords = words
+                .Where(w => !stopWords.Contains(w) && w.Length > 2)
+                .ToList();
+            
+            if (keywords.Count > 0)
+            {
+                return string.Join(" ", keywords);
+            }
+        }
         
         // If we filtered everything out, return original query
-        if (keywords.Count == 0)
-            return query;
-        
-        // Return the extracted keywords (usually the object name)
-        return string.Join(" ", keywords);
+        return query;
     }
 }
