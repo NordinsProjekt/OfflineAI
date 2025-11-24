@@ -63,9 +63,19 @@ public class DatabaseVectorMemory(
             return null;
         }
 
-        // Generate embedding for the query
-        Console.WriteLine($"[*] Searching database for: '{query}'");
-        var queryEmbedding = await _embeddingService.GenerateEmbeddingAsync(query);
+        // Extract keywords from query to focus on the object/topic rather than the question structure
+        // For recycling queries like "Hur sorterar jag adapter?", extract just "adapter"
+        var extractedKeywords = ExtractKeywords(query);
+        var searchQuery = !string.IsNullOrEmpty(extractedKeywords) ? extractedKeywords : query;
+        
+        if (extractedKeywords != query)
+        {
+            Console.WriteLine($"[*] Extracted keywords: '{extractedKeywords}' from query: '{query}'");
+        }
+
+        // Generate embedding for the search query
+        Console.WriteLine($"[*] Searching database for: '{searchQuery}'");
+        var queryEmbedding = await _embeddingService.GenerateEmbeddingAsync(searchQuery);
 
         // Load fragments from the collection - filter at database level if domain filter is provided
         List<MemoryFragmentEntity> allFragments;
@@ -107,8 +117,6 @@ public class DatabaseVectorMemory(
                         categoryEmb,
                         contentEmb,
                         combinedEmb);
-                    
-                    Console.WriteLine($"[DEBUG] Weighted score for '{entity.Category}': {score:F3}");
                 }
                 else if (!combinedEmb.IsEmpty)
                 {
@@ -129,6 +137,14 @@ public class DatabaseVectorMemory(
             .OrderByDescending(x => x.Score)
             .ToList();
 
+        // ?? DEBUG: Show top 10 matches to diagnose matching issues
+        Console.WriteLine($"[DEBUG] Top 10 similarity scores:");
+        foreach (var top in scoredFragments.Take(10))
+        {
+            Console.WriteLine($"    {top.Score:F3} - {top.Entity.Category}");
+        }
+        Console.WriteLine();
+
         // Filter by threshold and take top K
         var results = scoredFragments
             .Where(x => x.Score >= minRelevanceScore)
@@ -138,10 +154,16 @@ public class DatabaseVectorMemory(
         if (results.Count == 0)
         {
             Console.WriteLine($"[!] No fragments met minimum relevance score of {minRelevanceScore}");
+            Console.WriteLine($"[!] Highest score was: {scoredFragments.FirstOrDefault()?.Score:F3} for '{scoredFragments.FirstOrDefault()?.Entity.Category}'");
             return null;
         }
 
-        Console.WriteLine($"[*] Found {results.Count} relevant fragments (scores: {string.Join(", ", results.Select(r => r.Score.ToString("F3")))})");
+        // Show matching fragments with their categories and scores
+        Console.WriteLine($"[*] Found {results.Count} relevant fragments:");
+        foreach (var result in results)
+        {
+            Console.WriteLine($"    {result.Entity.Category} ({result.Score:F3})");
+        }
 
         // Build result string
         var sb = new StringBuilder();
@@ -193,16 +215,17 @@ public class DatabaseVectorMemory(
             }
         }
         
-        // EDGE CASE FIX: Check if total retrieved content is too small (< 200 chars)
-        if (totalContentLength < 200)
+        // EDGE CASE FIX: Check if total retrieved content is too small
+        // For short, precise answers (like "Kulspruta"), even 50 chars is enough!
+        if (totalContentLength < 100 && results.Count < 3)
         {
-            Console.WriteLine($"[!] WARNING: Retrieved context is too small ({totalContentLength} chars)");
+            Console.WriteLine($"[!] WARNING: Retrieved context is small ({totalContentLength} chars with {results.Count} fragments)");
             Console.WriteLine($"[*] Attempting to retrieve more context by lowering threshold...");
             
             // Try again with lower threshold and more results
             var expandedResults = scoredFragments
-                .Where(x => x.Score >= Math.Max(0.3, minRelevanceScore - 0.15))
-                .Take(Math.Min(topK + 2, 5))
+                .Where(x => x.Score >= Math.Max(0.3, minRelevanceScore - 0.2))
+                .Take(Math.Min(topK + 3, 7))
                 .ToList();
             
             if (expandedResults.Count > results.Count)
@@ -237,14 +260,20 @@ public class DatabaseVectorMemory(
                 resultText = sb.ToString();
                 Console.WriteLine($"[*] Expanded context to {totalContentLength} chars");
             }
-            
-            // Still too small? Return null to trigger "insufficient context" message
-            if (totalContentLength < 150)
-            {
-                Console.WriteLine($"[!] Context still too small ({totalContentLength} chars) - insufficient information");
-                return null;
-            }
         }
+        
+        // Accept any context with at least 1 relevant fragment, even if very short
+        // Short answers are often the BEST answers for recycling queries:
+        // "Adapter ? Elektronik, Småelektronik" is perfect (37 chars)!
+        // "Kulspruta ? call police" is perfect!
+        // DON'T reject short but correct answers!
+        if (results.Count == 0 || string.IsNullOrWhiteSpace(resultText))
+        {
+            Console.WriteLine($"[!] No valid context found after expansion");
+            return null;
+        }
+        
+        Console.WriteLine($"[?] Returning context with {totalContentLength} chars from {results.Count} fragments");
 
         return resultText;
     }
@@ -278,5 +307,52 @@ public class DatabaseVectorMemory(
         }
 
         return truncated.Trim() + "...";
+    }
+    
+    /// <summary>
+    /// Extracts keywords from a query to focus on the object/topic.
+    /// Removes Swedish question words and focuses on nouns.
+    /// Examples:
+    ///   "Hur sorterar jag adapter?" ? "adapter"
+    ///   "Var ska airfryer slängas?" ? "airfryer"
+    ///   "adapter" ? "adapter" (unchanged if already simple)
+    /// </summary>
+    private static string ExtractKeywords(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return query;
+        
+        // Swedish question words and common filler words to remove
+        var stopWords = new[]
+        {
+            "hur", "var", "vad", "när", "varför", "vem", "vilken", "vilket",
+            "ska", "kan", "måste", "bör", "sorterar", "sortera", "slänger", "slänga",
+            "jag", "vi", "du", "ni", "man",
+            "en", "ett", "den", "det", "de",
+            "i", "på", "till", "från", "med", "av",
+            "som", "för", "om", "åt"
+        };
+        
+        // Remove punctuation and split into words
+        var cleanQuery = query.ToLowerInvariant()
+            .Replace("?", "")
+            .Replace("!", "")
+            .Replace(".", "")
+            .Replace(",", "")
+            .Trim();
+        
+        var words = cleanQuery.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        
+        // Filter out stop words
+        var keywords = words
+            .Where(w => !stopWords.Contains(w) && w.Length > 2)
+            .ToList();
+        
+        // If we filtered everything out, return original query
+        if (keywords.Count == 0)
+            return query;
+        
+        // Return the extracted keywords (usually the object name)
+        return string.Join(" ", keywords);
     }
 }

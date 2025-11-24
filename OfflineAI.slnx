@@ -18,4 +18,5 @@
     <Project Path="Application.AI.Tests/Application.AI.Tests.csproj" Id="4bdb3278-a091-4162-869b-d4f44dbff38f" />
     <Project Path="Presentation.AiDashboard.Tests/Presentation.AiDashboard.Tests.csproj" Id="03b48d4e-dcc9-40b5-ac13-957373a23ec5" />
   </Folder>
+  <Project Path="Services.Tests/Services.Tests.csproj" />
 </Solution>

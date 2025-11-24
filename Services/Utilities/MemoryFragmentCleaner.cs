@@ -40,9 +40,14 @@ public static class MemoryFragmentCleaner
     
     /// <summary>
     /// Remove common special tokens found in LLM outputs and tokenizer vocabularies.
+    /// Also removes markdown header prefixes (##) that can pollute embeddings.
     /// </summary>
     private static string RemoveSpecialTokens(string text)
     {
+        // Remove markdown header prefixes (##Sopsortering -> Sopsortering)
+        // This MUST happen BEFORE other token removal to catch ##Sopsortering patterns
+        text = Regex.Replace(text, @"^##\s*", "", RegexOptions.Multiline);
+        
         // Common LLM special tokens
         var llmTokens = new[]
         {
