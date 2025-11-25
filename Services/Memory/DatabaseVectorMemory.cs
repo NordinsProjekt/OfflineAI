@@ -226,9 +226,16 @@ public class DatabaseVectorMemory(
                 content = TruncateAtSentenceBoundary(content, maxCharsPerFragment.Value);
             }
 
+            // ALWAYS include the category label so LLM knows what each fragment is about
+            // Only include the relevance score if metadata is requested
             if (includeMetadata)
             {
                 sb.AppendLine($"[Relevance: {result.Score:F3}]");
+                sb.AppendLine($"[{result.Entity.Category}]");
+            }
+            else
+            {
+                // Even without metadata, include category so LLM can identify the answer
                 sb.AppendLine($"[{result.Entity.Category}]");
             }
 
