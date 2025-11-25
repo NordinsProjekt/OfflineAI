@@ -3,9 +3,15 @@
 
 <div class="oa-topbar">
     <div class="oa-badges">
-        <span class="oa-badge green">RAG: @(Dashboard.SettingsService.RagMode ? "ON" : "OFF")</span>
-        <span class="oa-badge blue">Model: @Dashboard.ModelService.CurrentModel</span>
-        <span class="oa-badge purple">Temp: @Dashboard.SettingsService.Temperature.ToString("0.0")</span>
+        <span class="oa-badge @(Dashboard.SettingsService.RagMode ? "green" : "gray")">
+            RAG: @(Dashboard.SettingsService.RagMode ? "ON" : "OFF")
+        </span>
+        <span class="oa-badge blue">
+            Model: @Dashboard.ModelService.CurrentModel
+        </span>
+        <span class="oa-badge purple">
+            Temperature: @Dashboard.SettingsService.Temperature.ToString("0.0")
+        </span>
         <span class="oa-badge @(Dashboard.SettingsService.UseGpu ? "orange" : "gray")">
             GPU: @(Dashboard.SettingsService.UseGpu ? "ON (34)" : "OFF (0)")
         </span>

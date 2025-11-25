@@ -1,30 +1,41 @@
-/* Alternative: CSS-based avatar fallback if emojis don't work */
-/* Uncomment this section if emojis still show as ?? */
+/* CSS-based avatar fallback - Modern gradient-based avatars */
 
-/*
-.oa-avatar {
-    width: 28px;
-    height: 28px;
-    display: grid;
-    place-items: center;
+.oa-avatar-fallback {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     border-radius: 50%;
-    background: #1a1f29;
-    border: 1px solid #2a2f3a;
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 700;
     flex-shrink: 0;
     text-transform: uppercase;
+    letter-spacing: 0.02em;
+    box-shadow: var(--shadow-md);
+    border: 2px solid;
 }
 
-.oa-msg.user .oa-avatar {
-    background: #1e3a5f;
-    border-color: #2c5282;
-    color: #90cdf4;
+.oa-avatar-fallback.user {
+    background: linear-gradient(135deg, var(--accent-success), #059669);
+    border-color: rgba(16, 185, 129, 0.3);
+    color: white;
 }
 
-.oa-msg.ai .oa-avatar {
-    background: #1f2937;
-    border-color: #374151;
-    color: #9ca3af;
+.oa-avatar-fallback.assistant {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    border-color: rgba(59, 130, 246, 0.3);
+    color: white;
 }
-*/
+
+.oa-avatar-fallback.system {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.8), rgba(124, 58, 237, 0.8));
+    border-color: rgba(139, 92, 246, 0.3);
+    color: white;
+}
+
+/* If emoji support is problematic, use text initials */
+.oa-avatar-text {
+    font-size: 14px;
+    line-height: 1;
+}
