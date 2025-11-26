@@ -92,21 +92,20 @@ public class MultiFormatFileWatcher
 
     /// <summary>
     /// Process plain text file.
-    /// Game name is extracted from FIRST LINE of the file.
-    /// Categories format: "GameName - SectionHeader"
     /// 
-    /// SUPPORTED PAGE NUMBER FORMATS:
-    /// - [Page: 5]
-    /// - [Page 5]
-    /// - --- Page 5 ---
-    /// - Page 5
+    /// SUPPORTED FORMATS:
     /// 
-    /// HEADER DETECTION RULES:
-    /// - Must be on its own line
-    /// - < 60 characters
-    /// - Title Case (most words start with capital)
-    /// - No sentence-ending punctuation (., !, ?)
-    /// - Not a bullet point (-, *, •)
+    /// FORMAT 1 (NEW): Markdown-style with ## for domain and # for categories
+    ///   ##DomainName
+    ///   #Category1
+    ///   Content for category 1
+    ///   #Category2
+    ///   Content for category 2
+    /// 
+    /// FORMAT 2 (LEGACY): First line is game name, then sections
+    ///   GameName
+    ///   Section Header
+    ///   Content...
     /// 
     /// CHUNK SIZE: Maximum 1500 characters per fragment, no minimum enforced
     /// </summary>
@@ -120,6 +119,124 @@ public class MultiFormatFileWatcher
         
         if (lines.Length == 0)
             return fragments;
+        
+        // Detect format: Does file start with ## (domain marker)?
+        bool isMarkdownFormat = lines[0].Trim().StartsWith("##");
+        
+        if (isMarkdownFormat)
+        {
+            // NEW FORMAT: ##Domain then #Categories
+            return await ProcessMarkdownStyleTextFileAsync(lines, filePath);
+        }
+        else
+        {
+            // LEGACY FORMAT: First line = game name
+            return await ProcessLegacyTextFileAsync(lines, filePath);
+        }
+    }
+    
+    /// <summary>
+    /// Process text file with markdown-style format:
+    /// ##Domain
+    /// #Category
+    /// Content
+    /// </summary>
+    private async Task<List<MemoryFragment>> ProcessMarkdownStyleTextFileAsync(string[] lines, string filePath)
+    {
+        var fragments = new List<MemoryFragment>();
+        
+        string? domainName = null;
+        string? currentCategory = null;
+        var currentContent = new List<string>();
+        
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].Trim();
+            
+            // Check for domain marker (##)
+            if (line.StartsWith("##"))
+            {
+                // Save previous fragment if exists
+                if (domainName != null && currentCategory != null && currentContent.Count > 0)
+                {
+                    var contentText = string.Join(Environment.NewLine, currentContent).Trim();
+                    if (!string.IsNullOrWhiteSpace(contentText))
+                    {
+                        var chunkedFragments = SplitIntoChunks(contentText, domainName, currentCategory);
+                        fragments.AddRange(chunkedFragments);
+                    }
+                }
+                
+                // Extract domain name (without ##)
+                domainName = line.Substring(2).Trim();
+                currentCategory = null;
+                currentContent.Clear();
+                
+                DisplayService.ShowLoadingFile(domainName, filePath);
+            }
+            // Check for category marker (#)
+            else if (line.StartsWith("#") && !line.StartsWith("##"))
+            {
+                // Save previous fragment if exists
+                if (domainName != null && currentCategory != null && currentContent.Count > 0)
+                {
+                    var contentText = string.Join(Environment.NewLine, currentContent).Trim();
+                    if (!string.IsNullOrWhiteSpace(contentText))
+                    {
+                        var chunkedFragments = SplitIntoChunks(contentText, domainName, currentCategory);
+                        fragments.AddRange(chunkedFragments);
+                    }
+                }
+                
+                // Extract category (without #)
+                currentCategory = line.Substring(1).Trim();
+                currentContent.Clear();
+            }
+            // Empty line - skip
+            else if (string.IsNullOrWhiteSpace(line))
+            {
+                // Skip empty lines at the start of content
+                if (currentContent.Count > 0)
+                {
+                    currentContent.Add(string.Empty);
+                }
+            }
+            // Content line
+            else
+            {
+                // Only add content if we have both domain and category
+                if (domainName != null && currentCategory != null)
+                {
+                    currentContent.Add(line);
+                }
+            }
+        }
+        
+        // Save last fragment
+        if (domainName != null && currentCategory != null && currentContent.Count > 0)
+        {
+            var contentText = string.Join(Environment.NewLine, currentContent).Trim();
+            if (!string.IsNullOrWhiteSpace(contentText))
+            {
+                var chunkedFragments = SplitIntoChunks(contentText, domainName, currentCategory);
+                fragments.AddRange(chunkedFragments);
+            }
+        }
+        
+        if (fragments.Count > 0)
+        {
+            DisplayService.ShowCollectedSections(fragments.Count, domainName ?? "Unknown");
+        }
+        
+        return fragments;
+    }
+    
+    /// <summary>
+    /// Process text file with legacy format (first line = game name).
+    /// </summary>
+    private async Task<List<MemoryFragment>> ProcessLegacyTextFileAsync(string[] lines, string filePath)
+    {
+        var fragments = new List<MemoryFragment>();
         
         // FIRST LINE = GAME NAME (not documentName parameter!)
         string gameName = lines[0].Trim();
@@ -240,7 +357,7 @@ public class MultiFormatFileWatcher
         }
 
         DisplayService.ShowCollectedSections(fragments.Count, gameName);
-        return fragments;
+        return await Task.FromResult(fragments);
     }
 
     /// <summary>

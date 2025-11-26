@@ -21,6 +21,9 @@ public class DatabaseVectorMemory(
     private readonly ITextEmbeddingGenerationService _embeddingService = embeddingService ?? throw new ArgumentNullException(nameof(embeddingService));
     private readonly IVectorMemoryRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private string _collectionName = collectionName ?? throw new ArgumentNullException(nameof(collectionName));
+    
+    // Debug counter for string matching diagnostics
+    private static int _debugMatchCounter = 0;
 
     /// <summary>
     /// Update the collection name that will be used for searches.
@@ -98,6 +101,9 @@ public class DatabaseVectorMemory(
             return null;
         }
 
+        // Reset debug counter for this search
+        System.Threading.Interlocked.Exchange(ref _debugMatchCounter, 0);
+
         // Calculate similarity scores using weighted strategy + exact string matching
         var scoredFragments = allFragments
             .Select(entity =>
@@ -135,6 +141,14 @@ public class DatabaseVectorMemory(
                 
                 double originalScore = score;
                 
+                // DEBUG: Log the first 20 comparisons to see what's being matched
+                var debugCounter = System.Threading.Interlocked.Increment(ref _debugMatchCounter);
+                if (debugCounter <= 20)
+                {
+                    Console.WriteLine($"[DEBUG MATCH] Comparing query='{queryLower}' with category='{categoryLower}'");
+                    Console.WriteLine($"              Contains check: {categoryLower.Contains(queryLower)}");
+                }
+                
                 // PHASE 1: Check for important multi-word phrases in the ORIGINAL query
                 // These phrases are meaningful as complete units (don't rely on keyword extraction)
                 var importantPhrases = new[]
@@ -156,22 +170,97 @@ public class DatabaseVectorMemory(
                     }
                 }
                 
-                // PHASE 2: Check for full query match in category
+                // PHASE 2: Check for query word match in category (exact word or substring)
                 if (categoryLower.Contains(queryLower))
                 {
-                    // Exact match boost: +0.3 (this will push exact matches to the top)
-                    score += 0.3;
+                    // Split category into words to check for exact word match
+                    var categoryWords = categoryLower.Split(new[] { ' ', '-', ',', '(', ')', '[', ']' }, StringSplitOptions.RemoveEmptyEntries);
+                    var queryWords = queryLower.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
                     
-                    // Extra boost if it's at the word boundary (not substring)
-                    var words = categoryLower.Split(new[] { ' ', '-', ',' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (words.Contains(queryLower))
+                    if (debugCounter <= 20)
                     {
-                        score += 0.2; // Total +0.5 boost for exact word match
-                        Console.WriteLine($"[BOOST] '{entity.Category}' exact word match: {originalScore:F3} ? {score:F3} (+0.5)");
+                        Console.WriteLine($"[DEBUG MATCH] Category words: [{string.Join(", ", categoryWords)}]");
+                        Console.WriteLine($"[DEBUG MATCH] Query words: [{string.Join(", ", queryWords)}]");
+                    }
+                    
+                    // Check if ANY query word appears as a complete word in the category
+                    bool hasExactWordMatch = false;
+                    string? matchedWord = null;
+                    
+                    foreach (var queryWord in queryWords)
+                    {
+                        if (queryWord.Length < 3) continue; // Skip very short words
+                        
+                        // Check for exact word match (e.g., "leksaksbåt" in "Leksaksbåt metall")
+                        if (categoryWords.Contains(queryWord))
+                        {
+                            hasExactWordMatch = true;
+                            matchedWord = queryWord;
+                            break;
+                        }
+                        
+                        // Check if query word is START of any category word (e.g., "leksak" matches "leksaksbåt")
+                        if (categoryWords.Any(w => w.StartsWith(queryWord) && w.Length > queryWord.Length))
+                        {
+                            hasExactWordMatch = true;
+                            matchedWord = queryWord;
+                            break;
+                        }
+                    }
+                    
+                    if (hasExactWordMatch)
+                    {
+                        score += 0.5; // Strong boost for exact word match
+                        Console.WriteLine($"[BOOST] '{entity.Category}' exact word match '{matchedWord}': {originalScore:F3} ? {score:F3} (+0.5)");
                     }
                     else
                     {
+                        // Substring match only (less confident)
+                        score += 0.3;
                         Console.WriteLine($"[BOOST] '{entity.Category}' substring match: {originalScore:F3} ? {score:F3} (+0.3)");
+                    }
+                }
+                else
+                {
+                    // PHASE 3: FUZZY MATCHING - Handle typos and misspellings
+                    // Use Levenshtein distance to find similar words even with typos
+                    var categoryWords = categoryLower.Split(new[] { ' ', '-', ',', '(', ')', '[', ']' }, StringSplitOptions.RemoveEmptyEntries);
+                    var queryWords = queryLower.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    
+                    string? fuzzyMatchedWord = null;
+                    string? fuzzyMatchedCategoryWord = null;
+                    int bestDistance = int.MaxValue;
+                    
+                    foreach (var queryWord in queryWords)
+                    {
+                        if (queryWord.Length < 4) continue; // Need at least 4 chars for fuzzy matching
+                        
+                        foreach (var categoryWord in categoryWords)
+                        {
+                            if (categoryWord.Length < 4) continue;
+                            
+                            // Calculate edit distance (number of character changes needed)
+                            var distance = CalculateLevenshteinDistance(queryWord, categoryWord);
+                            
+                            // Allow up to 2 character differences for words 6+ chars
+                            // Allow 1 character difference for words 4-5 chars
+                            var maxAllowedDistance = queryWord.Length >= 6 ? 2 : 1;
+                            
+                            if (distance <= maxAllowedDistance && distance < bestDistance)
+                            {
+                                bestDistance = distance;
+                                fuzzyMatchedWord = queryWord;
+                                fuzzyMatchedCategoryWord = categoryWord;
+                            }
+                        }
+                    }
+                    
+                    if (fuzzyMatchedWord != null && fuzzyMatchedCategoryWord != null)
+                    {
+                        // Fuzzy match found - give partial boost based on similarity
+                        var fuzzyBoost = bestDistance == 1 ? 0.4 : 0.25; // 1 char diff = 0.4, 2 char diff = 0.25
+                        score += fuzzyBoost;
+                        Console.WriteLine($"[FUZZY BOOST] '{entity.Category}' fuzzy match '{fuzzyMatchedWord}' ? '{fuzzyMatchedCategoryWord}' (distance={bestDistance}): {originalScore:F3} ? {score:F3} (+{fuzzyBoost})");
                     }
                 }
                 
@@ -384,7 +473,7 @@ public class DatabaseVectorMemory(
             {
                 "hur", "var", "vad", "när", "varför", "vem", "vilken", "vilket",
                 "ska", "kan", "måste", "bör", "sorterar", "sortera", "slänger", "slänga",
-                "jag", "vi", "du", "ni", "man",
+                "jag", "vi", "du", "ni", "man","återvinna","återvinner",
                 "en", "ett", "den", "det", "de",
                 "i", "på", "till", "från", "med", "av",
                 "som", "för", "om", "åt"
@@ -413,5 +502,52 @@ public class DatabaseVectorMemory(
         
         // If we filtered everything out, return original query
         return query;
+    }
+    
+    /// <summary>
+    /// Calculate Levenshtein distance (edit distance) between two strings.
+    /// Returns the minimum number of single-character edits (insertions, deletions, substitutions)
+    /// required to change one string into another.
+    /// 
+    /// Examples:
+    ///   "leksaksbåt" vs "leksakbåt" = 1 (missing 's')
+    ///   "leksaksbåt" vs "leksaksbot" = 1 (å ? o)
+    ///   "adapter" vs "adaptor" = 1 (e ? o)
+    /// </summary>
+    private static int CalculateLevenshteinDistance(string source, string target)
+    {
+        if (string.IsNullOrEmpty(source))
+            return target?.Length ?? 0;
+        
+        if (string.IsNullOrEmpty(target))
+            return source.Length;
+        
+        var n = source.Length;
+        var m = target.Length;
+        var distance = new int[n + 1, m + 1];
+        
+        // Initialize first column and row
+        for (var i = 0; i <= n; i++)
+            distance[i, 0] = i;
+        
+        for (var j = 0; j <= m; j++)
+            distance[0, j] = j;
+        
+        // Calculate distances
+        for (var i = 1; i <= n; i++)
+        {
+            for (var j = 1; j <= m; j++)
+            {
+                var cost = (source[i - 1] == target[j - 1]) ? 0 : 1;
+                
+                distance[i, j] = Math.Min(
+                    Math.Min(
+                        distance[i - 1, j] + 1,      // Deletion
+                        distance[i, j - 1] + 1),     // Insertion
+                    distance[i - 1, j - 1] + cost);  // Substitution
+            }
+        }
+        
+        return distance[n, m];
     }
 }
