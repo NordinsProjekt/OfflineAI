@@ -21,11 +21,11 @@ public class ChatComposerTests : TestContext
         var composer = cut.Find(".oa-composer");
         Assert.NotNull(composer);
         
-        var textarea = cut.Find(".oa-input");
+        var textarea = cut.Find(".oa-composer-input");
         Assert.NotNull(textarea);
         Assert.Equal("textarea", textarea.TagName.ToLower());
         
-        var button = cut.Find(".oa-send");
+        var button = cut.Find(".oa-send-btn");
         Assert.NotNull(button);
         Assert.Equal("button", button.TagName.ToLower());
     }
@@ -39,9 +39,9 @@ public class ChatComposerTests : TestContext
             .Add(p => p.IsProcessing, false));
 
         // Assert
-        var textarea = cut.Find(".oa-input");
+        var textarea = cut.Find(".oa-composer-input");
         Assert.Equal("2", textarea.GetAttribute("rows"));
-        Assert.Equal("Send a message...", textarea.GetAttribute("placeholder"));
+        Assert.Equal("Type your message...", textarea.GetAttribute("placeholder"));
         Assert.Null(textarea.GetAttribute("disabled"));
     }
 
@@ -54,10 +54,10 @@ public class ChatComposerTests : TestContext
             .Add(p => p.IsProcessing, false));
 
         // Assert
-        var button = cut.Find(".oa-send");
+        var button = cut.Find(".oa-send-btn");
         Assert.Equal("button", button.GetAttribute("type"));
-        Assert.Equal("Send", button.GetAttribute("title"));
-        Assert.Equal("Send", button.GetAttribute("aria-label"));
+        Assert.Equal("Send message", button.GetAttribute("title"));
+        Assert.Equal("Send message", button.GetAttribute("aria-label"));
         Assert.Null(button.GetAttribute("disabled"));
     }
 
@@ -73,7 +73,7 @@ public class ChatComposerTests : TestContext
             .Add(p => p.IsProcessing, false));
 
         // Assert
-        var textarea = cut.Find(".oa-input");
+        var textarea = cut.Find(".oa-composer-input");
         Assert.Equal(testText, textarea.GetAttribute("value"));
     }
 
@@ -86,10 +86,10 @@ public class ChatComposerTests : TestContext
             .Add(p => p.IsProcessing, true));
 
         // Assert
-        var textarea = cut.Find(".oa-input");
+        var textarea = cut.Find(".oa-composer-input");
         Assert.NotNull(textarea.GetAttribute("disabled"));
         
-        var button = cut.Find(".oa-send");
+        var button = cut.Find(".oa-send-btn");
         Assert.NotNull(button.GetAttribute("disabled"));
     }
 
@@ -102,10 +102,10 @@ public class ChatComposerTests : TestContext
             .Add(p => p.IsProcessing, false));
 
         // Assert
-        var textarea = cut.Find(".oa-input");
+        var textarea = cut.Find(".oa-composer-input");
         Assert.Null(textarea.GetAttribute("disabled"));
         
-        var button = cut.Find(".oa-send");
+        var button = cut.Find(".oa-send-btn");
         Assert.Null(button.GetAttribute("disabled"));
     }
 
@@ -119,7 +119,7 @@ public class ChatComposerTests : TestContext
             .Add(p => p.IsProcessing, false)
             .Add(p => p.OnComposerTextChanged, text => capturedText = text));
 
-        var textarea = cut.Find(".oa-input");
+        var textarea = cut.Find(".oa-composer-input");
 
         // Act
         textarea.Input("Test input");
@@ -138,7 +138,7 @@ public class ChatComposerTests : TestContext
             .Add(p => p.IsProcessing, false)
             .Add(p => p.OnSendMessage, () => callbackInvoked = true));
 
-        var button = cut.Find(".oa-send");
+        var button = cut.Find(".oa-send-btn");
 
         // Act
         button.Click();
@@ -157,7 +157,7 @@ public class ChatComposerTests : TestContext
             .Add(p => p.IsProcessing, false)
             .Add(p => p.OnKeyDown, args => capturedEvent = args));
 
-        var textarea = cut.Find(".oa-input");
+        var textarea = cut.Find(".oa-composer-input");
 
         // Act
         textarea.KeyDown("Enter");
@@ -177,8 +177,8 @@ public class ChatComposerTests : TestContext
 
         // Assert
         Assert.NotNull(cut.Find(".oa-composer"));
-        Assert.NotNull(cut.Find(".oa-input"));
-        Assert.NotNull(cut.Find(".oa-send"));
+        Assert.NotNull(cut.Find(".oa-composer-input"));
+        Assert.NotNull(cut.Find(".oa-send-btn"));
     }
 
     [Fact]
@@ -192,7 +192,7 @@ public class ChatComposerTests : TestContext
         // Assert - Just verify the button has the disabled attribute
         // bUnit's click() will still fire events on disabled buttons,
         // but in real browsers, disabled buttons don't fire click events
-        var button = cut.Find(".oa-send");
+        var button = cut.Find(".oa-send-btn");
         Assert.NotNull(button.GetAttribute("disabled"));
     }
 }

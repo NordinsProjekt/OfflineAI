@@ -26,12 +26,14 @@ public class AiChatServicePooled(
     bool debugMode = false,
     bool enableRag = true,
     bool showPerformanceMetrics = false,
-    IDomainDetector? domainDetector = null)
+    IDomainDetector? domainDetector = null,
+    BotPersonalityEntity? personality = null)
 {
     private readonly ILlmMemory _memory = memory ?? throw new ArgumentNullException(nameof(memory));
     private readonly ILlmMemory _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
     private readonly IModelInstancePool _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
     private readonly GenerationSettings _generationSettings = generationSettings ?? throw new ArgumentNullException(nameof(generationSettings));
+    private readonly BotPersonalityEntity? _personality = personality;
 
     private const int MaxContextChars = 1500;
     private const int MaxFragmentChars = 400;
@@ -66,6 +68,13 @@ public class AiChatServicePooled(
     private void DisplayGenerationInfo(string question)
     {
         DisplayService.ShowGenerationSettings(_generationSettings, enableRag);
+        
+        // Display personality language if available
+        if (_personality != null && !string.IsNullOrWhiteSpace(_personality.Language))
+        {
+            DisplayService.WriteLine($"[*] Using language: {_personality.Language}");
+        }
+        
         DisplayService.WriteLine($"[*] User question: \"{question}\"");
     }
 
@@ -321,13 +330,17 @@ public class AiChatServicePooled(
             return null;
         }
 
+        // Get language from personality or default to English
+        var language = _personality?.Language ?? "English";
+
         var relevantMemory = await searchableMemory.SearchRelevantMemoryAsync(
             question,
             topK: _generationSettings.RagTopK,
             minRelevanceScore: _generationSettings.RagMinRelevanceScore,
             domainFilter: detectedDomains.Count > 0 ? detectedDomains : null,
             maxCharsPerFragment: MaxFragmentChars,
-            includeMetadata: false);
+            includeMetadata: false,
+            language: language);
 
         return relevantMemory;
     }

@@ -185,7 +185,8 @@ namespace AiDashboard.Services
                     debugMode: debugMode,
                     enableRag: ragMode,
                     showPerformanceMetrics: showPerformanceMetrics,
-                    domainDetector: _domainDetector);
+                    domainDetector: _domainDetector,
+                    personality: personality);
 
                 // Send message and return response
                 var response = await chatService.SendMessageAsync(message);

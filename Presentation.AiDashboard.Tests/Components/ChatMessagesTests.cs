@@ -138,7 +138,7 @@ public class ChatMessagesTests : TestContext
         Assert.Equal(2, userMessages.Count);
         
         var aiMessages = cut.FindAll(".oa-msg.ai");
-        Assert.Equal(1, aiMessages.Count);
+        Assert.Single(aiMessages); // Use Assert.Single for single-item collections
     }
 
     [Fact]

@@ -62,7 +62,7 @@ public class SidebarTests : TestContext
 
         // Assert
         var subtitle = cut.Find(".oa-subtitle");
-        Assert.Equal("Controls", subtitle.TextContent);
+        Assert.Equal("Control Panel", subtitle.TextContent);
     }
 
     [Fact]
@@ -128,7 +128,8 @@ public class SidebarTests : TestContext
 
         // Assert
         var footer = cut.Find(".oa-footer-note");
-        Assert.Equal("Connected to LLM backend", footer.TextContent);
+        // The footer contains a bullet "•" and text "Connected to LLM backend" with whitespace
+        Assert.Contains("Connected to LLM backend", footer.TextContent);
     }
 
     [Fact]

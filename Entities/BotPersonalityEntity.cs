@@ -29,6 +29,12 @@ public class BotPersonalityEntity
     public string SystemPrompt { get; set; } = string.Empty;
     
     /// <summary>
+    /// Language for this bot personality (e.g., "Swedish", "English").
+    /// Used for language-specific processing like filler word filtering in RAG queries.
+    /// </summary>
+    public string Language { get; set; } = "English";
+    
+    /// <summary>
     /// Optional collection name to use by default
     /// </summary>
     public string? DefaultCollection { get; set; }
