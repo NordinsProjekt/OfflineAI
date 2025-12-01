@@ -1,17 +1,23 @@
 <div class="oa-composer">
-    <textarea class="oa-input" 
-              rows="2" 
-              placeholder="Send a message..." 
-              value="@ComposerText"
-              @oninput="@(e => OnComposerTextChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty))"
-              @onkeydown="@OnKeyDown" 
-              disabled="@IsProcessing"></textarea>
-    <button class="oa-send" 
-            type="button" 
-            title="Send" 
-            aria-label="Send" 
-            @onclick="@OnSendMessage" 
-            disabled="@IsProcessing">?</button>
+    <div class="oa-composer-form">
+        <div class="oa-composer-input-wrapper">
+            <textarea class="oa-composer-input" 
+                      rows="2" 
+                      placeholder="Type your message..."
+                      value="@ComposerText"
+                      @oninput="@(e => OnComposerTextChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty))"
+                      @onkeydown="@OnKeyDown" 
+                      disabled="@IsProcessing"></textarea>
+        </div>
+        <button class="oa-send-btn" 
+                type="button" 
+                title="Send message" 
+                aria-label="Send message" 
+                @onclick="@OnSendMessage" 
+                disabled="@IsProcessing">
+            @(IsProcessing ? "Sending..." : "Send")
+        </button>
+    </div>
 </div>
 
 @code {

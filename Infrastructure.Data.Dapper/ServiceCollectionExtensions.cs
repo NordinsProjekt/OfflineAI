@@ -48,4 +48,58 @@ public static class ServiceCollectionExtensions
         
         return services;
     }
+
+    /// <summary>
+    /// Registers LlmRepository for managing LLM models
+    /// </summary>
+    public static IServiceCollection AddDapperLlmRepository(
+        this IServiceCollection services,
+        string connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new ArgumentException("Connection string cannot be null or empty", nameof(connectionString));
+        }
+
+        services.AddSingleton<ILlmRepository>(sp => 
+            new LlmRepository(connectionString));
+        
+        return services;
+    }
+
+    /// <summary>
+    /// Registers QuestionRepository for managing questions and answers
+    /// </summary>
+    public static IServiceCollection AddDapperQuestionRepository(
+        this IServiceCollection services,
+        string connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new ArgumentException("Connection string cannot be null or empty", nameof(connectionString));
+        }
+
+        services.AddSingleton<IQuestionRepository>(sp => 
+            new QuestionRepository(connectionString));
+        
+        return services;
+    }
+    
+    /// <summary>
+    /// Registers BotPersonalityRepository for managing bot personalities
+    /// </summary>
+    public static IServiceCollection AddDapperBotPersonalityRepository(
+        this IServiceCollection services,
+        string connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new ArgumentException("Connection string cannot be null or empty", nameof(connectionString));
+        }
+
+        services.AddSingleton<IBotPersonalityRepository>(sp => 
+            new BotPersonalityRepository(connectionString));
+        
+        return services;
+    }
 }

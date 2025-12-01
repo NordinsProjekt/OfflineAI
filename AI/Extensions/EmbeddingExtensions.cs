@@ -37,6 +37,7 @@ public static class EmbeddingExtensions
     /// <summary>
     /// Calculates cosine similarity between two embedding vectors.
     /// Both vectors should be normalized for accurate results.
+    /// Returns dot product for normalized vectors.
     /// </summary>
     /// <param name="embedding1">First embedding</param>
     /// <param name="embedding2">Second embedding</param>

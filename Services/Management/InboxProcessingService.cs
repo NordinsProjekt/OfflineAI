@@ -115,8 +115,9 @@ public class InboxProcessingService(
                         {
                             // Extract domain name from first fragment's category
                             // Categories are typically: "Game Name - Section" or just "Game Name"
-                            var firstCategory = fragments[0].Category;
-                            await OnDomainDiscovered(firstCategory, "game");
+                            // Clean any markdown headers (##) that might be present
+                            var firstCategory = fragments[0].Category.Replace("##", "").Trim();
+                            await OnDomainDiscovered(firstCategory, "general");
                             UpdateStatus($"✓ Registered domain from: {firstCategory}");
                         }
                         catch (Exception domainEx)
@@ -232,6 +233,127 @@ public class InboxProcessingService(
         {
             return (false, 0, new Dictionary<string, int>());
         }
+    }
+
+    /// <summary>
+    /// Convert all PDF files in the inbox to TXT files.
+    /// This allows users to manually edit/clean the extracted text before processing.
+    /// </summary>
+    public async Task<(bool Success, string Message, int FilesConverted)> ConvertPdfToTxtAsync()
+    {
+        if (_isProcessing)
+        {
+            return (false, "Processing already in progress", 0);
+        }
+
+        try
+        {
+            _isProcessing = true;
+            UpdateStatus("Looking for PDF files to convert...");
+
+            var inboxFolder = _appConfig.Folders?.InboxFolder ?? "c:/llm/Inbox";
+
+            if (!Directory.Exists(inboxFolder))
+            {
+                return (false, $"Inbox folder not found: {inboxFolder}", 0);
+            }
+
+            var pdfFiles = Directory.GetFiles(inboxFolder, "*.pdf", SearchOption.TopDirectoryOnly);
+
+            if (pdfFiles.Length == 0)
+            {
+                return (true, "No PDF files found in inbox", 0);
+            }
+
+            UpdateStatus($"Found {pdfFiles.Length} PDF file(s). Starting conversion...");
+
+            var pdfProcessor = new PdfFragmentProcessor();
+            var filesConverted = 0;
+            var errorMessages = new List<string>();
+
+            foreach (var pdfPath in pdfFiles)
+            {
+                var fileName = Path.GetFileName(pdfPath);
+                UpdateStatus($"Converting: {fileName}...");
+
+                try
+                {
+                    // Extract text from PDF
+                    var text = await ExtractTextFromPdfAsync(pdfPath);
+
+                    if (string.IsNullOrWhiteSpace(text))
+                    {
+                        UpdateStatus($"⚠  No text extracted from {fileName}");
+                        errorMessages.Add($"{fileName}: No text content");
+                        continue;
+                    }
+
+                    // Create TXT file with same name
+                    var txtFileName = Path.GetFileNameWithoutExtension(fileName) + ".txt";
+                    var txtPath = Path.Combine(inboxFolder, txtFileName);
+
+                    await File.WriteAllTextAsync(txtPath, text);
+                    filesConverted++;
+
+                    UpdateStatus($"✓ Converted {fileName} → {txtFileName}");
+                }
+                catch (Exception ex)
+                {
+                    UpdateStatus($"✗  Failed to convert {fileName}: {ex.Message}");
+                    errorMessages.Add($"{fileName}: {ex.Message}");
+                }
+            }
+
+            var resultMessage = $"Converted {filesConverted} of {pdfFiles.Length} PDF file(s) to TXT";
+            
+            if (errorMessages.Count > 0)
+            {
+                resultMessage += $". {errorMessages.Count} file(s) failed.";
+            }
+
+            UpdateStatus($"✓ {resultMessage}");
+            OnProcessingComplete?.Invoke();
+
+            return (true, resultMessage, filesConverted);
+        }
+        catch (Exception ex)
+        {
+            UpdateStatus($"✗ Failed to convert PDFs: {ex.Message}");
+            return (false, $"Failed to convert PDFs: {ex.Message}", 0);
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+
+    /// <summary>
+    /// Extract raw text from PDF file using PdfPig
+    /// </summary>
+    private async Task<string> ExtractTextFromPdfAsync(string pdfPath)
+    {
+        return await Task.Run(() =>
+        {
+            try
+            {
+                using var document = UglyToad.PdfPig.PdfDocument.Open(pdfPath);
+                var text = new System.Text.StringBuilder();
+                
+                foreach (var page in document.GetPages())
+                {
+                    text.AppendLine($"--- Page {page.Number} ---");
+                    text.AppendLine();
+                    text.AppendLine(page.Text);
+                    text.AppendLine();
+                }
+                
+                return text.ToString();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to extract text from PDF: {ex.Message}", ex);
+            }
+        });
     }
 
     private void UpdateStatus(string status)

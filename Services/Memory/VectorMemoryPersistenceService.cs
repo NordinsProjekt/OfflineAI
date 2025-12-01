@@ -11,6 +11,7 @@ namespace Services.Memory;
 /// <summary>
 /// Service for persisting and loading VectorMemory to/from MSSQL database.
 /// Handles the conversion between in-memory VectorMemory and database storage.
+/// Generates multiple embeddings (category, content, combined) for improved semantic matching.
 /// </summary>
 public class VectorMemoryPersistenceService
 {
@@ -34,8 +35,11 @@ public class VectorMemoryPersistenceService
     }
     
     /// <summary>
-    /// Save memory fragments with embeddings to database.
-    /// This will generate embeddings if they don't exist.
+    /// Save memory fragments with MULTIPLE embeddings to database for improved matching.
+    /// Generates 3 embeddings per fragment:
+    /// 1. Category-only (without ## markers)
+    /// 2. Content-only
+    /// 3. Combined (category + content)
     /// </summary>
     public async Task SaveFragmentsAsync(
         List<MemoryFragment> fragments,
@@ -48,12 +52,15 @@ public class VectorMemoryPersistenceService
             await _repository.DeleteCollectionAsync(collectionName);
         }
         
-        Console.WriteLine($"\n?????????????????????????????????????????????????????????????????");
-        Console.WriteLine($"?  Generating Embeddings for {fragments.Count} Fragments");
-        Console.WriteLine($"?????????????????????????????????????????????????????????????????\n");
+        Console.WriteLine($"\n???????????????????????????????????????????????????????");
+        Console.WriteLine($"?  Generating WEIGHTED Embeddings for {fragments.Count} Fragments");
+        Console.WriteLine($"?  Strategy: Category (40%) + Content (30%) + Combined (30%)");
+        Console.WriteLine($"???????????????????????????????????????????????????????\n");
         
         var startTime = DateTime.Now;
-        var embeddings = new List<ReadOnlyMemory<float>>();
+        var categoryEmbeddings = new List<ReadOnlyMemory<float>>();
+        var contentEmbeddings = new List<ReadOnlyMemory<float>>();
+        var combinedEmbeddings = new List<ReadOnlyMemory<float>>();
         
         for (int i = 0; i < fragments.Count; i++)
         {
@@ -61,15 +68,16 @@ public class VectorMemoryPersistenceService
             
             // Calculate timing estimates
             var elapsed = (DateTime.Now - startTime).TotalSeconds;
-            var avgTimePerEmbedding = i > 0 ? elapsed / i : 0;
-            var remaining = fragments.Count - (i + 1);
-            var estimatedTimeRemaining = avgTimePerEmbedding > 0 ? remaining * avgTimePerEmbedding : 0;
+            var embeddingsGenerated = i * 3; // 3 embeddings per fragment
+            var avgTimePerEmbedding = embeddingsGenerated > 0 ? elapsed / embeddingsGenerated : 0;
+            var remainingEmbeddings = (fragments.Count - (i + 1)) * 3;
+            var estimatedTimeRemaining = avgTimePerEmbedding > 0 ? remainingEmbeddings * avgTimePerEmbedding : 0;
             
             // Show progress header
-            Console.WriteLine($"?????????????????????????????????????????????????????????????");
+            Console.WriteLine($"???????????????????????????????????????????????????????");
             Console.WriteLine($"  Fragment {i + 1}/{fragments.Count}");
             Console.WriteLine($"  Category: {TruncateString(fragment.Category, 50)}");
-            Console.WriteLine($"?????????????????????????????????????????????????????????????");
+            Console.WriteLine($"???????????????????????????????????????????????????????");
             
             // Progress bar
             var progressPercent = ((i + 1) * 100.0) / fragments.Count;
@@ -88,31 +96,45 @@ public class VectorMemoryPersistenceService
             if (avgTimePerEmbedding > 0)
             {
                 Console.WriteLine($"  ? Avg Time: {avgTimePerEmbedding:F2}s per embedding");
-                Console.WriteLine($"  ? Remaining: ~{estimatedTimeRemaining:F0}s ({remaining} fragments)");
+                Console.WriteLine($"  ? Remaining: ~{estimatedTimeRemaining:F0}s ({remainingEmbeddings} embeddings)");
             }
             
             // Memory info
             var currentProcess = System.Diagnostics.Process.GetCurrentProcess();
             var memoryMB = currentProcess.WorkingSet64 / 1024.0 / 1024.0;
             Console.WriteLine($"  ?? Memory: {memoryMB:F0} MB");
-            
-            Console.WriteLine();
-            Console.Write($"  ?? Generating embedding... ");
-            
-            var embeddingStart = DateTime.Now;
-            // Include both category (title) and content for better semantic matching
-            var textToEmbed = $"{fragment.Category}\n\n{fragment.Content}";
-            var embedding = await _embeddingService.GenerateEmbeddingAsync(textToEmbed);
-            embeddings.Add(embedding);
-            var embeddingTime = (DateTime.Now - embeddingStart).TotalSeconds;
-            
-            Console.WriteLine($"Done ({embeddingTime:F2}s)");
             Console.WriteLine();
             
-            // Force garbage collection every 3 embeddings to control memory
-            if ((i + 1) % 3 == 0)
+            // Generate 3 embeddings per fragment
+            // 1. Category-only embedding (without ## markers for better semantic matching)
+            var cleanCategory = fragment.Category.Replace("##", "").Trim();
+            Console.Write($"  ?? [1/3] Category embedding... ");
+            var categoryStart = DateTime.Now;
+            var categoryEmbedding = await _embeddingService.GenerateEmbeddingAsync(cleanCategory);
+            categoryEmbeddings.Add(categoryEmbedding);
+            Console.WriteLine($"Done ({(DateTime.Now - categoryStart).TotalSeconds:F2}s)");
+            
+            // 2. Content-only embedding
+            Console.Write($"  ?? [2/3] Content embedding... ");
+            var contentStart = DateTime.Now;
+            var contentEmbedding = await _embeddingService.GenerateEmbeddingAsync(fragment.Content);
+            contentEmbeddings.Add(contentEmbedding);
+            Console.WriteLine($"Done ({(DateTime.Now - contentStart).TotalSeconds:F2}s)");
+            
+            // 3. Combined embedding (category + content for balance)
+            Console.Write($"  ?? [3/3] Combined embedding... ");
+            var combinedStart = DateTime.Now;
+            var combinedText = $"{cleanCategory}\n\n{fragment.Content}";
+            var combinedEmbedding = await _embeddingService.GenerateEmbeddingAsync(combinedText);
+            combinedEmbeddings.Add(combinedEmbedding);
+            Console.WriteLine($"Done ({(DateTime.Now - combinedStart).TotalSeconds:F2}s)");
+            
+            Console.WriteLine();
+            
+            // Force garbage collection every 2 fragments to control memory (6 embeddings total)
+            if ((i + 1) % 2 == 0)
             {
-                Console.WriteLine($"  ?? Running garbage collection...");
+                Console.WriteLine($"  ??? Running garbage collection...");
                 GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
                 GC.WaitForPendingFinalizers();
                 GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
@@ -125,26 +147,29 @@ public class VectorMemoryPersistenceService
         }
         
         var totalTime = (DateTime.Now - startTime).TotalSeconds;
-        Console.WriteLine($"?????????????????????????????????????????????????????????????????");
+        var totalEmbeddings = fragments.Count * 3;
+        Console.WriteLine($"???????????????????????????????????????????????????????");
         Console.WriteLine($"?  ? ALL EMBEDDINGS GENERATED");
         Console.WriteLine($"?");
+        Console.WriteLine($"?  Total Embeddings: {totalEmbeddings} ({fragments.Count} × 3)");
         Console.WriteLine($"?  Total Time: {totalTime:F1}s");
-        Console.WriteLine($"?  Average: {totalTime / fragments.Count:F2}s per embedding");
-        Console.WriteLine($"?????????????????????????????????????????????????????????????????");
+        Console.WriteLine($"?  Average: {totalTime / totalEmbeddings:F2}s per embedding");
+        Console.WriteLine($"???????????????????????????????????????????????????????");
         Console.WriteLine();
         
-        Console.WriteLine($"Creating database entities...");
+        Console.WriteLine($"Creating database entities with weighted embeddings...");
         
-        // Now create entities with the pre-generated embeddings
+        // Create entities with all three embeddings
         var entities = new List<MemoryFragmentEntity>();
         for (int i = 0; i < fragments.Count; i++)
         {
             var fragment = fragments[i];
-            var embedding = embeddings[i];
             
             var entity = MemoryFragmentEntity.FromMemoryFragment(
                 fragment,
-                embedding,
+                combinedEmbeddings[i],      // Primary embedding (combined)
+                categoryEmbeddings[i],       // Category-only for domain matching
+                contentEmbeddings[i],        // Content-only for detail matching
                 collectionName,
                 sourceFile,
                 chunkIndex: i + 1);
@@ -152,9 +177,13 @@ public class VectorMemoryPersistenceService
             entities.Add(entity);
         }
         
-        Console.WriteLine($"Saving {entities.Count} fragments to database...");
+        Console.WriteLine($"Saving {entities.Count} fragments with weighted embeddings to database...");
         await _repository.BulkSaveAsync(entities);
-        Console.WriteLine($"? Saved {entities.Count} fragments to collection '{collectionName}'");
+        Console.WriteLine($"? Saved {entities.Count} fragments with 3 embeddings each to collection '{collectionName}'");
+        Console.WriteLine($"   - Category embeddings: {entities.Count}");
+        Console.WriteLine($"   - Content embeddings: {entities.Count}");
+        Console.WriteLine($"   - Combined embeddings: {entities.Count}");
+        Console.WriteLine($"   Total storage: {entities.Count * 3} embeddings");
     }
     
     private static string TruncateString(string text, int maxLength)
