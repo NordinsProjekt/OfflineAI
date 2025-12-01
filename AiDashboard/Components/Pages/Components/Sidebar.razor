@@ -4,9 +4,11 @@
     <div class="oa-sidebar-header">
         <div>
             <div class="oa-app-title">OfflineAI</div>
-            <div class="oa-subtitle">Controls</div>
+            <div class="oa-subtitle">Control Panel</div>
         </div>
-        <button type="button" class="oa-icon-btn" title="Collapse" aria-label="Collapse sidebar" @onclick="Dashboard.ToggleSidebar">&gt;</button>
+        <button type="button" class="oa-icon-btn" title="Collapse" aria-label="Collapse sidebar" @onclick="Dashboard.ToggleSidebar">
+            &times;
+        </button>
     </div>
 
     <ModesSection />
@@ -17,5 +19,7 @@
     <DomainsSection />
     <FilesSection />
 
-    <div class="oa-footer-note">Connected to LLM backend</div>
+    <div class="oa-footer-note">
+        <span style="opacity: 0.5;">•</span> Connected to LLM backend
+    </div>
 </aside>

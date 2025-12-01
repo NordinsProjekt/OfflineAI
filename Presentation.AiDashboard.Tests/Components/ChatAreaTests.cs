@@ -192,7 +192,7 @@ public class ChatAreaTests : TestContext
             .Add(p => p.OnComposerTextChanged, text => capturedText = text));
 
         var chatComposer = cut.FindComponent<ChatComposer>();
-        var textarea = chatComposer.Find(".oa-input");
+        var textarea = chatComposer.Find(".oa-composer-input");
 
         // Act
         textarea.Input("New text");
@@ -217,7 +217,7 @@ public class ChatAreaTests : TestContext
             .Add(p => p.OnSendMessage, () => callbackInvoked = true));
 
         var chatComposer = cut.FindComponent<ChatComposer>();
-        var sendButton = chatComposer.Find(".oa-send");
+        var sendButton = chatComposer.Find(".oa-send-btn");
 
         // Act
         sendButton.Click();

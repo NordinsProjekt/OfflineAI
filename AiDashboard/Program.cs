@@ -11,6 +11,7 @@ using Microsoft.SemanticKernel.Embeddings;
 using Infrastructure.Data.Dapper;
 using Services.Configuration;
 using Services.Management;
+using Services.Language;
 
 namespace AiDashboard;
 
@@ -27,6 +28,9 @@ public class Program
         // Register AppConfiguration
         var appConfig = builder.Configuration.GetSection("AppConfiguration").Get<AppConfiguration>() ?? new AppConfiguration();
         builder.Services.AddSingleton(appConfig);
+        
+        // Register language services for stop words filtering
+        builder.Services.AddSingleton<ILanguageStopWordsService, LanguageStopWordsService>();
 
         // Read configuration for LLM
         var llmExe = appConfig.Llm?.ExecutablePath ?? builder.Configuration["AppConfiguration:Llm:ExecutablePath"] ?? string.Empty;
@@ -165,13 +169,14 @@ public class Program
         {
             var embeddingService = sp.GetService<ITextEmbeddingGenerationService>();
             var repository = sp.GetService<IVectorMemoryRepository>();
+            var stopWordsService = sp.GetRequiredService<ILanguageStopWordsService>();
             var collectionName = appConfig.Debug?.CollectionName ?? builder.Configuration["AppConfiguration:Debug:CollectionName"] ?? "game-rules-mpnet";
 
             if (embeddingService != null && repository != null)
             {
                 // Use database-backed vector memory for RAG queries
                 Console.WriteLine($"[+] Database vector memory initialized (collection: {collectionName})");
-                return new DatabaseVectorMemory(embeddingService, repository, collectionName);
+                return new DatabaseVectorMemory(embeddingService, repository, stopWordsService, collectionName);
             }
             else
             {

@@ -98,7 +98,7 @@ namespace AiDashboard.Services
         /// Update the collection name if using DatabaseVectorMemory.
         /// This allows switching between collections without creating a new memory instance.
         /// </summary>
-        public void UpdateCollectionName(string collectionName)
+        public void UpdateCollectionName(String collectionName)
         {
             if (_memory is DatabaseVectorMemory dbMemory)
             {
@@ -162,11 +162,9 @@ namespace AiDashboard.Services
                 // Apply personality settings if provided
                 ApplyPersonalitySettings(personality, generationSettings);
                 
-                // Override RAG mode if personality specifies it
-                if (personality != null)
-                {
-                    ragMode = personality.EnableRag;
-                }
+                // Note: We respect the user's RAG mode toggle from the UI
+                // Bot personalities can have preferred RAG settings, but the user's manual toggle takes precedence
+                // This allows users to experiment with RAG ON/OFF regardless of personality
                 
                 // Create LLM settings with GPU configuration
                 var llmSettings = new LlmSettings
@@ -185,7 +183,8 @@ namespace AiDashboard.Services
                     debugMode: debugMode,
                     enableRag: ragMode,
                     showPerformanceMetrics: showPerformanceMetrics,
-                    domainDetector: _domainDetector);
+                    domainDetector: _domainDetector,
+                    personality: personality);
 
                 // Send message and return response
                 var response = await chatService.SendMessageAsync(message);

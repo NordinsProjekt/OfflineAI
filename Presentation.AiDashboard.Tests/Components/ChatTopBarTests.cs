@@ -23,6 +23,7 @@ public class ChatTopBarTests : TestContext
     {
         // Arrange
         var dashboardState = CreateMockDashboardState();
+        dashboardState.SettingsService.RagMode = true; // Set RAG to true so we can find .green badge
         Services.AddSingleton(dashboardState);
 
         // Act
@@ -34,7 +35,7 @@ public class ChatTopBarTests : TestContext
         Assert.Equal(4, cut.FindAll(".oa-badge").Count);
         
         // Verify each badge type exists
-        Assert.NotNull(cut.Find(".oa-badge.green")); // RAG badge
+        Assert.NotNull(cut.Find(".oa-badge.green")); // RAG badge (when enabled)
         Assert.NotNull(cut.Find(".oa-badge.blue"));  // Model badge
         Assert.NotNull(cut.Find(".oa-badge.purple")); // Temperature badge
         var gpuBadge = cut.FindAll(".oa-badge").Last(); // GPU badge (last one)
@@ -69,7 +70,8 @@ public class ChatTopBarTests : TestContext
         var cut = RenderComponent<ChatTopBar>();
 
         // Assert
-        var ragBadge = cut.Find(".oa-badge.green");
+        // When RAG is OFF, the badge has class "gray", not "green"
+        var ragBadge = cut.Find(".oa-badge.gray");
         Assert.Contains("RAG: OFF", ragBadge.TextContent);
     }
 
@@ -101,9 +103,9 @@ public class ChatTopBarTests : TestContext
 
         // Assert
         var tempBadge = cut.Find(".oa-badge.purple");
-        // Use Contains "Temp:" and check the badge contains a number, accounting for culture
-        Assert.Contains("Temp:", tempBadge.TextContent);
-        var tempText = tempBadge.TextContent.Replace("Temp:", "").Trim();
+        // The actual text is "Temperature:" not "Temp:"
+        Assert.Contains("Temperature:", tempBadge.TextContent);
+        var tempText = tempBadge.TextContent.Replace("Temperature:", "").Trim();
         // Parse using current culture or invariant
         Assert.True(double.TryParse(tempText, NumberStyles.Float, CultureInfo.CurrentCulture, out var temp) ||
                     double.TryParse(tempText, NumberStyles.Float, CultureInfo.InvariantCulture, out temp));
@@ -158,14 +160,14 @@ public class ChatTopBarTests : TestContext
 
         var cut = RenderComponent<ChatTopBar>();
         
-        // Verify initial state
-        var ragBadge = cut.Find(".oa-badge.green");
+        // Verify initial state - RAG is OFF, so badge has "gray" class
+        var ragBadge = cut.Find(".oa-badge.gray");
         Assert.Contains("RAG: OFF", ragBadge.TextContent);
 
-        // Act
+        // Act - Change the RAG mode, which triggers state change internally
         dashboardState.SettingsService.RagMode = true;
 
-        // Assert
+        // Assert - Now RAG is ON, so badge should have "green" class
         ragBadge = cut.Find(".oa-badge.green");
         Assert.Contains("RAG: ON", ragBadge.TextContent);
     }

@@ -1,8 +1,10 @@
 /* Chat area styles */
 .oa-chat {
-    display: grid;
-    grid-template-rows: auto auto 1fr auto;
-    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: linear-gradient(180deg, rgba(15, 20, 25, 0.95) 0%, rgba(10, 14, 20, 0.98) 100%);
+    position: relative;
 }
 
 /* Expand button */
@@ -19,196 +21,428 @@
     cursor: pointer;
 }
 
-/* Top bar */
+/***** Top Bar *****/
 .oa-topbar {
-    border-bottom: 1px solid #20232b;
-    padding: 10px 16px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border-color);
+    background: linear-gradient(135deg, rgba(21, 26, 36, 0.6), rgba(15, 20, 25, 0.6));
+    backdrop-filter: blur(10px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .oa-badges {
     display: flex;
-    gap: 8px;
+    gap: 10px;
     flex-wrap: wrap;
 }
 
 .oa-badge {
+    padding: 6px 14px;
+    border-radius: 8px;
     font-size: 12px;
-    padding: 4px 8px;
-    border-radius: 999px;
-    border: 1px solid #2a2f3a;
-    background: #12151b;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    border: 1px solid;
+    box-shadow: var(--shadow-sm);
+    transition: all 0.2s ease;
+    cursor: default;
+}
+
+.oa-badge:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
 }
 
 .oa-badge.green {
-    border-color: #234b2f;
-    background: #15231a;
-    color: #90e6a8;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(5, 150, 105, 0.12));
+    border-color: rgba(16, 185, 129, 0.3);
+    color: #6ee7b7;
 }
 
 .oa-badge.blue {
-    border-color: #27456f;
-    background: #141c26;
-    color: #9ec7ff;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(37, 99, 235, 0.12));
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #93c5fd;
 }
 
 .oa-badge.purple {
-    border-color: #4a2c6f;
-    background: #1c1426;
-    color: #d8b4fe;
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(124, 58, 237, 0.12));
+    border-color: rgba(139, 92, 246, 0.3);
+    color: #c4b5fd;
 }
 
 .oa-badge.orange {
-    border-color: #6f4a2c;
-    background: #261c14;
-    color: #fdba74;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(217, 119, 6, 0.12));
+    border-color: rgba(245, 158, 11, 0.3);
+    color: #fcd34d;
 }
 
 .oa-badge.gray {
-    border-color: #2a2f3a;
-    background: #12151b;
-    color: #c4cbd8;
+    background: linear-gradient(135deg, rgba(75, 85, 99, 0.12), rgba(55, 65, 81, 0.12));
+    border-color: rgba(75, 85, 99, 0.3);
+    color: #d1d5db;
 }
 
-/* Messages */
+/***** Messages Area *****/
 .oa-messages {
+    flex: 1;
     overflow-y: auto;
-    padding: 18px 18px 0;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
+    padding: 24px 20px;
+    scroll-behavior: smooth;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
 }
 
-.oa-messages::-webkit-scrollbar {
-    width: 0;
-    height: 0;
-}
-
-.oa-msg {
+.oa-message {
     display: flex;
-    gap: 10px;
-    margin-bottom: 14px;
+    gap: 14px;
+    margin-bottom: 24px;
+    animation: messageSlideIn 0.3s ease;
 }
 
-.oa-msg.user {
+@keyframes messageSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.oa-message.user {
     flex-direction: row-reverse;
 }
 
 .oa-avatar {
-    width: 28px;
-    height: 28px;
-    display: grid;
-    place-items: center;
+    width: 36px;
+    height: 36px;
     border-radius: 50%;
-    background: #2a3544;
-    border: 1px solid #3a4554;
-    font-size: 10px;
-    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 600;
+    color: white;
     flex-shrink: 0;
-    color: #9ca3af;
-    font-family: system-ui, -apple-system, sans-serif;
+    box-shadow: var(--shadow-md);
+    border: 2px solid rgba(59, 130, 246, 0.2);
 }
 
-.oa-msg.user .oa-avatar {
-    background: #1e3a5f;
-    border-color: #2c5282;
-    color: #90cdf4;
+.oa-message.user .oa-avatar {
+    background: linear-gradient(135deg, var(--accent-success), #059669);
+    border-color: rgba(16, 185, 129, 0.2);
 }
 
-.oa-msg.ai .oa-avatar {
-    background: #2a3544;
-    border-color: #3a4554;
-    color: #a0aec0;
+.oa-message-content {
+    max-width: 75%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.oa-message.user .oa-message-content {
+    align-items: flex-end;
+}
+
+.oa-message-role {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    letter-spacing: 0.03em;
+}
+
+.oa-message.user .oa-message-role {
+    text-align: right;
 }
 
 .oa-bubble {
-    background: #11151c;
-    border: 1px solid #242a36;
-    border-radius: 12px;
-    padding: 10px 12px;
-    max-width: min(840px, 85%);
-    line-height: 1.5;
+    padding: 14px 18px;
+    border-radius: 16px;
     font-size: 14px;
-    color: #e6e6e6;
-    white-space: pre-wrap;
+    line-height: 1.6;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    backdrop-filter: blur(10px);
+    transition: all 0.2s ease;
 }
 
-.oa-msg.user .oa-bubble {
-    background: #0d1218;
-    border-color: #1f2633;
+.oa-bubble:hover {
+    box-shadow: var(--shadow-md);
 }
 
-.oa-meta {
-    font-size: 12px;
-    color: #97a5ba;
-    margin-bottom: 4px;
+.oa-message.assistant .oa-bubble {
+    background: linear-gradient(135deg, rgba(21, 26, 36, 0.7), rgba(15, 20, 25, 0.7));
+    border: 1px solid var(--border-color);
+    border-top-left-radius: 4px;
 }
 
-.oa-bubble strong {
-    color: #9ec7ff;
-    font-weight: 600;
+.oa-message.user .oa-bubble {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(37, 99, 235, 0.15));
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: var(--text-primary);
+    border-top-right-radius: 4px;
 }
 
-.oa-typing {
-    animation: blink 1.4s infinite both;
-    font-size: 20px;
-    letter-spacing: 4px;
+.oa-message.system .oa-bubble {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(124, 58, 237, 0.1));
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    font-style: italic;
+    font-size: 13px;
+    color: var(--text-secondary);
 }
 
-@keyframes blink {
+.oa-bubble p {
+    margin: 0 0 10px 0;
+}
+
+.oa-bubble p:last-child {
+    margin-bottom: 0;
+}
+
+.oa-bubble code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.oa-bubble pre {
+    background: rgba(0, 0, 0, 0.4);
+    padding: 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 10px 0;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.oa-bubble pre code {
+    background: none;
+    padding: 0;
+    border: none;
+}
+
+.oa-message-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.oa-message.user .oa-message-time {
+    text-align: right;
+}
+
+/***** Processing Indicator *****/
+.oa-processing {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 24px;
+    animation: messageSlideIn 0.3s ease;
+}
+
+.oa-processing-content {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.oa-processing-bubble {
+    padding: 14px 18px;
+    border-radius: 16px;
+    border-top-left-radius: 4px;
+    background: linear-gradient(135deg, rgba(21, 26, 36, 0.7), rgba(15, 20, 25, 0.7));
+    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: var(--shadow-sm);
+}
+
+.oa-dots {
+    display: flex;
+    gap: 4px;
+}
+
+.oa-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    animation: dotPulse 1.4s ease-in-out infinite;
+}
+
+.oa-dot:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.oa-dot:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes dotPulse {
     0%, 80%, 100% {
-        opacity: 0;
+        opacity: 0.3;
+        transform: scale(0.8);
     }
     40% {
         opacity: 1;
+        transform: scale(1.1);
     }
 }
 
-/* Composer */
+/***** Composer *****/
 .oa-composer {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 8px;
-    padding: 10px;
-    border-top: 1px solid #20232b;
-    background: #0d1015;
+    padding: 16px 20px 20px 20px;
+    border-top: 1px solid var(--border-color);
+    background: linear-gradient(135deg, rgba(21, 26, 36, 0.7), rgba(15, 20, 25, 0.7));
+    backdrop-filter: blur(10px);
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.2);
 }
 
-.oa-input {
+.oa-composer-form {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+}
+
+.oa-composer-input-wrapper {
+    flex: 1;
+    position: relative;
+}
+
+.oa-composer-input {
     width: 100%;
-    resize: none;
-    border-radius: 10px;
-    border: 1px solid #1b1f27;
-    background: #0b0e13;
-    color: #e6e6e6;
-    padding: 10px 12px;
+    min-height: 48px;
+    max-height: 150px;
+    padding: 12px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: rgba(10, 14, 20, 0.7);
+    color: var(--text-primary);
     font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    transition: all 0.2s ease;
+    line-height: 1.5;
+}
+
+.oa-composer-input:focus {
     outline: none;
+    border-color: var(--accent-primary);
+    background: rgba(10, 14, 20, 0.9);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1), 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
-.oa-input:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
+.oa-composer-input::placeholder {
+    color: var(--text-muted);
 }
 
-.oa-send {
-    width: 44px;
-    height: 44px;
-    border-radius: 10px;
-    border: 1px solid #1e6cf0;
-    background: #1e6cf0;
-    color: #fff;
+.oa-send-btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
     cursor: pointer;
-    font-weight: 700;
+    transition: all 0.2s ease;
+    box-shadow: var(--shadow-md);
+    height: 48px;
 }
 
-.oa-send:hover {
-    background: #2c79f5;
+.oa-send-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, #60a5fa, var(--accent-primary));
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(59, 130, 246, 0.3);
 }
 
-.oa-send:disabled {
+.oa-send-btn:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.oa-send-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-    background: #1a5cb8;
+}
+
+/***** Empty State *****/
+.oa-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 40px 20px;
+    text-align: center;
+}
+
+.oa-empty-icon {
+    font-size: 64px;
+    margin-bottom: 20px;
+    opacity: 0.3;
+}
+
+.oa-empty-title {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.oa-empty-text {
+    font-size: 14px;
+    color: var(--text-secondary);
+    max-width: 400px;
+    line-height: 1.6;
+}
+
+/***** Context Bar *****/
+.oa-context-bar {
+    padding: 10px 20px;
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.08), rgba(124, 58, 237, 0.08));
+    border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    backdrop-filter: blur(10px);
+}
+
+.oa-context-bar strong {
+    color: var(--accent-secondary);
+    font-weight: 600;
+}
+
+/***** Responsive *****/
+@media (max-width: 768px) {
+    .oa-topbar {
+        padding: 12px 16px;
+    }
+
+    .oa-messages {
+        padding: 20px 16px;
+    }
+
+    .oa-message-content {
+        max-width: 85%;
+    }
+
+    .oa-composer {
+        padding: 14px 16px 16px 16px;
+    }
+
+    .oa-badge {
+        font-size: 11px;
+        padding: 5px 10px;
+    }
 }

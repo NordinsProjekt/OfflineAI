@@ -14,6 +14,7 @@ public interface ISearchableMemory : ILlmMemory
     /// <param name="domainFilter">Optional list of domain IDs to filter by</param>
     /// <param name="maxCharsPerFragment">Optional maximum characters per fragment</param>
     /// <param name="includeMetadata">Include relevance scores and categories in output</param>
+    /// <param name="language">Language for stop word filtering (e.g., "Swedish", "English"). Defaults to "English"</param>
     /// <returns>Formatted string containing relevant fragments, or null if none found</returns>
     Task<string?> SearchRelevantMemoryAsync(
         string query,
@@ -21,5 +22,6 @@ public interface ISearchableMemory : ILlmMemory
         double minRelevanceScore = 0.5,
         List<string>? domainFilter = null,
         int? maxCharsPerFragment = null,
-        bool includeMetadata = true);
+        bool includeMetadata = true,
+        string language = "English");
 }

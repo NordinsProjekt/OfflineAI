@@ -32,6 +32,7 @@ public class BotPersonalityRepository : IBotPersonalityRepository
                     DisplayName NVARCHAR(200) NOT NULL,
                     Description NVARCHAR(1000) NOT NULL,
                     SystemPrompt NVARCHAR(MAX) NOT NULL,
+                    Language NVARCHAR(50) NOT NULL DEFAULT 'English',
                     DefaultCollection NVARCHAR(255) NULL,
                     Temperature FLOAT NULL,
                     EnableRag BIT NOT NULL DEFAULT 1,
@@ -45,6 +46,17 @@ public class BotPersonalityRepository : IBotPersonalityRepository
                 CREATE INDEX IX_BotPersonalities_PersonalityId ON [BotPersonalities](PersonalityId);
                 CREATE INDEX IX_BotPersonalities_Category ON [BotPersonalities](Category);
                 CREATE INDEX IX_BotPersonalities_IsActive ON [BotPersonalities](IsActive);
+            END
+            ELSE
+            BEGIN
+                -- Add Language column if it doesn't exist (migration for existing databases)
+                IF NOT EXISTS (SELECT * FROM sys.columns 
+                               WHERE object_id = OBJECT_ID('BotPersonalities') 
+                               AND name = 'Language')
+                BEGIN
+                    ALTER TABLE [BotPersonalities] 
+                    ADD Language NVARCHAR(50) NOT NULL DEFAULT 'English';
+                END
             END";
         
         using var connection = new SqlConnection(_connectionString);
@@ -54,7 +66,7 @@ public class BotPersonalityRepository : IBotPersonalityRepository
     public async Task<List<BotPersonalityEntity>> GetAllActiveAsync()
     {
         const string sql = @"
-            SELECT Id, PersonalityId, DisplayName, Description, SystemPrompt, 
+            SELECT Id, PersonalityId, DisplayName, Description, SystemPrompt, Language,
                    DefaultCollection, Temperature, EnableRag, Icon, Category, 
                    IsActive, CreatedAt, UpdatedAt
             FROM [BotPersonalities]
@@ -69,7 +81,7 @@ public class BotPersonalityRepository : IBotPersonalityRepository
     public async Task<List<BotPersonalityEntity>> GetAllAsync()
     {
         const string sql = @"
-            SELECT Id, PersonalityId, DisplayName, Description, SystemPrompt, 
+            SELECT Id, PersonalityId, DisplayName, Description, SystemPrompt, Language,
                    DefaultCollection, Temperature, EnableRag, Icon, Category, 
                    IsActive, CreatedAt, UpdatedAt
             FROM [BotPersonalities]
@@ -83,7 +95,7 @@ public class BotPersonalityRepository : IBotPersonalityRepository
     public async Task<BotPersonalityEntity?> GetByPersonalityIdAsync(string personalityId)
     {
         const string sql = @"
-            SELECT Id, PersonalityId, DisplayName, Description, SystemPrompt, 
+            SELECT Id, PersonalityId, DisplayName, Description, SystemPrompt, Language,
                    DefaultCollection, Temperature, EnableRag, Icon, Category, 
                    IsActive, CreatedAt, UpdatedAt
             FROM [BotPersonalities]
@@ -98,7 +110,7 @@ public class BotPersonalityRepository : IBotPersonalityRepository
     public async Task<List<BotPersonalityEntity>> GetByCategoryAsync(string category)
     {
         const string sql = @"
-            SELECT Id, PersonalityId, DisplayName, Description, SystemPrompt, 
+            SELECT Id, PersonalityId, DisplayName, Description, SystemPrompt, Language,
                    DefaultCollection, Temperature, EnableRag, Icon, Category, 
                    IsActive, CreatedAt, UpdatedAt
             FROM [BotPersonalities]
@@ -136,6 +148,7 @@ public class BotPersonalityRepository : IBotPersonalityRepository
                     DisplayName = @DisplayName,
                     Description = @Description,
                     SystemPrompt = @SystemPrompt,
+                    Language = @Language,
                     DefaultCollection = @DefaultCollection,
                     Temperature = @Temperature,
                     EnableRag = @EnableRag,
@@ -144,10 +157,10 @@ public class BotPersonalityRepository : IBotPersonalityRepository
                     IsActive = @IsActive,
                     UpdatedAt = GETUTCDATE()
             WHEN NOT MATCHED THEN
-                INSERT (Id, PersonalityId, DisplayName, Description, SystemPrompt, 
+                INSERT (Id, PersonalityId, DisplayName, Description, SystemPrompt, Language,
                         DefaultCollection, Temperature, EnableRag, Icon, Category, 
                         IsActive, CreatedAt, UpdatedAt)
-                VALUES (@Id, @PersonalityId, @DisplayName, @Description, @SystemPrompt, 
+                VALUES (@Id, @PersonalityId, @DisplayName, @Description, @SystemPrompt, @Language,
                         @DefaultCollection, @Temperature, @EnableRag, @Icon, @Category, 
                         @IsActive, @CreatedAt, @UpdatedAt);";
         
@@ -196,6 +209,7 @@ public class BotPersonalityRepository : IBotPersonalityRepository
                 DisplayName = "General Assistant",
                 Description = "A helpful general-purpose assistant",
                 SystemPrompt = "You are a helpful AI assistant. Answer questions accurately and concisely based on the provided information.",
+                Language = "English",
                 Category = "general",
                 Icon = "??",
                 EnableRag = true
@@ -206,6 +220,7 @@ public class BotPersonalityRepository : IBotPersonalityRepository
                 DisplayName = "Rules Bot",
                 Description = "Specialized in explaining rules and regulations",
                 SystemPrompt = "You are a rules expert. Provide clear, precise explanations of rules based on the documentation. Always cite specific rule sections when possible.",
+                Language = "English",
                 Category = "specialized",
                 Icon = "??",
                 EnableRag = true,
@@ -217,6 +232,7 @@ public class BotPersonalityRepository : IBotPersonalityRepository
                 DisplayName = "User Support Bot",
                 Description = "Customer service and user support specialist",
                 SystemPrompt = "You are a friendly customer support agent. Help users solve problems step-by-step. Be patient, empathetic, and provide clear instructions.",
+                Language = "English",
                 Category = "support",
                 Icon = "??",
                 EnableRag = true,
@@ -228,6 +244,7 @@ public class BotPersonalityRepository : IBotPersonalityRepository
                 DisplayName = "Teacher Bot",
                 Description = "Educational tutor that explains concepts",
                 SystemPrompt = "You are a patient teacher. Explain concepts clearly, provide examples, and check for understanding. Break down complex topics into digestible parts.",
+                Language = "English",
                 Category = "education",
                 Icon = "?????",
                 EnableRag = true,
@@ -239,6 +256,7 @@ public class BotPersonalityRepository : IBotPersonalityRepository
                 DisplayName = "Creative Assistant",
                 Description = "Helps with creative and brainstorming tasks",
                 SystemPrompt = "You are a creative assistant. Think outside the box, provide imaginative suggestions, and help brainstorm ideas while staying grounded in the provided context.",
+                Language = "English",
                 Category = "creative",
                 Icon = "??",
                 EnableRag = true,
