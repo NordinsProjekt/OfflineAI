@@ -19,5 +19,7 @@ public interface IPersistentLlmProcess : IDisposable
         float topP = 0.85f,
         float repeatPenalty = 1.15f,
         float presencePenalty = 0.2f,
-        float frequencyPenalty = 0.2f);
+        float frequencyPenalty = 0.2f,
+        bool useGpu = false,
+        int gpuLayers = 0);
 }

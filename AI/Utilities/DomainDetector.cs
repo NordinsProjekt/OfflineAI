@@ -33,15 +33,11 @@ public class DomainDetector(IKnowledgeDomainRepository domainRepository) : IDoma
 
         foreach (var (domainId, variants) in _variantsCache)
         {
-            foreach (var variant in variants)
+            if (variants.Any(variant => lowerQuery.Contains(variant, StringComparison.OrdinalIgnoreCase)))
             {
-                if (lowerQuery.Contains(variant, StringComparison.OrdinalIgnoreCase))
+                if (!detectedDomains.Contains(domainId))
                 {
-                    if (!detectedDomains.Contains(domainId))
-                    {
-                        detectedDomains.Add(domainId);
-                    }
-                    break;
+                    detectedDomains.Add(domainId);
                 }
             }
         }
@@ -72,12 +68,9 @@ public class DomainDetector(IKnowledgeDomainRepository domainRepository) : IDoma
             }
             
             // Check variant matches
-            foreach (var variant in variants)
+            if (variants.Any(variant => lowerCategory.Contains(variant, StringComparison.OrdinalIgnoreCase)))
             {
-                if (lowerCategory.Contains(variant, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
+                return true;
             }
         }
 
@@ -93,14 +86,9 @@ public class DomainDetector(IKnowledgeDomainRepository domainRepository) : IDoma
             return string.Empty;
         
         // Category format: "Domain Name - Section" or just "Domain Name"
-        var parts = category.Split(new[] { " - " }, StringSplitOptions.RemoveEmptyEntries);
+        var parts = category.Split([" - "], StringSplitOptions.RemoveEmptyEntries);
         
-        if (parts.Length > 0)
-        {
-            return parts[0].Trim();
-        }
-        
-        return category.Trim();
+        return parts.Length > 0 ? parts[0].Trim() : category.Trim();
     }
 
     /// <summary>
@@ -109,7 +97,10 @@ public class DomainDetector(IKnowledgeDomainRepository domainRepository) : IDoma
     /// </summary>
     public async Task RegisterDomainFromCategoryAsync(string category, string categoryType = "general")
     {
-        var domainName = ExtractDomainNameFromCategory(category);
+        // Clean markdown headers (##) from category before processing
+        var cleanCategory = category?.Replace("##", "").Trim();
+        
+        var domainName = ExtractDomainNameFromCategory(cleanCategory ?? string.Empty);
         
         if (string.IsNullOrWhiteSpace(domainName))
             return;
@@ -124,7 +115,7 @@ public class DomainDetector(IKnowledgeDomainRepository domainRepository) : IDoma
         await _domainRepository.RegisterDomainAsync(
             domainId,
             domainName,
-            new[] { domainName, domainName.ToLowerInvariant() },
+            [domainName, domainName.ToLowerInvariant()],
             category: categoryType,
             source: "auto-discovered");
         

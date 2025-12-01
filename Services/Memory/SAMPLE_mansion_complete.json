@@ -1,0 +1,31 @@
+{
+  "domainName": "Mansion of Madness",
+  "sourceFile": "Core Rulebook.pdf",
+  "sections": [
+    {
+      "heading": "Game Overview",
+      "pageNumber": 1,
+      "content": "This is a cooperative game where investigators explore a mansion and solve mysteries. Players work together to complete objectives before time runs out."
+    },
+    {
+      "heading": "Setup Phase",
+      "pageNumber": 2,
+      "content": "Each player chooses an investigator and receives their character card.\n\nPlace the map tiles according to the scenario guide.\n\nShuffle the common item deck and place it within reach of all players."
+    },
+    {
+      "heading": "Items and Equipment",
+      "pageNumber": 3,
+      "content": "An investigator can carry any number of common items. However, an investigator can have only two possessions.\n\nWhen an investigator gains a possession, if he already has two possessions, he must discard one possession to the supply."
+    },
+    {
+      "heading": "Combat Rules",
+      "pageNumber": 5,
+      "content": "To attack a monster, roll dice equal to your strength value.\n\nEach evade result allows you to move one space away from the monster.\n\nEach damage result deals one damage to the monster."
+    },
+    {
+      "heading": "Victory Conditions",
+      "pageNumber": 8,
+      "content": "Investigators win by completing all objectives before the timer runs out.\n\nIf the timer reaches zero or all investigators are eliminated, the investigators lose the game."
+    }
+  ]
+}

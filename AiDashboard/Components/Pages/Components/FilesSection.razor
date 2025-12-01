@@ -13,4 +13,15 @@
             disabled="@(Dashboard.InboxService?.IsProcessing == true)">
         Reload Inbox
     </button>
+    <button class="oa-btn oa-btn-secondary oa-btn-block" @onclick="async () => await ConvertPdfToTxtAsync()"
+            disabled="@(Dashboard.InboxService?.IsProcessing == true)">
+        PDF to TXT
+    </button>
 </CollapsibleSection>
+
+@code {
+    private async Task ConvertPdfToTxtAsync()
+    {
+        await Dashboard.ConvertPdfToTxtInInboxAsync();
+    }
+}

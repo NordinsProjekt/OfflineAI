@@ -7,8 +7,7 @@ namespace AiDashboard.Components.Pages;
 
 public partial class Home : IDisposable
 {
-    [Inject]
-    private DashboardState Dashboard { get; set; } = default!;
+    [Inject] private DashboardState Dashboard { get; set; } = default!;
 
     private string composerText = string.Empty;
     private bool isProcessing = false;
@@ -17,10 +16,10 @@ public partial class Home : IDisposable
     private List<ChatMessageModel> messages = new()
     {
         new ChatMessageModel
-        { 
-            IsUser = false, 
-            Text = "Hi! I'm ready to chat. Select a collection in the Collections section to use for RAG queries.", 
-            Timestamp = DateTime.Now 
+        {
+            IsUser = false,
+            Text = "Hi! I'm ready to chat. Select a collection in the Collections section to use for RAG queries.",
+            Timestamp = DateTime.Now
         }
     };
 
@@ -28,9 +27,9 @@ public partial class Home : IDisposable
     {
         // Set InvokeAsync callback for thread-safe state updates
         Dashboard.SetInvokeAsync(action => InvokeAsync(action));
-        
+
         Dashboard.OnChange += Refresh;
-        
+
         // Format initial message
         foreach (var msg in messages)
         {
@@ -47,14 +46,14 @@ public partial class Home : IDisposable
 
         // Convert markdown-style bold **text** to HTML <strong>text</strong>
         text = System.Text.RegularExpressions.Regex.Replace(text, @"\*\*(.+?)\*\*", "<strong>$1</strong>");
-        
+
         // Escape other HTML to prevent injection
         text = text.Replace("<", "&lt;").Replace(">", "&gt;")
-                   .Replace("<strong>", "<strong>").Replace("</strong>", "</strong>"); // But preserve our strong tags
-        
+            .Replace("<strong>", "<strong>").Replace("</strong>", "</strong>"); // But preserve our strong tags
+
         // Convert line breaks to <br> for proper rendering
         text = text.Replace("\n", "<br>");
-        
+
         return text;
     }
 

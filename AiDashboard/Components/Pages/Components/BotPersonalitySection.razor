@@ -1,0 +1,127 @@
+@inject DashboardState Dashboard
+@implements IDisposable
+
+<CollapsibleSection SectionKey="personality" Title="Bot Personality">
+    <div class="oa-field">
+        <label>Select Bot</label>
+        @if (Dashboard.PersonalityService?.AvailablePersonalities.Any() == true)
+        {
+            <select class="oa-text" @bind="selectedPersonalityId" @bind:after="OnPersonalityChanged">
+                <option value="">-- General Assistant --</option>
+                @foreach (var personality in Dashboard.PersonalityService.AvailablePersonalities)
+                {
+                    <option value="@personality.PersonalityId">
+                        @(personality.Icon != null ? $"{personality.Icon} " : "")@personality.DisplayName
+                    </option>
+                }
+            </select>
+        }
+        else
+        {
+            <div class="oa-info-text">No bot personalities available</div>
+        }
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(selectedPersonalityId) && Dashboard.PersonalityService?.CurrentPersonality != null)
+    {
+        var personality = Dashboard.PersonalityService.CurrentPersonality;
+        
+        <div class="oa-field">
+            <div class="oa-personality-info">
+                <div class="personality-header">
+                    @if (!string.IsNullOrWhiteSpace(personality.Icon))
+                    {
+                        <span class="personality-icon">@personality.Icon</span>
+                    }
+                    <strong>@personality.DisplayName</strong>
+                </div>
+                <p class="personality-description">@personality.Description</p>
+                @if (!string.IsNullOrWhiteSpace(personality.DefaultCollection))
+                {
+                    <small class="personality-collection">Uses: @personality.DefaultCollection</small>
+                }
+            </div>
+        </div>
+    }
+    
+    <div class="oa-field">
+        <button class="oa-btn oa-btn-secondary oa-btn-block" @onclick="RefreshPersonalities">
+            Refresh Personalities
+        </button>
+    </div>
+</CollapsibleSection>
+
+<style>
+    .oa-personality-info {
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 4px;
+        margin-top: 8px;
+    }
+    
+    .personality-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+    
+    .personality-icon {
+        font-size: 1.5em;
+    }
+    
+    .personality-description {
+        margin: 0 0 8px 0;
+        font-size: 0.9em;
+        color: rgba(255, 255, 255, 0.7);
+    }
+    
+    .personality-collection {
+        display: block;
+        color: rgba(255, 255, 255, 0.6);
+        font-style: italic;
+    }
+</style>
+
+@code {
+    private string? selectedPersonalityId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Dashboard.OnChange += HandleStateChanged;
+        
+        await RefreshPersonalities();
+        
+        // Set initial selection to current personality
+        selectedPersonalityId = Dashboard.PersonalityService?.CurrentPersonality?.PersonalityId;
+    }
+
+    private void HandleStateChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Dashboard.OnChange -= HandleStateChanged;
+    }
+
+    private async Task OnPersonalityChanged()
+    {
+        if (Dashboard.PersonalityService != null)
+        {
+            await Dashboard.SelectPersonalityAsync(selectedPersonalityId ?? string.Empty);
+        }
+        
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshPersonalities()
+    {
+        if (Dashboard.PersonalityService != null)
+        {
+            await Dashboard.RefreshPersonalitiesAsync();
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+}

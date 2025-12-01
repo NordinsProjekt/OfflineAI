@@ -10,6 +10,8 @@ using Services.Repositories;
 using Microsoft.SemanticKernel.Embeddings;
 using Infrastructure.Data.Dapper;
 using Services.Configuration;
+using Services.Management;
+using Services.Language;
 
 namespace AiDashboard;
 
@@ -26,6 +28,9 @@ public class Program
         // Register AppConfiguration
         var appConfig = builder.Configuration.GetSection("AppConfiguration").Get<AppConfiguration>() ?? new AppConfiguration();
         builder.Services.AddSingleton(appConfig);
+        
+        // Register language services for stop words filtering
+        builder.Services.AddSingleton<ILanguageStopWordsService, LanguageStopWordsService>();
 
         // Read configuration for LLM
         var llmExe = appConfig.Llm?.ExecutablePath ?? builder.Configuration["AppConfiguration:Llm:ExecutablePath"] ?? string.Empty;
@@ -50,12 +55,12 @@ public class Program
 
         if (configErrors.Any())
         {
-            Console.WriteLine("??  Configuration Errors:");
+            Console.WriteLine("[!] Configuration Errors:");
             foreach (var error in configErrors)
             {
                 Console.WriteLine($"   - {error}");
             }
-            Console.WriteLine("\n?? Please update User Secrets to configure required paths.");
+            Console.WriteLine("\n[!] Please update User Secrets to configure required paths.");
             Console.WriteLine("   The application will start but functionality will be limited.\n");
         }
 
@@ -73,20 +78,20 @@ public class Program
                 builder.Services.AddSingleton<ITextEmbeddingGenerationService>(sp =>
                     sp.GetRequiredService<SemanticEmbeddingService>());
 
-                Console.WriteLine("? Embedding service registered (RAG available)");
+                Console.WriteLine("[+] Embedding service registered (RAG available)");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"??  Warning: Failed to register embedding service: {ex.Message}");
+                Console.WriteLine($"[!] Warning: Failed to register embedding service: {ex.Message}");
                 Console.WriteLine("   RAG mode will not be available.");
             }
         }
         else
         {
-            Console.WriteLine("??  Embedding service not configured (RAG disabled)");
+            Console.WriteLine("[!] Embedding service not configured (RAG disabled)");
         }
 
-        // Register Dapper repository (optional - but required for table management and collections)
+        // Register Dapper repositories (optional - but required for table management and collections)
         IVectorMemoryRepository? repositoryInstance = null;
         if (!string.IsNullOrEmpty(dbConnectionString))
         {
@@ -96,65 +101,87 @@ public class Program
                 
                 // Register KnowledgeDomainRepository for domain-based filtering
                 builder.Services.AddDapperKnowledgeDomainRepository(dbConnectionString);
+                
+                // Register LLM and Question repositories
+                builder.Services.AddDapperLlmRepository(dbConnectionString);
+                builder.Services.AddDapperQuestionRepository(dbConnectionString);
+                
+                // Register BotPersonalityRepository for personality management
+                builder.Services.AddDapperBotPersonalityRepository(dbConnectionString);
 
-                // Build a temporary service provider to check if services are registered
+// Build a temporary service provider to check if services are registered
                 using var tempProvider = builder.Services.BuildServiceProvider();
                 repositoryInstance = tempProvider.GetService<IVectorMemoryRepository>();
                 
                 if (repositoryInstance != null)
                 {
-                    Console.WriteLine("? Database repository registered");
+                    Console.WriteLine("[+] Database repository registered");
                     
                     // Only register persistence service if we have both repository AND embedding service
                     var embeddingService = tempProvider.GetService<ITextEmbeddingGenerationService>();
                     if (embeddingService != null)
                     {
                         builder.Services.AddSingleton<VectorMemoryPersistenceService>();
-                        Console.WriteLine("? Persistence service registered (collection loading available)");
+                        Console.WriteLine("[+] Persistence service registered (collection loading available)");
                     }
                     else
                     {
-                        Console.WriteLine("??  Persistence service not registered - embedding service missing");
+                        Console.WriteLine("[!] Persistence service not registered - embedding service missing");
                         Console.WriteLine("   Collection loading will not be available");
                     }
                 }
                 else
                 {
-                    Console.WriteLine("??  Database repository registration failed");
+                    Console.WriteLine("[!] Database repository registration failed");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"??  Warning: Failed to register database services: {ex.Message}");
+                Console.WriteLine($"[!] Warning: Failed to register database services: {ex.Message}");
                 Console.WriteLine("   Table management and collection loading will not be available");
             }
         }
         else
         {
-            Console.WriteLine("??  Database not configured");
+            Console.WriteLine("[!] Database not configured");
             Console.WriteLine("   Table management and collection loading disabled");
+        }
+        
+        // Register LlmSyncService
+        if (!string.IsNullOrEmpty(llmModel))
+        {
+            builder.Services.AddSingleton(sp =>
+            {
+                var llmRepository = sp.GetRequiredService<ILlmRepository>();
+                var llmFolderPath = Path.GetDirectoryName(llmModel) ?? string.Empty;
+                return new LlmSyncService(llmRepository, llmFolderPath);
+            });
         }
 
         // Register DomainDetector (requires KnowledgeDomainRepository)
         builder.Services.AddSingleton<Application.AI.Utilities.IDomainDetector, Application.AI.Utilities.DomainDetector>();
+        
+        // Register BotPersonalityService (requires BotPersonalityRepository)
+        builder.Services.AddSingleton<BotPersonalityService>();
 
         // Register memory for knowledge base
         builder.Services.AddSingleton<ILlmMemory>(sp =>
         {
             var embeddingService = sp.GetService<ITextEmbeddingGenerationService>();
             var repository = sp.GetService<IVectorMemoryRepository>();
+            var stopWordsService = sp.GetRequiredService<ILanguageStopWordsService>();
             var collectionName = appConfig.Debug?.CollectionName ?? builder.Configuration["AppConfiguration:Debug:CollectionName"] ?? "game-rules-mpnet";
 
             if (embeddingService != null && repository != null)
             {
                 // Use database-backed vector memory for RAG queries
-                Console.WriteLine($"? Database vector memory initialized (collection: {collectionName})");
-                return new DatabaseVectorMemory(embeddingService, repository, collectionName);
+                Console.WriteLine($"[+] Database vector memory initialized (collection: {collectionName})");
+                return new DatabaseVectorMemory(embeddingService, repository, stopWordsService, collectionName);
             }
             else
             {
                 // Fallback to simple string memory (RAG not available)
-                Console.WriteLine("? Simple memory initialized (RAG not available - database or embedding service missing)");
+                Console.WriteLine("[!] Simple memory initialized (RAG not available - database or embedding service missing)");
                 return new StringJoinMemory();
             }
         });
@@ -170,19 +197,19 @@ public class Program
                 // Validate files exist before creating pool
                 if (!System.IO.File.Exists(llmExe))
                 {
-                    Console.WriteLine($"??  LLM executable not found: {llmExe}");
+                    Console.WriteLine($"[!] LLM executable not found: {llmExe}");
                     Console.WriteLine("   Chat functionality will not be available.");
                 }
                 else if (!System.IO.File.Exists(llmModel))
                 {
-                    Console.WriteLine($"??  Model file not found: {llmModel}");
+                    Console.WriteLine($"[!] Model file not found: {llmModel}");
                     Console.WriteLine("   Chat functionality will not be available.");
                 }
                 else
                 {
                     builder.Services.AddSingleton<IModelInstancePool>(sp => new ModelInstancePool(llmExe, llmModel, maxInstances: poolMax, timeoutMs: poolTimeout));
                     builder.Services.AddSingleton<IModelManager>(sp => new ModelManager(sp.GetRequiredService<IModelInstancePool>(), llmExe));
-                    Console.WriteLine($"? Model pool registered (will initialize on first use)");
+                    Console.WriteLine($"[+] Model pool registered (will initialize on first use)");
                     Console.WriteLine($"   LLM: {System.IO.Path.GetFileName(llmExe)}");
                     Console.WriteLine($"   Model: {System.IO.Path.GetFileName(llmModel)}");
                     Console.WriteLine($"   Max instances: {poolMax}, Timeout: {poolTimeout}ms");
@@ -190,12 +217,12 @@ public class Program
             }
             else
             {
-                Console.WriteLine("??  Skipping model pool registration (missing LLM configuration)");
+                Console.WriteLine("[!] Skipping model pool registration (missing LLM configuration)");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"??  Warning: Failed to register model pool: {ex.Message}");
+            Console.WriteLine($"[!] Warning: Failed to register model pool: {ex.Message}");
         }
 
         // Register DashboardChatService (only if ModelInstancePool is available)
@@ -223,9 +250,20 @@ public class Program
 
                 // Get DomainDetector for domain filtering
                 var domainDetector = sp.GetService<Application.AI.Utilities.IDomainDetector>();
+                
+                // Get repositories for question/answer storage
+                var questionRepository = sp.GetService<IQuestionRepository>();
+                var llmRepository = sp.GetService<ILlmRepository>();
 
-                Console.WriteLine("? Chat service initialized");
-                return new DashboardChatService(vectorMemory, conversationMemory, modelPool, domainDetector);
+                Console.WriteLine("[+] Chat service initialized");
+                return new DashboardChatService(
+                    vectorMemory, 
+                    conversationMemory, 
+                    modelPool, 
+                    domainDetector,
+                    questionRepository,
+                    llmRepository,
+                    null); // Will be set when DashboardState attaches the service
             }
             catch (Exception ex)
             {
@@ -260,7 +298,8 @@ public class Program
                 // Initialize services
                 var repository = sp.GetService<IVectorMemoryRepository>();
                 var persistenceService = sp.GetService<VectorMemoryPersistenceService>();
-                dashboardState.InitializeServices(repository, persistenceService, config);
+                var personalityService = sp.GetService<BotPersonalityService>();
+                dashboardState.InitializeServices(repository, persistenceService, config, personalityService);
                 
                 // Attach chat service
                 var chatService = sp.GetService<DashboardChatService>();
@@ -268,7 +307,7 @@ public class Program
                 
                 if (chatService != null)
                 {
-                    Console.WriteLine("? Chat service attached to dashboard");
+                    Console.WriteLine("[+] Chat service attached to dashboard");
                 }
                 
                 // Set model switch handler
@@ -287,7 +326,7 @@ public class Program
                         try
                         {
                             await dashboardState.RefreshModelsAsync();
-                            Console.WriteLine($"? Found {dashboardState.ModelService.AvailableModels.Count} models in {modelFolder}");
+                            Console.WriteLine($"[+] Found {dashboardState.ModelService.AvailableModels.Count} models in {modelFolder}");
                         }
                         catch { }
                     });
@@ -302,19 +341,19 @@ public class Program
                     catch { }
                 });
 
-                Console.WriteLine("? Dashboard state initialized");
+                Console.WriteLine("[+] Dashboard state initialized");
                 return dashboardState;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"??  Warning during dashboard initialization: {ex.Message}");
+                Console.WriteLine($"[!] Warning during dashboard initialization: {ex.Message}");
                 throw;
             }
         });
 
         var app = builder.Build();
 
-        // Initialize database on startup (non-blocking, optional)
+        // Initialize database tables on startup (non-blocking)
         if (app.Services.GetService<IVectorMemoryRepository>() != null)
         {
             Task.Run(async () =>
@@ -324,11 +363,33 @@ public class Program
                 {
                     var repository = scope.ServiceProvider.GetRequiredService<IVectorMemoryRepository>();
                     await repository.InitializeDatabaseAsync();
-                    Console.WriteLine("? Database initialized");
+                    Console.WriteLine("[+] Database initialized");
+                    
+                    // Initialize LLM and Question tables
+                    var llmRepository = scope.ServiceProvider.GetService<ILlmRepository>();
+                    var questionRepository = scope.ServiceProvider.GetService<IQuestionRepository>();
+                    
+                    if (llmRepository != null && questionRepository != null)
+                    {
+                        await llmRepository.InitializeDatabaseAsync();
+                        await questionRepository.InitializeDatabaseAsync();
+                        Console.WriteLine("[+] LLM and Question tables initialized");
+                        
+                        // Sync LLMs from folder
+                        var llmSyncService = scope.ServiceProvider.GetService<LlmSyncService>();
+                        if (llmSyncService != null)
+                        {
+                            var (added, existing, total) = await llmSyncService.SyncLlmsAsync();
+                            if (total > 0)
+                            {
+                                Console.WriteLine($"[+] LLM sync complete: {added} added, {existing} existing, {total} total");
+                            }
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"??  Warning: Failed to initialize database: {ex.Message}");
+                    Console.WriteLine($"[!] Warning: Failed to initialize database: {ex.Message}");
                 }
             });
         }
@@ -345,17 +406,39 @@ public class Program
                     await domainDetector.InitializeAsync();
                     var domainCount = (await domainDetector.GetAllDomainsAsync()).Count;
                     var categories = await domainDetector.GetCategoriesAsync();
-                    Console.WriteLine($"? Domain detector initialized ({domainCount} domain(s) in {categories.Count} categor{(categories.Count == 1 ? "y" : "ies")})");
+                    Console.WriteLine($"[+] Domain detector initialized ({domainCount} domain(s) in {categories.Count} categor{(categories.Count == 1 ? "y" : "ies")})");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"??  Warning: Failed to initialize domain detector: {ex.Message}");
+                Console.WriteLine($"[!] Warning: Failed to initialize domain detector: {ex.Message}");
                 Console.WriteLine("   Domain management will not be available");
             }
         });
+        
+        // Initialize BotPersonalityService on startup (non-blocking, optional)
+        Task.Run(async () =>
+        {
+            using var scope = app.Services.CreateScope();
+            try
+            {
+                var personalityService = scope.ServiceProvider.GetService<BotPersonalityService>();
+                if (personalityService != null)
+                {
+                    await personalityService.InitializeAsync();
+                    await personalityService.RefreshPersonalitiesAsync();
+                    var personalityCount = personalityService.AvailablePersonalities.Count;
+                    Console.WriteLine($"[+] Bot personality service initialized ({personalityCount} personalit{(personalityCount == 1 ? "y" : "ies")} available)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[!] Warning: Failed to initialize personality service: {ex.Message}");
+                Console.WriteLine("   Personality management will not be available");
+            }
+        });
 
-        Console.WriteLine("\n?? AiDashboard starting...\n");
+        Console.WriteLine("\n[*] AiDashboard starting...\n");
 
         // Configure the HTTP request pipeline.
         if (!app.Environment.IsDevelopment())

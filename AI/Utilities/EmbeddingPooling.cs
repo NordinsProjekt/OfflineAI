@@ -135,28 +135,4 @@ public static class EmbeddingPooling
         
         return (float)Math.Sqrt(sumOfSquares);
     }
-    
-    /// <summary>
-    /// Calculates cosine similarity between two normalized embeddings.
-    /// Since embeddings are normalized, this is equivalent to dot product.
-    /// </summary>
-    /// <param name="embedding1">First normalized embedding</param>
-    /// <param name="embedding2">Second normalized embedding</param>
-    /// <returns>Cosine similarity score (0 to 1 for normalized vectors)</returns>
-    public static float CosineSimilarity(float[] embedding1, float[] embedding2)
-    {
-        ArgumentNullException.ThrowIfNull(embedding1);
-        ArgumentNullException.ThrowIfNull(embedding2);
-        
-        if (embedding1.Length != embedding2.Length)
-            throw new ArgumentException("Embeddings must have the same dimension");
-        
-        float dotProduct = 0;
-        for (int i = 0; i < embedding1.Length; i++)
-        {
-            dotProduct += embedding1[i] * embedding2[i];
-        }
-        
-        return dotProduct;
-    }
 }

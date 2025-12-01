@@ -184,7 +184,8 @@ public class StringExtensionsTests
         var result = input.CleanModelArtifacts();
 
         // Assert
-        Assert.Equal("Assistant response", result);
+        // After removing <|assistant|> token, "Assistant " prefix is also removed by CleanPlainAssistantPrefix
+        Assert.Equal("response", result);
     }
 
     [Fact]
