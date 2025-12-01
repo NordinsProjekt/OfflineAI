@@ -21,7 +21,7 @@ public class BotPersonalityService(IBotPersonalityRepository repository)
     public BotPersonalityEntity? CurrentPersonality
     {
         get => _currentPersonality;
-        set
+        private set
         {
             if (_currentPersonality == value) return;
             _currentPersonality = value;
@@ -48,15 +48,6 @@ public class BotPersonalityService(IBotPersonalityRepository repository)
         }
     }
     
-    /// <summary>
-    /// Get all personalities including inactive ones.
-    /// </summary>
-    public async Task<List<BotPersonalityEntity>> GetAllPersonalitiesAsync(bool includeInactive = false)
-    {
-        return includeInactive 
-            ? await _repository.GetAllAsync() 
-            : await _repository.GetAllActiveAsync();
-    }
     
     /// <summary>
     /// Select a personality by ID.
@@ -88,41 +79,6 @@ public class BotPersonalityService(IBotPersonalityRepository repository)
         catch (Exception ex)
         {
             return (false, $"Failed to select personality: {ex.Message}");
-        }
-    }
-    
-    /// <summary>
-    /// Delete a personality.
-    /// </summary>
-    public async Task<(bool Success, string Message)> DeletePersonalityAsync(string personalityId)
-    {
-        if (string.IsNullOrWhiteSpace(personalityId))
-        {
-            return (false, "Personality ID is required");
-        }
-        
-        try
-        {
-            var exists = await _repository.ExistsAsync(personalityId);
-            if (!exists)
-            {
-                return (false, $"Personality '{personalityId}' not found");
-            }
-            
-            await _repository.DeleteAsync(personalityId);
-            
-            // Clear current personality if it was deleted
-            if (CurrentPersonality?.PersonalityId == personalityId)
-            {
-                CurrentPersonality = null;
-            }
-            
-            await RefreshPersonalitiesAsync();
-            return (true, $"Deleted personality: {personalityId}");
-        }
-        catch (Exception ex)
-        {
-            return (false, $"Failed to delete personality: {ex.Message}");
         }
     }
     
