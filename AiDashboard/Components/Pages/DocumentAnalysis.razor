@@ -1,0 +1,830 @@
+@page "/document-analysis"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@inject DashboardState Dashboard
+@using AiDashboard.Services
+
+<PageTitle>Document Analysis - OfflineAI</PageTitle>
+
+<div class="oa-workflow-page">
+    <div class="oa-workflow-header">
+        <button class="oa-back-button" @onclick="@(() => Navigation.NavigateTo("/"))">
+            ? Back to Home
+        </button>
+        <h1>?? Document Analysis</h1>
+        <p class="oa-workflow-subtitle">Upload a document and get instant AI-powered insights</p>
+    </div>
+
+    <div class="oa-workflow-content">
+        <div class="oa-upload-section">
+            <div class="oa-upload-area @(isDragOver ? "drag-over" : "")"
+                 @ondrop="HandleDrop"
+                 @ondragover:preventDefault
+                 @ondragenter="HandleDragEnter"
+                 @ondragleave="HandleDragLeave">
+                
+                @if (uploadedFile == null)
+                {
+                    <div class="oa-upload-prompt">
+                        <div class="oa-upload-icon">??</div>
+                        <h2>Drop your document here</h2>
+                        <p>or click to browse</p>
+                        <InputFile OnChange="HandleFileSelected" class="oa-file-input" accept=".txt,.pdf,.doc,.docx" />
+                        <p class="oa-upload-hint">Supports: TXT, PDF, DOC, DOCX (Max 10MB)</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="oa-file-preview">
+                        <div class="oa-file-icon">??</div>
+                        <div class="oa-file-info">
+                            <h3>@uploadedFile.Name</h3>
+                            <p>@FormatFileSize(uploadedFile.Size)</p>
+                            @if (documentChunks.Count > 0)
+                            {
+                                <p class="oa-chunk-info">?? Split into @documentChunks.Count chunk(s)</p>
+                            }
+                        </div>
+                        <button class="oa-remove-file" @onclick="RemoveFile">?</button>
+                    </div>
+                }
+            </div>
+
+            @if (uploadedFile != null && !isAnalyzing && !string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="oa-error-message">
+                    <strong>?? Error:</strong> @errorMessage
+                </div>
+            }
+
+            @if (uploadedFile != null && !isAnalyzing && string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="oa-analysis-options">
+                    <h3>What would you like to do?</h3>
+                    <div class="oa-option-grid">
+                        <button class="oa-option-button oa-featured" @onclick="@(() => AnalyzeDocument("kunskapsmal"))">
+                            <span class="oa-option-icon">??</span>
+                            <span class="oa-option-text">Extract Kunskapsmål</span>
+                            <span class="oa-option-badge">Specialized</span>
+                        </button>
+                        <button class="oa-option-button" @onclick="@(() => AnalyzeDocument("summarize"))">
+                            <span class="oa-option-icon">??</span>
+                            <span class="oa-option-text">Summarize</span>
+                        </button>
+                        <button class="oa-option-button" @onclick="@(() => AnalyzeDocument("extract"))">
+                            <span class="oa-option-icon">??</span>
+                            <span class="oa-option-text">Extract Key Points</span>
+                        </button>
+                        <button class="oa-option-button" @onclick="@(() => AnalyzeDocument("search"))">
+                            <span class="oa-option-icon">??</span>
+                            <span class="oa-option-text">Custom Search</span>
+                        </button>
+                    </div>
+
+                    @if (showCustomSearch)
+                    {
+                        <div class="oa-custom-search">
+                            <h4>Enter search terms (comma-separated):</h4>
+                            <input type="text" class="oa-search-input" placeholder="e.g., Kunskapsmål, Centralt innehåll, Förmågor" @bind="customSearchTerms" />
+                            <h4>Output format:</h4>
+                            <textarea class="oa-format-input" rows="5" placeholder="e.g., - [Term]: [Description]" @bind="outputFormat"></textarea>
+                            <button class="oa-search-button" @onclick="@(() => ExecuteCustomSearch())">
+                                ?? Search & Analyze
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        @if (isAnalyzing)
+        {
+            <div class="oa-analyzing">
+                <div class="oa-spinner"></div>
+                <h3>@analysisStatus</h3>
+                @if (!string.IsNullOrEmpty(analysisSubStatus))
+                {
+                    <p>@analysisSubStatus</p>
+                }
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(analysisResult))
+        {
+            <div class="oa-results-section">
+                <h2>Analysis Results</h2>
+                @if (matchedChunks.Count > 0)
+                {
+                    <div class="oa-match-summary">
+                        <p>Found <strong>@matchedChunks.Count</strong> relevant section(s) containing your search terms.</p>
+                    </div>
+                }
+                <div class="oa-result-box">
+                    <pre>@analysisResult</pre>
+                </div>
+                <div class="oa-result-actions">
+                    <button class="oa-action-button" @onclick="CopyResults">
+                        ?? Copy Results
+                    </button>
+                    <button class="oa-action-button" @onclick="DownloadResults">
+                        ?? Download
+                    </button>
+                    <button class="oa-action-button" @onclick="AnalyzeAnother">
+                        ?? Analyze Another
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+<style>
+    .oa-workflow-page {
+        min-height: 100vh;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+    }
+
+    .oa-workflow-header {
+        text-align: center;
+        color: white;
+        margin-bottom: 2rem;
+    }
+
+    .oa-back-button {
+        position: absolute;
+        top: 2rem;
+        left: 2rem;
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+        border: none;
+        padding: 0.75rem 1.5rem;
+        border-radius: 8px;
+        font-size: 1rem;
+        cursor: pointer;
+        backdrop-filter: blur(10px);
+        transition: all 0.2s ease;
+    }
+
+    .oa-back-button:hover {
+        background: rgba(255, 255, 255, 0.3);
+        transform: translateX(-4px);
+    }
+
+    .oa-workflow-header h1 {
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .oa-workflow-subtitle {
+        font-size: 1.2rem;
+        opacity: 0.9;
+    }
+
+    .oa-workflow-content {
+        max-width: 900px;
+        margin: 0 auto;
+    }
+
+    .oa-upload-section {
+        background: white;
+        border-radius: 16px;
+        padding: 2rem;
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+    }
+
+    .oa-upload-area {
+        border: 3px dashed #cbd5e0;
+        border-radius: 12px;
+        padding: 3rem;
+        text-align: center;
+        transition: all 0.3s ease;
+        position: relative;
+        background: #f7fafc;
+    }
+
+    .oa-upload-area.drag-over {
+        border-color: #667eea;
+        background: #edf2ff;
+        transform: scale(1.02);
+    }
+
+    .oa-upload-prompt {
+        position: relative;
+    }
+
+    .oa-upload-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+    }
+
+    .oa-upload-prompt h2 {
+        font-size: 1.5rem;
+        color: #2d3748;
+        margin-bottom: 0.5rem;
+    }
+
+    .oa-upload-prompt p {
+        color: #4a5568;
+        margin-bottom: 1rem;
+    }
+
+    .oa-file-input {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+    }
+
+    .oa-upload-hint {
+        font-size: 0.875rem;
+        color: #718096;
+        margin-top: 1rem;
+    }
+
+    .oa-file-preview {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 1rem;
+        background: white;
+        border-radius: 8px;
+    }
+
+    .oa-file-icon {
+        font-size: 3rem;
+    }
+
+    .oa-file-info {
+        flex: 1;
+        text-align: left;
+    }
+
+    .oa-file-info h3 {
+        color: #2d3748;
+        margin: 0;
+        font-size: 1.1rem;
+    }
+
+    .oa-file-info p {
+        color: #718096;
+        margin: 0.25rem 0 0 0;
+        font-size: 0.875rem;
+    }
+
+    .oa-remove-file {
+        background: #fc8181;
+        color: white;
+        border: none;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        cursor: pointer;
+        font-size: 1.2rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+    }
+
+    .oa-remove-file:hover {
+        background: #f56565;
+        transform: scale(1.1);
+    }
+
+    .oa-analysis-options {
+        margin-top: 2rem;
+    }
+
+    .oa-analysis-options h3 {
+        color: #2d3748;
+        margin-bottom: 1rem;
+    }
+
+    .oa-option-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1rem;
+    }
+
+    .oa-option-button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 1.5rem;
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .oa-option-button:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
+    }
+
+    .oa-option-icon {
+        font-size: 2rem;
+    }
+
+    .oa-option-text {
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    .oa-analyzing {
+        background: white;
+        border-radius: 16px;
+        padding: 3rem;
+        text-align: center;
+        margin-top: 2rem;
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+    }
+
+    .oa-spinner {
+        width: 60px;
+        height: 60px;
+        border: 4px solid #e2e8f0;
+        border-top-color: #667eea;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 1rem;
+    }
+
+    @@keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .oa-analyzing h3 {
+        color: #2d3748;
+        margin-bottom: 0.5rem;
+    }
+
+    .oa-analyzing p {
+        color: #718096;
+    }
+
+    .oa-results-section {
+        background: white;
+        border-radius: 16px;
+        padding: 2rem;
+        margin-top: 2rem;
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+    }
+
+    .oa-results-section h2 {
+        color: #2d3748;
+        margin-bottom: 1rem;
+    }
+
+    .oa-result-box {
+        background: #f7fafc;
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+    }
+
+    .oa-result-box pre {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        margin: 0;
+        color: #2d3748;
+        line-height: 1.6;
+        font-family: inherit;
+    }
+
+    .oa-result-actions {
+        display: flex;
+        gap: 1rem;
+    }
+
+    .oa-action-button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 0.875rem 1.5rem;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .oa-action-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .oa-chunk-info {
+        color: #667eea !important;
+        font-weight: 600;
+        font-size: 0.875rem;
+    }
+
+    .oa-error-message {
+        background: #fee;
+        border: 1px solid #fcc;
+        border-radius: 8px;
+        padding: 1rem;
+        margin-top: 1rem;
+        color: #c33;
+    }
+
+    .oa-featured {
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        border: 2px solid #fbbf24;
+        position: relative;
+    }
+
+    .oa-option-badge {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        background: rgba(255, 255, 255, 0.9);
+        color: #d97706;
+        font-size: 0.7rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+
+    .oa-custom-search {
+        margin-top: 2rem;
+        padding: 1.5rem;
+        background: #f7fafc;
+        border-radius: 12px;
+        border: 2px dashed #cbd5e0;
+    }
+
+    .oa-custom-search h4 {
+        color: #2d3748;
+        margin-bottom: 0.5rem;
+        font-size: 0.95rem;
+    }
+
+    .oa-search-input,
+    .oa-format-input {
+        width: 100%;
+        padding: 0.75rem;
+        border: 1px solid #cbd5e0;
+        border-radius: 8px;
+        font-size: 0.95rem;
+        margin-bottom: 1rem;
+        font-family: inherit;
+    }
+
+    .oa-search-input:focus,
+    .oa-format-input:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .oa-search-button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 0.875rem 1.5rem;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        width: 100%;
+        transition: all 0.2s ease;
+    }
+
+    .oa-search-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .oa-match-summary {
+        background: #edf2ff;
+        border-left: 4px solid #667eea;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        border-radius: 4px;
+    }
+
+    .oa-match-summary p {
+        margin: 0;
+        color: #2d3748;
+    }
+</style>
+
+@code {
+    private IBrowserFile? uploadedFile;
+    private bool isDragOver;
+    private bool isAnalyzing;
+    private string analysisStatus = "";
+    private string analysisSubStatus = "";
+    private string analysisResult = "";
+    private string errorMessage = "";
+    private bool showCustomSearch = false;
+    private string customSearchTerms = "Kunskapsmål, Centralt innehåll, Förmågor";
+    private string outputFormat = "- [Category]: [Description]\n- Skills: [List of skills]\n- Content: [Key content areas]";
+
+    private DocumentAnalysisService analysisService = new();
+    private List<DocumentChunk> documentChunks = new();
+    private List<DocumentChunk> matchedChunks = new();
+    private string fullDocumentText = "";
+
+    private void HandleDragEnter()
+    {
+        isDragOver = true;
+    }
+
+    private void HandleDragLeave()
+    {
+        isDragOver = false;
+    }
+
+    private async Task HandleDrop()
+    {
+        isDragOver = false;
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        uploadedFile = e.File;
+        errorMessage = "";
+        documentChunks.Clear();
+        matchedChunks.Clear();
+        analysisResult = "";
+        
+        // Extract text immediately after selection
+        await ExtractDocumentText();
+        StateHasChanged();
+    }
+
+    private async Task ExtractDocumentText()
+    {
+        if (uploadedFile == null) return;
+
+        analysisStatus = $"Reading {uploadedFile.Name}...";
+        
+        var (success, text, error) = await analysisService.ExtractTextAsync(uploadedFile);
+        
+        if (!success)
+        {
+            errorMessage = error;
+            fullDocumentText = "";
+            return;
+        }
+
+        fullDocumentText = text;
+        
+        // Split into chunks
+        documentChunks = analysisService.SplitIntoChunks(fullDocumentText);
+    }
+
+    private void RemoveFile()
+    {
+        uploadedFile = null;
+        analysisResult = "";
+        errorMessage = "";
+        documentChunks.Clear();
+        matchedChunks.Clear();
+        fullDocumentText = "";
+        showCustomSearch = false;
+    }
+
+    private async Task AnalyzeDocument(string analysisType)
+    {
+        if (analysisType == "search")
+        {
+            showCustomSearch = !showCustomSearch;
+            return;
+        }
+
+        if (string.IsNullOrEmpty(fullDocumentText))
+        {
+            errorMessage = "No document text available. Please upload a TXT file (PDF/DOCX support coming soon).";
+            return;
+        }
+
+        isAnalyzing = true;
+        analysisStatus = "Analyzing document...";
+        analysisSubStatus = "";
+        StateHasChanged();
+
+        await Task.Delay(500);
+
+        try
+        {
+            if (analysisType == "kunskapsmal")
+            {
+                await AnalyzeKunskapsmal();
+            }
+            else
+            {
+                await AnalyzeGeneral(analysisType);
+            }
+        }
+        catch (Exception ex)
+        {
+            analysisResult = $"Error during analysis: {ex.Message}";
+        }
+        finally
+        {
+            isAnalyzing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task AnalyzeKunskapsmal()
+    {
+        analysisStatus = "Searching for Kunskapsmål...";
+        StateHasChanged();
+        await Task.Delay(500);
+
+        // Search for Swedish educational terms
+        string[] terms = ["Kunskapsmål", "Kunskapskrav", "Centralt innehåll", "Förmågor", "Betygskriterier"];
+        matchedChunks = analysisService.SearchMultipleTerms(documentChunks, terms);
+
+        if (matchedChunks.Count == 0)
+        {
+            analysisResult = "No sections containing Swedish educational terms (Kunskapsmål, etc.) were found in the document.";
+            return;
+        }
+
+        analysisStatus = "Formatting results with AI...";
+        analysisSubStatus = $"Found {matchedChunks.Count} relevant sections";
+        StateHasChanged();
+        await Task.Delay(500);
+
+        var format = @"Format the extracted learning objectives as follows:
+# Kunskapsmål (Learning Objectives)
+
+## Subject/Course:
+[Extract subject/course name]
+
+## Kunskapskrav (Knowledge Requirements):
+- [Requirement 1]
+- [Requirement 2]
+
+## Centralt innehåll (Core Content):
+- [Content area 1]
+- [Content area 2]
+
+## Förmågor (Abilities/Skills):
+- [Ability 1]
+- [Ability 2]
+
+## Assessment Criteria:
+[Extract grading criteria if present]";
+
+        var prompt = analysisService.CreateAnalysisPrompt(matchedChunks, "Kunskapsmål", format);
+
+        // Send to AI
+        if (Dashboard.ChatService != null)
+        {
+            var response = await Dashboard.ChatService.SendMessageAsync(
+                message: prompt,
+                ragMode: false,
+                debugMode: false,
+                showPerformanceMetrics: false,
+                generationSettings: Dashboard.SettingsService.ToGenerationSettings()
+            );
+            
+            analysisResult = response;
+        }
+        else
+        {
+            // Fallback: show raw matched chunks
+            analysisResult = $"Found {matchedChunks.Count} sections with educational terms:\n\n";
+            foreach (var chunk in matchedChunks.Take(5))
+            {
+                analysisResult += $"[Section {chunk.Index + 1}] (Relevance: {chunk.RelevanceScore})\n";
+                analysisResult += $"Matched terms: {string.Join(", ", chunk.MatchedTerms)}\n";
+                analysisResult += chunk.Text + "\n\n---\n\n";
+            }
+        }
+    }
+
+    private async Task AnalyzeGeneral(string analysisType)
+    {
+        analysisStatus = $"Performing {analysisType} analysis...";
+        StateHasChanged();
+
+        var prompt = analysisType switch
+        {
+            "summarize" => $"Summarize the following document concisely:\n\n{fullDocumentText}",
+            "extract" => $"Extract the key points from this document in bullet format:\n\n{fullDocumentText}",
+            _ => $"Analyze this document:\n\n{fullDocumentText}"
+        };
+
+        if (Dashboard.ChatService != null)
+        {
+            analysisResult = await Dashboard.ChatService.SendMessageAsync(
+                message: prompt,
+                ragMode: false,
+                debugMode: false,
+                showPerformanceMetrics: false,
+                generationSettings: Dashboard.SettingsService.ToGenerationSettings()
+            );
+        }
+        else
+        {
+            analysisResult = $"[{analysisType.ToUpper()}]\n\nChat service not available. Please ensure the dashboard is properly initialized.";
+        }
+    }
+
+    private async Task ExecuteCustomSearch()
+    {
+        if (string.IsNullOrWhiteSpace(customSearchTerms))
+        {
+            errorMessage = "Please enter at least one search term.";
+            return;
+        }
+
+        isAnalyzing = true;
+        analysisStatus = "Searching document...";
+        StateHasChanged();
+        await Task.Delay(500);
+
+        var terms = customSearchTerms.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(t => t.Trim())
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .ToArray();
+
+        matchedChunks = analysisService.SearchMultipleTerms(documentChunks, terms);
+
+        if (matchedChunks.Count == 0)
+        {
+            analysisResult = $"No sections containing the search terms ({string.Join(", ", terms)}) were found.";
+            isAnalyzing = false;
+            return;
+        }
+
+        analysisStatus = "Analyzing matched sections...";
+        analysisSubStatus = $"Found {matchedChunks.Count} relevant sections";
+        StateHasChanged();
+        await Task.Delay(500);
+
+        var prompt = analysisService.CreateAnalysisPrompt(matchedChunks, string.Join(", ", terms), outputFormat);
+
+        if (Dashboard.ChatService != null)
+        {
+            analysisResult = await Dashboard.ChatService.SendMessageAsync(
+                message: prompt,
+                ragMode: false,
+                debugMode: false,
+                showPerformanceMetrics: false,
+                generationSettings: Dashboard.SettingsService.ToGenerationSettings()
+            );
+        }
+        else
+        {
+            analysisResult = $"Found {matchedChunks.Count} sections:\n\n";
+            foreach (var chunk in matchedChunks.Take(10))
+            {
+                analysisResult += $"[Section {chunk.Index + 1}]\n";
+                analysisResult += $"Matched: {string.Join(", ", chunk.MatchedTerms)}\n";
+                analysisResult += chunk.Text + "\n\n---\n\n";
+            }
+        }
+
+        isAnalyzing = false;
+        StateHasChanged();
+    }
+
+    private async Task CopyResults()
+    {
+        // TODO: Implement clipboard copy
+        await Task.CompletedTask;
+    }
+
+    private async Task DownloadResults()
+    {
+        // TODO: Implement download as TXT
+        await Task.CompletedTask;
+    }
+
+    private void AnalyzeAnother()
+    {
+        uploadedFile = null;
+        analysisResult = "";
+        errorMessage = "";
+        documentChunks.Clear();
+        matchedChunks.Clear();
+        showCustomSearch = false;
+    }
+
+    private string FormatFileSize(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB" };
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len = len / 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+}

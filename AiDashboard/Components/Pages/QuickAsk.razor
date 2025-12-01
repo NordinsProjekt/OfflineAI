@@ -1,0 +1,524 @@
+@page "/quick-ask"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@inject DashboardState Dashboard
+
+<PageTitle>Quick Ask - OfflineAI</PageTitle>
+
+<div class="oa-quick-ask-page">
+    <div class="oa-quick-header">
+        <button class="oa-back-button" @onclick="@(() => Navigation.NavigateTo("/"))">
+            ? Back to Home
+        </button>
+        <h1>? Quick Ask</h1>
+        <p class="oa-quick-subtitle">Ask anything, get instant answers from your local AI</p>
+    </div>
+
+    <div class="oa-quick-container">
+        <div class="oa-quick-card">
+            <div class="oa-conversation">
+                @if (messages.Count == 0)
+                {
+                    <div class="oa-welcome">
+                        <div class="oa-welcome-icon">??</div>
+                        <h2>Ready to help!</h2>
+                        <p>Ask me anything - I'm running locally on your machine.</p>
+                        <div class="oa-example-questions">
+                            <p class="oa-examples-label">Try asking:</p>
+                            <button class="oa-example-chip" @onclick="@(() => AskExample("Explain quantum computing in simple terms"))">
+                                Explain quantum computing
+                            </button>
+                            <button class="oa-example-chip" @onclick="@(() => AskExample("Write a haiku about programming"))">
+                                Write a haiku about programming
+                            </button>
+                            <button class="oa-example-chip" @onclick="@(() => AskExample("What are the benefits of local AI?"))">
+                                Benefits of local AI
+                            </button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="oa-messages-list">
+                        @foreach (var msg in messages)
+                        {
+                            <div class="oa-message @(msg.IsUser ? "user" : "ai")">
+                                <div class="oa-msg-avatar">
+                                    @(msg.IsUser ? "??" : "??")
+                                </div>
+                                <div class="oa-msg-content">
+                                    <div class="oa-msg-text">@msg.Text</div>
+                                    @if (!msg.IsUser && msg.Timestamp.HasValue)
+                                    {
+                                        <div class="oa-msg-meta">
+                                            @msg.Timestamp.Value.ToString("HH:mm:ss")
+                                            @if (msg.TokensPerSecond.HasValue)
+                                            {
+                                                <span class="oa-msg-speed">• @msg.TokensPerSecond.Value.ToString("F1") tokens/s</span>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        @if (isProcessing)
+                        {
+                            <div class="oa-message ai">
+                                <div class="oa-msg-avatar">??</div>
+                                <div class="oa-msg-content">
+                                    <div class="oa-typing-indicator">
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="oa-input-area">
+                <textarea class="oa-quick-input"
+                          placeholder="Type your question here..."
+                          @bind="currentQuestion"
+                          @onkeydown="HandleKeyPress"
+                          rows="3"
+                          disabled="@isProcessing"></textarea>
+                <button class="oa-send-button"
+                        @onclick="SendQuestion"
+                        disabled="@(string.IsNullOrWhiteSpace(currentQuestion) || isProcessing)">
+                    @if (isProcessing)
+                    {
+                        <span>?</span>
+                    }
+                    else
+                    {
+                        <span>Send ?</span>
+                    }
+                </button>
+            </div>
+
+            @if (messages.Count > 0)
+            {
+                <div class="oa-quick-actions">
+                    <button class="oa-action-btn" @onclick="ClearConversation">
+                        ??? Clear Chat
+                    </button>
+                    <button class="oa-action-btn" @onclick="ExportConversation">
+                        ?? Export
+                    </button>
+                </div>
+            }
+        </div>
+
+        <div class="oa-quick-info">
+            <div class="oa-info-badge">
+                <span class="oa-badge-icon">??</span>
+                <span>100% Private - Runs on your machine</span>
+            </div>
+            <div class="oa-info-badge">
+                <span class="oa-badge-icon">?</span>
+                <span>No setup required - Just ask!</span>
+            </div>
+            <div class="oa-info-badge">
+                <span class="oa-badge-icon">??</span>
+                <span>Model: @Dashboard.ModelService.CurrentModel</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .oa-quick-ask-page {
+        min-height: 100vh;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+    }
+
+    .oa-quick-header {
+        text-align: center;
+        color: white;
+        margin-bottom: 2rem;
+    }
+
+    .oa-back-button {
+        position: absolute;
+        top: 2rem;
+        left: 2rem;
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+        border: none;
+        padding: 0.75rem 1.5rem;
+        border-radius: 8px;
+        font-size: 1rem;
+        cursor: pointer;
+        backdrop-filter: blur(10px);
+        transition: all 0.2s ease;
+    }
+
+    .oa-back-button:hover {
+        background: rgba(255, 255, 255, 0.3);
+        transform: translateX(-4px);
+    }
+
+    .oa-quick-header h1 {
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .oa-quick-subtitle {
+        font-size: 1.2rem;
+        opacity: 0.9;
+    }
+
+    .oa-quick-container {
+        max-width: 900px;
+        margin: 0 auto;
+    }
+
+    .oa-quick-card {
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+        overflow: hidden;
+    }
+
+    .oa-conversation {
+        min-height: 400px;
+        max-height: 600px;
+        overflow-y: auto;
+        padding: 2rem;
+    }
+
+    .oa-welcome {
+        text-align: center;
+        padding: 3rem 1rem;
+    }
+
+    .oa-welcome-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+    }
+
+    .oa-welcome h2 {
+        color: #2d3748;
+        margin-bottom: 0.5rem;
+    }
+
+    .oa-welcome p {
+        color: #4a5568;
+        margin-bottom: 2rem;
+        font-size: 1.1rem;
+    }
+
+    .oa-example-questions {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .oa-examples-label {
+        color: #718096;
+        font-size: 0.875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.5rem;
+    }
+
+    .oa-example-chip {
+        background: #edf2ff;
+        color: #667eea;
+        border: none;
+        padding: 0.75rem 1.5rem;
+        border-radius: 24px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 0.95rem;
+        font-weight: 500;
+    }
+
+    .oa-example-chip:hover {
+        background: #667eea;
+        color: white;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    }
+
+    .oa-messages-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+
+    .oa-message {
+        display: flex;
+        gap: 1rem;
+        align-items: flex-start;
+    }
+
+    .oa-message.user {
+        flex-direction: row-reverse;
+    }
+
+    .oa-msg-avatar {
+        font-size: 2rem;
+        flex-shrink: 0;
+    }
+
+    .oa-msg-content {
+        flex: 1;
+        max-width: 70%;
+    }
+
+    .oa-message.user .oa-msg-content {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+    }
+
+    .oa-msg-text {
+        background: #f7fafc;
+        padding: 1rem 1.5rem;
+        border-radius: 16px;
+        color: #2d3748;
+        line-height: 1.6;
+    }
+
+    .oa-message.user .oa-msg-text {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+
+    .oa-msg-meta {
+        font-size: 0.75rem;
+        color: #718096;
+        margin-top: 0.5rem;
+        padding: 0 0.5rem;
+    }
+
+    .oa-msg-speed {
+        color: #48bb78;
+        font-weight: 600;
+    }
+
+    .oa-typing-indicator {
+        display: flex;
+        gap: 0.5rem;
+        padding: 1rem 1.5rem;
+        background: #f7fafc;
+        border-radius: 16px;
+    }
+
+    .oa-typing-indicator span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #cbd5e0;
+        animation: bounce 1.4s infinite;
+    }
+
+    .oa-typing-indicator span:nth-child(2) {
+        animation-delay: 0.2s;
+    }
+
+    .oa-typing-indicator span:nth-child(3) {
+        animation-delay: 0.4s;
+    }
+
+    @@keyframes bounce {
+        0%, 60%, 100% { transform: translateY(0); }
+        30% { transform: translateY(-10px); }
+    }
+
+    .oa-input-area {
+        border-top: 1px solid #e2e8f0;
+        padding: 1.5rem;
+        display: flex;
+        gap: 1rem;
+        background: #f7fafc;
+    }
+
+    .oa-quick-input {
+        flex: 1;
+        border: 2px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 1rem;
+        font-size: 1rem;
+        font-family: inherit;
+        resize: none;
+        transition: all 0.2s ease;
+    }
+
+    .oa-quick-input:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .oa-quick-input:disabled {
+        background: #edf2f7;
+        cursor: not-allowed;
+    }
+
+    .oa-send-button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 1rem 2rem;
+        border-radius: 12px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        white-space: nowrap;
+    }
+
+    .oa-send-button:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .oa-send-button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .oa-quick-actions {
+        display: flex;
+        gap: 1rem;
+        padding: 1rem 1.5rem;
+        border-top: 1px solid #e2e8f0;
+        background: #f7fafc;
+    }
+
+    .oa-action-btn {
+        background: white;
+        color: #4a5568;
+        border: 1px solid #e2e8f0;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        font-size: 0.875rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .oa-action-btn:hover {
+        border-color: #cbd5e0;
+        background: #edf2f7;
+    }
+
+    .oa-quick-info {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-top: 1.5rem;
+        justify-content: center;
+    }
+
+    .oa-info-badge {
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+        padding: 0.75rem 1.25rem;
+        border-radius: 24px;
+        backdrop-filter: blur(10px);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.95rem;
+    }
+
+    .oa-badge-icon {
+        font-size: 1.25rem;
+    }
+</style>
+
+@code {
+    private string currentQuestion = "";
+    private bool isProcessing = false;
+    private List<QuickMessage> messages = new();
+
+    private class QuickMessage
+    {
+        public bool IsUser { get; set; }
+        public string Text { get; set; } = "";
+        public DateTime? Timestamp { get; set; }
+        public double? TokensPerSecond { get; set; }
+    }
+
+    private async Task AskExample(string question)
+    {
+        currentQuestion = question;
+        await SendQuestion();
+    }
+
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey && !isProcessing)
+        {
+            await SendQuestion();
+        }
+    }
+
+    private async Task SendQuestion()
+    {
+        if (string.IsNullOrWhiteSpace(currentQuestion) || isProcessing)
+            return;
+
+        // Add user message
+        messages.Add(new QuickMessage
+        {
+            IsUser = true,
+            Text = currentQuestion,
+            Timestamp = DateTime.Now
+        });
+
+        var question = currentQuestion;
+        currentQuestion = "";
+        isProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            // TODO: Implement actual AI query with Dashboard.ChatService
+            // For now, simulate response
+            await Task.Delay(2000);
+
+            messages.Add(new QuickMessage
+            {
+                IsUser = false,
+                Text = $"This is a placeholder response to: \"{question}\"\n\nThe actual implementation will use Dashboard.ChatService.SendMessageAsync() with RAG mode disabled for direct LLM conversation.",
+                Timestamp = DateTime.Now,
+                TokensPerSecond = 15.3
+            });
+        }
+        catch (Exception ex)
+        {
+            messages.Add(new QuickMessage
+            {
+                IsUser = false,
+                Text = $"Error: {ex.Message}",
+                Timestamp = DateTime.Now
+            });
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ClearConversation()
+    {
+        messages.Clear();
+    }
+
+    private async Task ExportConversation()
+    {
+        // TODO: Implement export functionality
+        await Task.CompletedTask;
+    }
+}

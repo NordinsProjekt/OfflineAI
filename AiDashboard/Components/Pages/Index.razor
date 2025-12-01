@@ -1,0 +1,326 @@
+@page "/"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+
+<PageTitle>OfflineAI - Home</PageTitle>
+
+<div class="oa-home-landing">
+    <div class="oa-home-container">
+        <div class="oa-home-header">
+            <h1 class="oa-home-title">
+                <span class="oa-logo-icon">??</span>
+                OfflineAI
+            </h1>
+            <p class="oa-home-subtitle">Your Private AI Assistant Platform</p>
+            <p class="oa-home-description">
+                Choose your AI workflow below. All processing happens locally on your machine - 
+                your data never leaves your computer.
+            </p>
+        </div>
+
+        <div class="oa-home-grid">
+            <!-- Chat Dashboard -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/chat"))">
+                <div class="oa-card-icon">??</div>
+                <h2 class="oa-card-title">Chat Dashboard</h2>
+                <p class="oa-card-description">
+                    Interactive chat with RAG (Retrieval-Augmented Generation). 
+                    Talk to your AI with full control over settings, models, and knowledge base.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">RAG Mode</span>
+                    <span class="oa-feature-badge">Knowledge Base</span>
+                    <span class="oa-feature-badge">Model Settings</span>
+                </div>
+                <button class="oa-card-button">
+                    Open Chat Dashboard ?
+                </button>
+            </div>
+
+            <!-- Document Analysis -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/document-analysis"))">
+                <div class="oa-card-icon">??</div>
+                <h2 class="oa-card-title">Document Analysis</h2>
+                <p class="oa-card-description">
+                    Upload a document and get instant AI-powered analysis. 
+                    Extract insights, summaries, and answers from your documents.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">PDF Support</span>
+                    <span class="oa-feature-badge">Text Extraction</span>
+                    <span class="oa-feature-badge">Q&A</span>
+                </div>
+                <button class="oa-card-button">
+                    Analyze Document ?
+                </button>
+            </div>
+
+            <!-- Batch Processing -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/batch-processing"))">
+                <div class="oa-card-icon">??</div>
+                <h2 class="oa-card-title">Batch Processing</h2>
+                <p class="oa-card-description">
+                    Process multiple documents at once. Perfect for building knowledge bases 
+                    from document collections.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">Bulk Upload</span>
+                    <span class="oa-feature-badge">Auto-Vectorize</span>
+                    <span class="oa-feature-badge">Progress Tracking</span>
+                </div>
+                <button class="oa-card-button">
+                    Start Batch Job ?
+                </button>
+            </div>
+
+            <!-- Quick Ask -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/quick-ask"))">
+                <div class="oa-card-icon">?</div>
+                <h2 class="oa-card-title">Quick Ask</h2>
+                <p class="oa-card-description">
+                    Simple, fast AI queries without setup. Just ask a question and get an answer.
+                    No knowledge base, pure LLM conversation.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">No Setup</span>
+                    <span class="oa-feature-badge">Fast Response</span>
+                    <span class="oa-feature-badge">Direct Mode</span>
+                </div>
+                <button class="oa-card-button">
+                    Ask Question ?
+                </button>
+            </div>
+
+            <!-- Knowledge Base Builder -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/knowledge-builder"))">
+                <div class="oa-card-icon">??</div>
+                <h2 class="oa-card-title">Knowledge Base</h2>
+                <p class="oa-card-description">
+                    Manage your knowledge collections. View, edit, and organize your 
+                    vectorized documents and embeddings.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">Collections</span>
+                    <span class="oa-feature-badge">Search</span>
+                    <span class="oa-feature-badge">Manage</span>
+                </div>
+                <button class="oa-card-button">
+                    Manage Knowledge ?
+                </button>
+            </div>
+
+            <!-- Settings & Config -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/settings"))">
+                <div class="oa-card-icon">??</div>
+                <h2 class="oa-card-title">Settings</h2>
+                <p class="oa-card-description">
+                    Configure models, personalities, GPU settings, and advanced options. 
+                    Customize your AI experience.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">Models</span>
+                    <span class="oa-feature-badge">GPU Config</span>
+                    <span class="oa-feature-badge">Personalities</span>
+                </div>
+                <button class="oa-card-button">
+                    Open Settings ?
+                </button>
+            </div>
+        </div>
+
+        <div class="oa-home-footer">
+            <p class="oa-footer-text">
+                <span class="oa-footer-icon">??</span>
+                <strong>100% Private:</strong> All AI processing runs locally on your machine. 
+                No data is sent to external servers.
+            </p>
+            <p class="oa-footer-stats">
+                <span>Model: @ModelInfo</span>
+                <span class="separator">•</span>
+                <span>Status: @StatusInfo</span>
+            </p>
+        </div>
+    </div>
+</div>
+
+<style>
+    .oa-home-landing {
+        min-height: 100vh;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+    }
+
+    .oa-home-container {
+        max-width: 1400px;
+        width: 100%;
+    }
+
+    .oa-home-header {
+        text-align: center;
+        margin-bottom: 3rem;
+        color: white;
+    }
+
+    .oa-home-title {
+        font-size: 3.5rem;
+        font-weight: 800;
+        margin-bottom: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+    }
+
+    .oa-logo-icon {
+        font-size: 4rem;
+    }
+
+    .oa-home-subtitle {
+        font-size: 1.5rem;
+        margin-bottom: 1rem;
+        opacity: 0.95;
+    }
+
+    .oa-home-description {
+        font-size: 1.1rem;
+        opacity: 0.9;
+        max-width: 800px;
+        margin: 0 auto;
+        line-height: 1.6;
+    }
+
+    .oa-home-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+        gap: 2rem;
+        margin-bottom: 3rem;
+    }
+
+    .oa-home-card {
+        background: white;
+        border-radius: 16px;
+        padding: 2rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        display: flex;
+        flex-direction: column;
+    }
+
+    .oa-home-card:hover {
+        transform: translateY(-8px);
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
+    }
+
+    .oa-card-icon {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+    }
+
+    .oa-card-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin-bottom: 0.75rem;
+        color: #2d3748;
+    }
+
+    .oa-card-description {
+        font-size: 1rem;
+        color: #4a5568;
+        margin-bottom: 1.5rem;
+        line-height: 1.6;
+        flex-grow: 1;
+    }
+
+    .oa-card-features {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .oa-feature-badge {
+        background: #edf2f7;
+        color: #4a5568;
+        padding: 0.25rem 0.75rem;
+        border-radius: 12px;
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+
+    .oa-card-button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 0.875rem 1.5rem;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        width: 100%;
+    }
+
+    .oa-card-button:hover {
+        transform: scale(1.02);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .oa-home-footer {
+        text-align: center;
+        color: white;
+        padding: 2rem;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        backdrop-filter: blur(10px);
+    }
+
+    .oa-footer-text {
+        font-size: 1.1rem;
+        margin-bottom: 0.75rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+    }
+
+    .oa-footer-icon {
+        font-size: 1.5rem;
+    }
+
+    .oa-footer-stats {
+        font-size: 0.95rem;
+        opacity: 0.9;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem;
+    }
+
+    .separator {
+        opacity: 0.5;
+    }
+
+    @@media (max-width: 768px) {
+        .oa-home-title {
+            font-size: 2.5rem;
+        }
+
+        .oa-home-grid {
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+        }
+
+        .oa-home-card {
+            padding: 1.5rem;
+        }
+    }
+</style>
+
+@code {
+    private string ModelInfo => "TinyLlama 1.1B"; // TODO: Get from service
+    private string StatusInfo => "Ready"; // TODO: Get from service
+}

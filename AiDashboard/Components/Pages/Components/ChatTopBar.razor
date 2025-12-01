@@ -1,7 +1,13 @@
 @inject DashboardState Dashboard
+@inject NavigationManager Navigation
 @implements IDisposable
 
 <div class="oa-topbar">
+    <button class="oa-home-button" @onclick="NavigateToHome" title="Back to Home">
+        <span class="oa-home-icon">??</span>
+        <span class="oa-home-text">Home</span>
+    </button>
+    
     <div class="oa-badges">
         <span class="oa-badge @(Dashboard.SettingsService.RagMode ? "green" : "gray")">
             RAG: @(Dashboard.SettingsService.RagMode ? "ON" : "OFF")
@@ -18,6 +24,54 @@
     </div>
 </div>
 
+<style>
+    .oa-home-button {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+        font-size: 0.9rem;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        backdrop-filter: blur(10px);
+    }
+
+    .oa-home-button:hover {
+        background: rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.3);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .oa-home-button:active {
+        transform: translateY(0);
+    }
+
+    .oa-home-icon {
+        font-size: 1.1rem;
+    }
+
+    .oa-home-text {
+        font-family: inherit;
+    }
+
+    /* Hide text on very small screens */
+    @@media (max-width: 480px) {
+        .oa-home-text {
+            display: none;
+        }
+        
+        .oa-home-button {
+            padding: 0.5rem;
+        }
+    }
+</style>
+
 @code {
     protected override void OnInitialized()
     {
@@ -28,6 +82,11 @@
     private void HandleStateChanged()
     {
         _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void NavigateToHome()
+    {
+        Navigation.NavigateTo("/");
     }
 
     public void Dispose()

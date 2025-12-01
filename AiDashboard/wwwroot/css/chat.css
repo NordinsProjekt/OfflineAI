@@ -28,12 +28,17 @@
     background: linear-gradient(135deg, rgba(21, 26, 36, 0.6), rgba(15, 20, 25, 0.6));
     backdrop-filter: blur(10px);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
 }
 
 .oa-badges {
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
+    flex: 1;
 }
 
 .oa-badge {
