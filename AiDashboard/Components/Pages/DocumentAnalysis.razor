@@ -2,22 +2,27 @@
 @rendermode InteractiveServer
 @inject NavigationManager Navigation
 @inject DashboardState Dashboard
-@using AiDashboard.Services
+@inject IDocumentAnalysisService AnalysisService
+@inject IKursplanAnalysisService KursplanService
+@inject IDocumentTypeDetector TypeDetector
+@inject IJSRuntime JSRuntime
+
+@using System.IO
 
 <PageTitle>Document Analysis - OfflineAI</PageTitle>
 
 <div class="oa-workflow-page">
     <div class="oa-workflow-header">
         <button class="oa-back-button" @onclick="@(() => Navigation.NavigateTo("/"))">
-            ? Back to Home
+            &larr; Back to Home
         </button>
-        <h1>?? Document Analysis</h1>
-        <p class="oa-workflow-subtitle">Upload a document and get instant AI-powered insights</p>
+        <h1>Document Analysis</h1>
+        <p class="oa-workflow-subtitle">Upload a Swedish YH course plan and extract structured objectives</p>
     </div>
 
     <div class="oa-workflow-content">
         <div class="oa-upload-section">
-            <div class="oa-upload-area @(isDragOver ? "drag-over" : "")"
+            <div id="upload-area" class="oa-upload-area @(isDragOver ? "drag-over" : "")"
                  @ondrop="HandleDrop"
                  @ondragover:preventDefault
                  @ondragenter="HandleDragEnter"
@@ -26,73 +31,68 @@
                 @if (uploadedFile == null)
                 {
                     <div class="oa-upload-prompt">
-                        <div class="oa-upload-icon">??</div>
-                        <h2>Drop your document here</h2>
+                        <div class="oa-upload-icon">[+]</div>
+                        <h2>Drop your YH course plan here</h2>
                         <p>or click to browse</p>
-                        <InputFile OnChange="HandleFileSelected" class="oa-file-input" accept=".txt,.pdf,.doc,.docx" />
-                        <p class="oa-upload-hint">Supports: TXT, PDF, DOC, DOCX (Max 10MB)</p>
+                        <InputFile @ref="fileInput" id="file-input" OnChange="HandleFileSelected" class="oa-file-input" accept=".txt,.doc,.docx" />
+                        <p class="oa-upload-hint">Supports: TXT, DOCX (Max 10MB)</p>
                     </div>
                 }
                 else
                 {
                     <div class="oa-file-preview">
-                        <div class="oa-file-icon">??</div>
+                        <div class="oa-file-icon">[DOC]</div>
                         <div class="oa-file-info">
                             <h3>@uploadedFile.Name</h3>
                             <p>@FormatFileSize(uploadedFile.Size)</p>
                             @if (documentChunks.Count > 0)
                             {
-                                <p class="oa-chunk-info">?? Split into @documentChunks.Count chunk(s)</p>
+                                <p class="oa-chunk-info">Loaded successfully</p>
                             }
                         </div>
-                        <button class="oa-remove-file" @onclick="RemoveFile">?</button>
+                        <button class="oa-remove-file" @onclick="RemoveFile">X</button>
                     </div>
                 }
             </div>
 
+            @* Show detected document type *@
+            @if (detectedType != null && uploadedFile != null && string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="oa-type-detection">
+                    <div class="oa-type-badge @GetTypeClass(detectedType.Type)">
+                        <span class="oa-type-icon">@TypeDetector.GetTypeIcon(detectedType.Type)</span>
+                        <span class="oa-type-name">@TypeDetector.GetTypeName(detectedType.Type)</span>
+                        <span class="oa-type-confidence">@detectedType.Confidence% confidence</span>
+                    </div>
+                    <p class="oa-type-reason">@detectedType.Reason</p>
+                </div>
+            }
+
             @if (uploadedFile != null && !isAnalyzing && !string.IsNullOrEmpty(errorMessage))
             {
                 <div class="oa-error-message">
-                    <strong>?? Error:</strong> @errorMessage
+                    <strong>Error:</strong> @errorMessage
                 </div>
             }
 
             @if (uploadedFile != null && !isAnalyzing && string.IsNullOrEmpty(errorMessage))
             {
                 <div class="oa-analysis-options">
-                    <h3>What would you like to do?</h3>
+                    <h3>Vad vill du göra?</h3>
                     <div class="oa-option-grid">
-                        <button class="oa-option-button oa-featured" @onclick="@(() => AnalyzeDocument("kunskapsmal"))">
-                            <span class="oa-option-icon">??</span>
-                            <span class="oa-option-text">Extract Kunskapsmål</span>
-                            <span class="oa-option-badge">Specialized</span>
-                        </button>
-                        <button class="oa-option-button" @onclick="@(() => AnalyzeDocument("summarize"))">
-                            <span class="oa-option-icon">??</span>
-                            <span class="oa-option-text">Summarize</span>
-                        </button>
-                        <button class="oa-option-button" @onclick="@(() => AnalyzeDocument("extract"))">
-                            <span class="oa-option-icon">??</span>
-                            <span class="oa-option-text">Extract Key Points</span>
-                        </button>
-                        <button class="oa-option-button" @onclick="@(() => AnalyzeDocument("search"))">
-                            <span class="oa-option-icon">??</span>
-                            <span class="oa-option-text">Custom Search</span>
-                        </button>
-                    </div>
-
-                    @if (showCustomSearch)
-                    {
-                        <div class="oa-custom-search">
-                            <h4>Enter search terms (comma-separated):</h4>
-                            <input type="text" class="oa-search-input" placeholder="e.g., Kunskapsmål, Centralt innehåll, Förmågor" @bind="customSearchTerms" />
-                            <h4>Output format:</h4>
-                            <textarea class="oa-format-input" rows="5" placeholder="e.g., - [Term]: [Description]" @bind="outputFormat"></textarea>
-                            <button class="oa-search-button" @onclick="@(() => ExecuteCustomSearch())">
-                                ?? Search & Analyze
+                        @foreach (var action in recommendedActions)
+                        {
+                            <button class="oa-option-button @(action.IsRecommended ? "oa-featured" : "")" 
+                                    @onclick="@(() => AnalyzeDocument(action.Id))">
+                                <span class="oa-option-icon">@GetActionIcon(action.Id)</span>
+                                <span class="oa-option-text">@action.Label</span>
+                                @if (action.IsRecommended)
+                                {
+                                    <span class="oa-option-badge">Rekommenderad</span>
+                                }
                             </button>
-                        </div>
-                    }
+                        }
+                    </div>
                 </div>
             }
         </div>
@@ -106,17 +106,33 @@
                 {
                     <p>@analysisSubStatus</p>
                 }
+                @if (showAbortButton)
+                {
+                    <p style="margin-top: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">
+                        Analysering pågår... Du kan avbryta om det tar för lång tid.
+                    </p>
+                    <button class="oa-abort-button" @onclick="AbortAnalysis">
+                        Avbryt analys
+                    </button>
+                }
             </div>
         }
 
         @if (!string.IsNullOrEmpty(analysisResult))
         {
             <div class="oa-results-section">
-                <h2>Analysis Results</h2>
-                @if (matchedChunks.Count > 0)
+                <h2>Analysresultat</h2>
+                @if (kursplanResult != null)
                 {
-                    <div class="oa-match-summary">
-                        <p>Found <strong>@matchedChunks.Count</strong> relevant section(s) containing your search terms.</p>
+                    <div class="oa-kursplan-summary">
+                        <div class="oa-summary-stat">
+                            <span class="oa-stat-number">@kursplanResult.TotalItems</span>
+                            <span class="oa-stat-label">KURSMÅL TOTALT</span>
+                        </div>
+                        <div class="oa-summary-stat">
+                            <span class="oa-stat-number">@kursplanResult.Sections.Count</span>
+                            <span class="oa-stat-label">SEKTIONER</span>
+                        </div>
                     </div>
                 }
                 <div class="oa-result-box">
@@ -124,13 +140,13 @@
                 </div>
                 <div class="oa-result-actions">
                     <button class="oa-action-button" @onclick="CopyResults">
-                        ?? Copy Results
+                        Kopiera
                     </button>
                     <button class="oa-action-button" @onclick="DownloadResults">
-                        ?? Download
+                        Ladda ner
                     </button>
                     <button class="oa-action-button" @onclick="AnalyzeAnother">
-                        ?? Analyze Another
+                        Analysera annat
                     </button>
                 </div>
             </div>
@@ -138,414 +154,49 @@
     </div>
 </div>
 
-<style>
-    .oa-workflow-page {
-        min-height: 100vh;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-    }
-
-    .oa-workflow-header {
-        text-align: center;
-        color: white;
-        margin-bottom: 2rem;
-    }
-
-    .oa-back-button {
-        position: absolute;
-        top: 2rem;
-        left: 2rem;
-        background: rgba(255, 255, 255, 0.2);
-        color: white;
-        border: none;
-        padding: 0.75rem 1.5rem;
-        border-radius: 8px;
-        font-size: 1rem;
-        cursor: pointer;
-        backdrop-filter: blur(10px);
-        transition: all 0.2s ease;
-    }
-
-    .oa-back-button:hover {
-        background: rgba(255, 255, 255, 0.3);
-        transform: translateX(-4px);
-    }
-
-    .oa-workflow-header h1 {
-        font-size: 2.5rem;
-        margin-bottom: 0.5rem;
-    }
-
-    .oa-workflow-subtitle {
-        font-size: 1.2rem;
-        opacity: 0.9;
-    }
-
-    .oa-workflow-content {
-        max-width: 900px;
-        margin: 0 auto;
-    }
-
-    .oa-upload-section {
-        background: white;
-        border-radius: 16px;
-        padding: 2rem;
-        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-    }
-
-    .oa-upload-area {
-        border: 3px dashed #cbd5e0;
-        border-radius: 12px;
-        padding: 3rem;
-        text-align: center;
-        transition: all 0.3s ease;
-        position: relative;
-        background: #f7fafc;
-    }
-
-    .oa-upload-area.drag-over {
-        border-color: #667eea;
-        background: #edf2ff;
-        transform: scale(1.02);
-    }
-
-    .oa-upload-prompt {
-        position: relative;
-    }
-
-    .oa-upload-icon {
-        font-size: 4rem;
-        margin-bottom: 1rem;
-    }
-
-    .oa-upload-prompt h2 {
-        font-size: 1.5rem;
-        color: #2d3748;
-        margin-bottom: 0.5rem;
-    }
-
-    .oa-upload-prompt p {
-        color: #4a5568;
-        margin-bottom: 1rem;
-    }
-
-    .oa-file-input {
-        position: absolute;
-        inset: 0;
-        opacity: 0;
-        cursor: pointer;
-    }
-
-    .oa-upload-hint {
-        font-size: 0.875rem;
-        color: #718096;
-        margin-top: 1rem;
-    }
-
-    .oa-file-preview {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        padding: 1rem;
-        background: white;
-        border-radius: 8px;
-    }
-
-    .oa-file-icon {
-        font-size: 3rem;
-    }
-
-    .oa-file-info {
-        flex: 1;
-        text-align: left;
-    }
-
-    .oa-file-info h3 {
-        color: #2d3748;
-        margin: 0;
-        font-size: 1.1rem;
-    }
-
-    .oa-file-info p {
-        color: #718096;
-        margin: 0.25rem 0 0 0;
-        font-size: 0.875rem;
-    }
-
-    .oa-remove-file {
-        background: #fc8181;
-        color: white;
-        border: none;
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
-        cursor: pointer;
-        font-size: 1.2rem;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s ease;
-    }
-
-    .oa-remove-file:hover {
-        background: #f56565;
-        transform: scale(1.1);
-    }
-
-    .oa-analysis-options {
-        margin-top: 2rem;
-    }
-
-    .oa-analysis-options h3 {
-        color: #2d3748;
-        margin-bottom: 1rem;
-    }
-
-    .oa-option-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 1rem;
-    }
-
-    .oa-option-button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 1.5rem;
-        border-radius: 12px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .oa-option-button:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
-    }
-
-    .oa-option-icon {
-        font-size: 2rem;
-    }
-
-    .oa-option-text {
-        font-size: 1rem;
-        font-weight: 600;
-    }
-
-    .oa-analyzing {
-        background: white;
-        border-radius: 16px;
-        padding: 3rem;
-        text-align: center;
-        margin-top: 2rem;
-        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-    }
-
-    .oa-spinner {
-        width: 60px;
-        height: 60px;
-        border: 4px solid #e2e8f0;
-        border-top-color: #667eea;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-        margin: 0 auto 1rem;
-    }
-
-    @@keyframes spin {
-        to { transform: rotate(360deg); }
-    }
-
-    .oa-analyzing h3 {
-        color: #2d3748;
-        margin-bottom: 0.5rem;
-    }
-
-    .oa-analyzing p {
-        color: #718096;
-    }
-
-    .oa-results-section {
-        background: white;
-        border-radius: 16px;
-        padding: 2rem;
-        margin-top: 2rem;
-        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-    }
-
-    .oa-results-section h2 {
-        color: #2d3748;
-        margin-bottom: 1rem;
-    }
-
-    .oa-result-box {
-        background: #f7fafc;
-        border-radius: 8px;
-        padding: 1.5rem;
-        margin-bottom: 1rem;
-    }
-
-    .oa-result-box pre {
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        margin: 0;
-        color: #2d3748;
-        line-height: 1.6;
-        font-family: inherit;
-    }
-
-    .oa-result-actions {
-        display: flex;
-        gap: 1rem;
-    }
-
-    .oa-action-button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 0.875rem 1.5rem;
-        border-radius: 8px;
-        font-size: 1rem;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.2s ease;
-    }
-
-    .oa-action-button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-    }
-
-    .oa-chunk-info {
-        color: #667eea !important;
-        font-weight: 600;
-        font-size: 0.875rem;
-    }
-
-    .oa-error-message {
-        background: #fee;
-        border: 1px solid #fcc;
-        border-radius: 8px;
-        padding: 1rem;
-        margin-top: 1rem;
-        color: #c33;
-    }
-
-    .oa-featured {
-        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-        border: 2px solid #fbbf24;
-        position: relative;
-    }
-
-    .oa-option-badge {
-        position: absolute;
-        top: 0.5rem;
-        right: 0.5rem;
-        background: rgba(255, 255, 255, 0.9);
-        color: #d97706;
-        font-size: 0.7rem;
-        padding: 0.25rem 0.5rem;
-        border-radius: 4px;
-        font-weight: 700;
-        text-transform: uppercase;
-    }
-
-    .oa-custom-search {
-        margin-top: 2rem;
-        padding: 1.5rem;
-        background: #f7fafc;
-        border-radius: 12px;
-        border: 2px dashed #cbd5e0;
-    }
-
-    .oa-custom-search h4 {
-        color: #2d3748;
-        margin-bottom: 0.5rem;
-        font-size: 0.95rem;
-    }
-
-    .oa-search-input,
-    .oa-format-input {
-        width: 100%;
-        padding: 0.75rem;
-        border: 1px solid #cbd5e0;
-        border-radius: 8px;
-        font-size: 0.95rem;
-        margin-bottom: 1rem;
-        font-family: inherit;
-    }
-
-    .oa-search-input:focus,
-    .oa-format-input:focus {
-        outline: none;
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    }
-
-    .oa-search-button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 0.875rem 1.5rem;
-        border-radius: 8px;
-        font-size: 1rem;
-        font-weight: 600;
-        cursor: pointer;
-        width: 100%;
-        transition: all 0.2s ease;
-    }
-
-    .oa-search-button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-    }
-
-    .oa-match-summary {
-        background: #edf2ff;
-        border-left: 4px solid #667eea;
-        padding: 1rem;
-        margin-bottom: 1rem;
-        border-radius: 4px;
-    }
-
-    .oa-match-summary p {
-        margin: 0;
-        color: #2d3748;
-    }
-</style>
-
 @code {
     private IBrowserFile? uploadedFile;
+    private InputFile? fileInput;
     private bool isDragOver;
     private bool isAnalyzing;
     private string analysisStatus = "";
     private string analysisSubStatus = "";
     private string analysisResult = "";
     private string errorMessage = "";
-    private bool showCustomSearch = false;
-    private string customSearchTerms = "Kunskapsmål, Centralt innehåll, Förmågor";
-    private string outputFormat = "- [Category]: [Description]\n- Skills: [List of skills]\n- Content: [Key content areas]";
-
-    private DocumentAnalysisService analysisService = new();
-    private List<DocumentChunk> documentChunks = new();
-    private List<DocumentChunk> matchedChunks = new();
+    
+    private List<DocumentChunk> documentChunks = [];
     private string fullDocumentText = "";
+    private DocumentTypeResult? detectedType;
+    private List<AnalysisAction> recommendedActions = [];
+    private KursplanResult? kursplanResult;
 
-    private void HandleDragEnter()
+    private CancellationTokenSource? analysisCancellationTokenSource;
+    private DateTime analysisStartTime;
+    private bool showAbortButton = false;
+    private const int MaxAnalysisTimeMs = 300000; // 5 minutes
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        isDragOver = true;
+        if (firstRender)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("documentAnalysis.initializeDragDrop", "upload-area", "file-input");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to initialize drag-drop: {ex.Message}");
+            }
+        }
     }
 
-    private void HandleDragLeave()
-    {
-        isDragOver = false;
-    }
-
+    private void HandleDragEnter() => isDragOver = true;
+    private void HandleDragLeave() => isDragOver = false;
+    
     private async Task HandleDrop()
     {
         isDragOver = false;
+        StateHasChanged();
     }
 
     private async Task HandleFileSelected(InputFileChangeEventArgs e)
@@ -553,33 +204,126 @@
         uploadedFile = e.File;
         errorMessage = "";
         documentChunks.Clear();
-        matchedChunks.Clear();
         analysisResult = "";
+        kursplanResult = null;
+        detectedType = null;
+        recommendedActions.Clear();
         
-        // Extract text immediately after selection
-        await ExtractDocumentText();
+        await ExtractDocumentTextImmediately(e.File);
         StateHasChanged();
     }
 
-    private async Task ExtractDocumentText()
+    private async Task ExtractDocumentTextImmediately(IBrowserFile file)
     {
-        if (uploadedFile == null) return;
+        if (file == null) return;
 
-        analysisStatus = $"Reading {uploadedFile.Name}...";
+        analysisStatus = $"Läser {file.Name}...";
         
-        var (success, text, error) = await analysisService.ExtractTextAsync(uploadedFile);
-        
-        if (!success)
+        try
         {
-            errorMessage = error;
-            fullDocumentText = "";
-            return;
-        }
+            var extension = Path.GetExtension(file.Name).ToLowerInvariant();
+            
+            if (extension == ".txt")
+            {
+                using var stream = file.OpenReadStream(maxAllowedSize: 10485760);
+                using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+                fullDocumentText = await reader.ReadToEndAsync();
+            }
+            else if (extension == ".docx" || extension == ".doc")
+            {
+                using var memoryStream = new MemoryStream();
+                await file.OpenReadStream(maxAllowedSize: 10485760).CopyToAsync(memoryStream);
+                memoryStream.Position = 0;
+                
+                var (success, text, error) = ExtractTextFromDocxStream(memoryStream);
+                if (!success)
+                {
+                    errorMessage = error;
+                    fullDocumentText = "";
+                    return;
+                }
+                fullDocumentText = text;
+            }
+            else
+            {
+                errorMessage = $"Filtypen {extension} stöds inte. Använd .txt eller .docx";
+                fullDocumentText = "";
+                return;
+            }
 
-        fullDocumentText = text;
-        
-        // Split into chunks
-        documentChunks = analysisService.SplitIntoChunks(fullDocumentText);
+            if (string.IsNullOrWhiteSpace(fullDocumentText))
+            {
+                errorMessage = "Kunde inte extrahera text från filen.";
+                return;
+            }
+
+            documentChunks = AnalysisService.SplitIntoChunks(fullDocumentText);
+            detectedType = TypeDetector.DetectType(fullDocumentText);
+            recommendedActions = TypeDetector.GetRecommendedActions(detectedType.Type);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Fel vid läsning av fil: {ex.Message}";
+            fullDocumentText = "";
+        }
+    }
+
+    private (bool Success, string Text, string Error) ExtractTextFromDocxStream(MemoryStream stream)
+    {
+        try
+        {
+            using var doc = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(stream, false);
+            
+            if (doc.MainDocumentPart == null)
+            {
+                return (false, "", "Ogiltig DOCX-fil: Ingen dokumentdel hittades");
+            }
+
+            var textBuilder = new System.Text.StringBuilder();
+            var body = doc.MainDocumentPart.Document.Body;
+            
+            if (body != null)
+            {
+                foreach (var paragraph in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>())
+                {
+                    var text = paragraph.InnerText;
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        textBuilder.AppendLine(text);
+                    }
+                }
+
+                foreach (var table in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Table>())
+                {
+                    foreach (var row in table.Elements<DocumentFormat.OpenXml.Wordprocessing.TableRow>())
+                    {
+                        var rowTexts = new List<string>();
+                        foreach (var cell in row.Elements<DocumentFormat.OpenXml.Wordprocessing.TableCell>())
+                        {
+                            rowTexts.Add(cell.InnerText);
+                        }
+                        if (rowTexts.Count > 0)
+                        {
+                            textBuilder.AppendLine(string.Join("\t", rowTexts));
+                        }
+                    }
+                    textBuilder.AppendLine();
+                }
+            }
+
+            var extractedText = textBuilder.ToString().Trim();
+            
+            if (string.IsNullOrWhiteSpace(extractedText))
+            {
+                return (false, "", "Ingen textinnehåll hittades i DOCX-filen");
+            }
+
+            return (true, extractedText, "");
+        }
+        catch (Exception ex)
+        {
+            return (false, "", $"Fel vid läsning av DOCX: {ex.Message}");
+        }
     }
 
     private void RemoveFile()
@@ -588,221 +332,172 @@
         analysisResult = "";
         errorMessage = "";
         documentChunks.Clear();
-        matchedChunks.Clear();
         fullDocumentText = "";
-        showCustomSearch = false;
+        detectedType = null;
+        recommendedActions.Clear();
+        kursplanResult = null;
     }
 
     private async Task AnalyzeDocument(string analysisType)
     {
-        if (analysisType == "search")
-        {
-            showCustomSearch = !showCustomSearch;
-            return;
-        }
-
         if (string.IsNullOrEmpty(fullDocumentText))
         {
-            errorMessage = "No document text available. Please upload a TXT file (PDF/DOCX support coming soon).";
+            errorMessage = "Ingen dokumenttext tillgänglig. Ladda upp en fil.";
             return;
         }
 
         isAnalyzing = true;
-        analysisStatus = "Analyzing document...";
+        analysisStatus = "Analyserar dokument...";
         analysisSubStatus = "";
+        kursplanResult = null;
+        showAbortButton = false;
+        analysisStartTime = DateTime.UtcNow;
+        
+        analysisCancellationTokenSource = new CancellationTokenSource();
+        analysisCancellationTokenSource.CancelAfter(MaxAnalysisTimeMs);
+
         StateHasChanged();
 
-        await Task.Delay(500);
+        _ = Task.Delay(3000).ContinueWith(_ =>
+        {
+            if (isAnalyzing)
+            {
+                showAbortButton = true;
+                StateHasChanged();
+            }
+        });
 
         try
         {
-            if (analysisType == "kunskapsmal")
-            {
-                await AnalyzeKunskapsmal();
-            }
-            else
-            {
-                await AnalyzeGeneral(analysisType);
-            }
+            await AnalyzeKursmal();
+        }
+        catch (OperationCanceledException)
+        {
+            analysisResult = "Analys avbruten av användaren.";
+            analysisStatus = "Avbryten";
+            analysisSubStatus = "";
         }
         catch (Exception ex)
         {
-            analysisResult = $"Error during analysis: {ex.Message}";
+            analysisResult = $"Fel vid analys: {ex.Message}";
         }
         finally
         {
             isAnalyzing = false;
+            showAbortButton = false;
+            analysisCancellationTokenSource?.Dispose();
+            analysisCancellationTokenSource = null;
             StateHasChanged();
         }
     }
 
-    private async Task AnalyzeKunskapsmal()
+    private void AbortAnalysis()
     {
-        analysisStatus = "Searching for Kunskapsmål...";
-        StateHasChanged();
-        await Task.Delay(500);
-
-        // Search for Swedish educational terms
-        string[] terms = ["Kunskapsmål", "Kunskapskrav", "Centralt innehåll", "Förmågor", "Betygskriterier"];
-        matchedChunks = analysisService.SearchMultipleTerms(documentChunks, terms);
-
-        if (matchedChunks.Count == 0)
-        {
-            analysisResult = "No sections containing Swedish educational terms (Kunskapsmål, etc.) were found in the document.";
-            return;
-        }
-
-        analysisStatus = "Formatting results with AI...";
-        analysisSubStatus = $"Found {matchedChunks.Count} relevant sections";
-        StateHasChanged();
-        await Task.Delay(500);
-
-        var format = @"Format the extracted learning objectives as follows:
-# Kunskapsmål (Learning Objectives)
-
-## Subject/Course:
-[Extract subject/course name]
-
-## Kunskapskrav (Knowledge Requirements):
-- [Requirement 1]
-- [Requirement 2]
-
-## Centralt innehåll (Core Content):
-- [Content area 1]
-- [Content area 2]
-
-## Förmågor (Abilities/Skills):
-- [Ability 1]
-- [Ability 2]
-
-## Assessment Criteria:
-[Extract grading criteria if present]";
-
-        var prompt = analysisService.CreateAnalysisPrompt(matchedChunks, "Kunskapsmål", format);
-
-        // Send to AI
-        if (Dashboard.ChatService != null)
-        {
-            var response = await Dashboard.ChatService.SendMessageAsync(
-                message: prompt,
-                ragMode: false,
-                debugMode: false,
-                showPerformanceMetrics: false,
-                generationSettings: Dashboard.SettingsService.ToGenerationSettings()
-            );
-            
-            analysisResult = response;
-        }
-        else
-        {
-            // Fallback: show raw matched chunks
-            analysisResult = $"Found {matchedChunks.Count} sections with educational terms:\n\n";
-            foreach (var chunk in matchedChunks.Take(5))
-            {
-                analysisResult += $"[Section {chunk.Index + 1}] (Relevance: {chunk.RelevanceScore})\n";
-                analysisResult += $"Matched terms: {string.Join(", ", chunk.MatchedTerms)}\n";
-                analysisResult += chunk.Text + "\n\n---\n\n";
-            }
-        }
-    }
-
-    private async Task AnalyzeGeneral(string analysisType)
-    {
-        analysisStatus = $"Performing {analysisType} analysis...";
-        StateHasChanged();
-
-        var prompt = analysisType switch
-        {
-            "summarize" => $"Summarize the following document concisely:\n\n{fullDocumentText}",
-            "extract" => $"Extract the key points from this document in bullet format:\n\n{fullDocumentText}",
-            _ => $"Analyze this document:\n\n{fullDocumentText}"
-        };
-
-        if (Dashboard.ChatService != null)
-        {
-            analysisResult = await Dashboard.ChatService.SendMessageAsync(
-                message: prompt,
-                ragMode: false,
-                debugMode: false,
-                showPerformanceMetrics: false,
-                generationSettings: Dashboard.SettingsService.ToGenerationSettings()
-            );
-        }
-        else
-        {
-            analysisResult = $"[{analysisType.ToUpper()}]\n\nChat service not available. Please ensure the dashboard is properly initialized.";
-        }
-    }
-
-    private async Task ExecuteCustomSearch()
-    {
-        if (string.IsNullOrWhiteSpace(customSearchTerms))
-        {
-            errorMessage = "Please enter at least one search term.";
-            return;
-        }
-
-        isAnalyzing = true;
-        analysisStatus = "Searching document...";
-        StateHasChanged();
-        await Task.Delay(500);
-
-        var terms = customSearchTerms.Split(',', StringSplitOptions.RemoveEmptyEntries)
-            .Select(t => t.Trim())
-            .Where(t => !string.IsNullOrWhiteSpace(t))
-            .ToArray();
-
-        matchedChunks = analysisService.SearchMultipleTerms(documentChunks, terms);
-
-        if (matchedChunks.Count == 0)
-        {
-            analysisResult = $"No sections containing the search terms ({string.Join(", ", terms)}) were found.";
-            isAnalyzing = false;
-            return;
-        }
-
-        analysisStatus = "Analyzing matched sections...";
-        analysisSubStatus = $"Found {matchedChunks.Count} relevant sections";
-        StateHasChanged();
-        await Task.Delay(500);
-
-        var prompt = analysisService.CreateAnalysisPrompt(matchedChunks, string.Join(", ", terms), outputFormat);
-
-        if (Dashboard.ChatService != null)
-        {
-            analysisResult = await Dashboard.ChatService.SendMessageAsync(
-                message: prompt,
-                ragMode: false,
-                debugMode: false,
-                showPerformanceMetrics: false,
-                generationSettings: Dashboard.SettingsService.ToGenerationSettings()
-            );
-        }
-        else
-        {
-            analysisResult = $"Found {matchedChunks.Count} sections:\n\n";
-            foreach (var chunk in matchedChunks.Take(10))
-            {
-                analysisResult += $"[Section {chunk.Index + 1}]\n";
-                analysisResult += $"Matched: {string.Join(", ", chunk.MatchedTerms)}\n";
-                analysisResult += chunk.Text + "\n\n---\n\n";
-            }
-        }
-
+        analysisCancellationTokenSource?.Cancel();
         isAnalyzing = false;
+        showAbortButton = false;
+        analysisStatus = "";
+        analysisSubStatus = "";
         StateHasChanged();
+    }
+
+    private async Task AnalyzeKursmal()
+    {
+        analysisStatus = "Extraherar kursmål...";
+        StateHasChanged();
+        await Task.Delay(300);
+
+        var docType = detectedType?.Type ?? DocumentTypeDetector.DocumentType.SwedishYhKursplan;
+        kursplanResult = KursplanService.ExtractKursmal(fullDocumentText, docType);
+
+        if (kursplanResult.TotalItems > 0)
+        {
+            analysisStatus = $"Hittade {kursplanResult.TotalItems} kursmål i {kursplanResult.Sections.Count} sektioner";
+            analysisSubStatus = "";
+            StateHasChanged();
+            await Task.Delay(200);
+            
+            // Use FormatResult for clean output matching your requirements
+            analysisResult = KursplanService.FormatResult(kursplanResult);
+        }
+        else
+        {
+            analysisStatus = "Inga strukturerade mål hittades";
+            analysisResult = "Kunde inte hitta Kunskaper, Färdigheter eller Kompetenser i dokumentet.\n\n";
+            analysisResult += "Förväntad struktur:\n#Kunskaper\n#Färdigheter\n#Kompetenser\n\n";
+            analysisResult += "Råtext (första 1000 tecken):\n\n";
+            analysisResult += fullDocumentText.Length > 1000 
+                ? fullDocumentText.Substring(0, 1000) + "..." 
+                : fullDocumentText;
+        }
+    }
+
+    private string GetTypeClass(DocumentTypeDetector.DocumentType type)
+    {
+        return type switch
+        {
+            DocumentTypeDetector.DocumentType.SwedishYhKursplan => "kursplan yh",
+            DocumentTypeDetector.DocumentType.SwedishSkolverketKursplan => "kursplan skolverket",
+            DocumentTypeDetector.DocumentType.SwedishKursplan => "kursplan",
+            _ => ""
+        };
+    }
+
+    private string GetActionIcon(string actionId)
+    {
+        return actionId switch
+        {
+            "kunskapsmal" => "[K]",
+            "centralinnehall" => "[CI]",
+            "amnesmal" => "[A]",
+            "betygskriterier" => "[B]",
+            _ => "[?]"
+        };
     }
 
     private async Task CopyResults()
     {
-        // TODO: Implement clipboard copy
-        await Task.CompletedTask;
+        if (string.IsNullOrEmpty(analysisResult))
+        {
+            errorMessage = "Ingen innehåll att kopiera.";
+            return;
+        }
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", analysisResult);
+            var originalResult = analysisResult;
+            analysisResult = "? Kopierad till urklipp!";
+            StateHasChanged();
+            await Task.Delay(2000);
+            analysisResult = originalResult;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Kunde inte kopiera: {ex.Message}";
+        }
     }
 
     private async Task DownloadResults()
     {
-        // TODO: Implement download as TXT
-        await Task.CompletedTask;
+        if (string.IsNullOrEmpty(analysisResult))
+        {
+            errorMessage = "Ingen innehåll att ladda ner.";
+            return;
+        }
+
+        try
+        {
+            var fileName = $"kursmal_{DateTime.Now:yyyyMMdd_HHmmss}.txt";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(analysisResult);
+            
+            await JSRuntime.InvokeVoidAsync("documentAnalysis.downloadFile", fileName, Convert.ToBase64String(bytes));
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Kunde inte ladda ner: {ex.Message}";
+        }
     }
 
     private void AnalyzeAnother()
@@ -811,19 +506,20 @@
         analysisResult = "";
         errorMessage = "";
         documentChunks.Clear();
-        matchedChunks.Clear();
-        showCustomSearch = false;
+        detectedType = null;
+        recommendedActions.Clear();
+        kursplanResult = null;
     }
 
     private string FormatFileSize(long bytes)
     {
-        string[] sizes = { "B", "KB", "MB", "GB" };
+        string[] sizes = ["B", "KB", "MB", "GB"];
         double len = bytes;
         int order = 0;
         while (len >= 1024 && order < sizes.Length - 1)
         {
             order++;
-            len = len / 1024;
+            len /= 1024;
         }
         return $"{len:0.##} {sizes[order]}";
     }

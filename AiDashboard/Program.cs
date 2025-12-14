@@ -32,6 +32,11 @@ public class Program
         // Register language services for stop words filtering
         builder.Services.AddSingleton<ILanguageStopWordsService, LanguageStopWordsService>();
 
+        // Register document analysis services
+        builder.Services.AddScoped<IDocumentAnalysisService, DocumentAnalysisService>();
+        builder.Services.AddScoped<IKursplanAnalysisService, KursplanAnalysisService>();
+        builder.Services.AddScoped<IDocumentTypeDetector, DocumentTypeDetector>();
+
         // Read configuration for LLM
         var llmExe = appConfig.Llm?.ExecutablePath ?? builder.Configuration["AppConfiguration:Llm:ExecutablePath"] ?? string.Empty;
         var llmModel = appConfig.Llm?.ModelPath ?? builder.Configuration["AppConfiguration:Llm:ModelPath"] ?? string.Empty;

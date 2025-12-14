@@ -7,7 +7,7 @@ namespace AiDashboard.Services;
 /// Service for analyzing documents with AI.
 /// Supports PDF, DOCX, and TXT files with automatic chunking and semantic search.
 /// </summary>
-public class DocumentAnalysisService
+public class DocumentAnalysisService : IDocumentAnalysisService
 {
     private const int MaxChunkSize = 4000; // Characters per chunk
     private const int ChunkOverlap = 200; // Overlap between chunks for context

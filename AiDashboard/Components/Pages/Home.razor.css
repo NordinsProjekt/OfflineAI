@@ -3,10 +3,9 @@
     position: relative;
     display: grid;
     grid-template-columns: 320px 1fr;
-    height: 100vh;
+    min-height: 100vh;
     background: linear-gradient(135deg, #0a0e27 0%, #0d1117 50%, #0f1419 100%);
     color: var(--text-primary);
-    overflow: hidden;
 }
 
 .oa-dashboard.collapsed {
