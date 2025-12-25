@@ -146,20 +146,22 @@ public class PersistentLlmProcess : IPersistentLlmProcess
         var output = new StringBuilder();
         var error = new StringBuilder();
         var assistantStarted = false;
+        var endMarkerDetected = false; // Flag to signal end of generation
         var lastOutputTime = DateTime.UtcNow;
         var processStartTime = DateTime.UtcNow;
         var outputLock = new object();
         var fullOutput = new StringBuilder(); // Keep track of all output for debugging
 
         // Calculate pause timeout based on overall timeout
-        // For large timeouts (>60s), allow longer pauses (up to 10s)
-        // For small timeouts (<30s), keep short pauses (3s)
+        // For 5-minute timeouts, use 40-second pause detection
+        // For shorter timeouts, scale proportionally
         var pauseTimeoutMs = _timeoutMs switch
         {
-            >= 120000 => 10000,  // 2+ minutes -> 10 second pause
-            >= 60000 => 7000,    // 1+ minute -> 7 second pause
-            >= 30000 => 5000,    // 30+ seconds -> 5 second pause
-            _ => 3000            // < 30 seconds -> 3 second pause
+            >= 180000 => 40000,  // 3+ minutes -> 40 second pause
+            >= 120000 => 30000,  // 2+ minutes -> 30 second pause
+            >= 60000 => 20000,   // 1+ minute -> 20 second pause
+            >= 30000 => 15000,   // 30+ seconds -> 15 second pause
+            _ => 10000           // < 30 seconds -> 10 second pause
         };
 
         process.OutputDataReceived += (sender, e) =>
@@ -199,9 +201,32 @@ public class PersistentLlmProcess : IPersistentLlmProcess
                 }
                 else
                 {
-                    // Stream output to console as it arrives
-                    Console.Write(e.Data);
-                    output.Append(e.Data); // Use Append instead of AppendLine to preserve formatting
+                    // Check if this chunk contains an end marker
+                    foreach (var endMarker in LlmOutputPatterns.EndMarkers)
+                    {
+                        if (e.Data.Contains(endMarker))
+                        {
+                            // Extract text before the end marker
+                            var endIndex = e.Data.IndexOf(endMarker, StringComparison.Ordinal);
+                            if (endIndex > 0)
+                            {
+                                var finalText = e.Data.Substring(0, endIndex);
+                                Console.Write(finalText);
+                                output.Append(finalText);
+                            }
+                            Console.WriteLine($"\n[End marker detected: {endMarker}]");
+                            endMarkerDetected = true;
+                            break;
+                        }
+                    }
+                    
+                    // Only append if no end marker detected
+                    if (!endMarkerDetected)
+                    {
+                        // Stream output to console as it arrives
+                        Console.Write(e.Data);
+                        output.Append(e.Data); // Use Append instead of AppendLine to preserve formatting
+                    }
                 }
             }
         };
@@ -231,6 +256,21 @@ public class PersistentLlmProcess : IPersistentLlmProcess
             
             var timeSinceOutput = (DateTime.UtcNow - lastOutputTime).TotalMilliseconds;
             var totalTime = (DateTime.UtcNow - processStartTime).TotalMilliseconds;
+            
+            // Check if end marker was detected
+            if (endMarkerDetected)
+            {
+                Console.WriteLine($"\n[Generation complete - end marker found]");
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill();
+                    }
+                }
+                catch { /* Process may have already exited */ }
+                break;
+            }
             
             // If we've started getting assistant output and there's a pause, consider done
             if (assistantStarted && timeSinceOutput > pauseTimeoutMs)

@@ -1,0 +1,283 @@
+@page "/webscraper"
+@using AiDashboard.Services
+@inject IWebScraperService WebScraperService
+@rendermode InteractiveServer
+
+<PageTitle>Web Scraper Tool</PageTitle>
+
+<LlmLoadingIndicator 
+    IsLoading="@isLoading" 
+    Title="@loadingTitle"
+    Subtitle="@loadingSubtitle"
+    ProgressPercentage="@progressPercentage"
+    ElapsedTime="@elapsedTime"
+    EstimatedTimeRemaining="@estimatedTimeRemaining"
+    ShowCancelButton="true"
+    OnCancel="@CancelScraping" />
+
+<div class="web-scraper-container">
+    <h3>Web Scraper for LLM Context</h3>
+    <p class="description">Enter a URL to scrape web content and format it as context for the LLM.</p>
+
+    <div class="scraper-form">
+        <div class="input-group">
+            <label for="url-input">URL:</label>
+            <input 
+                id="url-input"
+                type="text" 
+                @bind="urlInput" 
+                @bind:event="oninput"
+                placeholder="https://example.com/article"
+                class="url-input" />
+        </div>
+
+        <div class="input-group">
+            <label for="max-length">Max Length (0 = no limit):</label>
+            <input 
+                id="max-length"
+                type="number" 
+                @bind="maxLength" 
+                min="0"
+                class="max-length-input" />
+        </div>
+
+        <div class="button-group">
+            <button @onclick="ScrapeUrl" disabled="@isLoading" class="btn-primary">
+                @if (isLoading)
+                {
+                    <span>?? Scraping...</span>
+                }
+                else
+                {
+                    <span>?? Scrape URL</span>
+                }
+            </button>
+            <button @onclick="ClearResult" disabled="@isLoading" class="btn-secondary">
+                Clear
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="error-message">
+            <strong>? Error:</strong> @errorMessage
+        </div>
+    }
+
+    @if (result != null && result.Success)
+    {
+        <div class="result-section">
+            <h4>Scraping Results</h4>
+            
+            <div class="metadata">
+                <div class="metadata-item">
+                    <strong>Title:</strong> @result.Title
+                </div>
+                <div class="metadata-item">
+                    <strong>URL:</strong> <a href="@result.Url" target="_blank">@result.Url</a>
+                </div>
+                <div class="metadata-item">
+                    <strong>Scraped At:</strong> @result.ScrapedAt.ToString("yyyy-MM-dd HH:mm:ss") UTC
+                </div>
+                <div class="metadata-item">
+                    <strong>Content Length:</strong> @result.TextContent.Length characters
+                </div>
+                <div class="metadata-item">
+                    <strong>Headers Found:</strong> @result.Headers.Count
+                </div>
+                <div class="metadata-item">
+                    <strong>Links Found:</strong> @result.Links.Count
+                </div>
+            </div>
+
+            @if (result.Metadata.Any())
+            {
+                <div class="metadata-section">
+                    <h5>Page Metadata</h5>
+                    @foreach (var meta in result.Metadata.Take(5))
+                    {
+                        <div class="metadata-item">
+                            <strong>@meta.Key:</strong> @meta.Value
+                        </div>
+                    }
+                </div>
+            }
+
+            <div class="tabs">
+                <button class="tab-button @(activeTab == "llm" ? "active" : "")" 
+                        @onclick="@(() => activeTab = "llm")">
+                    LLM Context
+                </button>
+                <button class="tab-button @(activeTab == "raw" ? "active" : "")" 
+                        @onclick="@(() => activeTab = "raw")">
+                    Raw Text
+                </button>
+                <button class="tab-button @(activeTab == "headers" ? "active" : "")" 
+                        @onclick="@(() => activeTab = "headers")">
+                    Headers (@result.Headers.Count)
+                </button>
+            </div>
+
+            <div class="tab-content">
+                @if (activeTab == "llm")
+                {
+                    <div class="content-box">
+                        <div class="copy-button-container">
+                            <button @onclick="CopyToClipboard" class="btn-copy">
+                                ?? Copy to Clipboard
+                            </button>
+                        </div>
+                        <pre class="llm-context">@llmContext</pre>
+                    </div>
+                }
+                else if (activeTab == "raw")
+                {
+                    <div class="content-box">
+                        <pre class="raw-content">@result.TextContent</pre>
+                    </div>
+                }
+                else if (activeTab == "headers")
+                {
+                    <div class="content-box">
+                        <ul class="headers-list">
+                            @foreach (var header in result.Headers)
+                            {
+                                <li>@header</li>
+                            }
+                        </ul>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private string urlInput = "";
+    private int maxLength = 10000;
+    private bool isLoading = false;
+    private string? errorMessage;
+    private WebScraperResult? result;
+    private string llmContext = "";
+    private string activeTab = "llm";
+    
+    // Progress tracking
+    private string loadingTitle = "Scraping web page...";
+    private string loadingSubtitle = "Fetching and parsing content";
+    private double progressPercentage = 0;
+    private TimeSpan elapsedTime = TimeSpan.Zero;
+    private TimeSpan? estimatedTimeRemaining = null;
+    private System.Diagnostics.Stopwatch? stopwatch;
+    private CancellationTokenSource? cancellationTokenSource;
+
+    private async Task ScrapeUrl()
+    {
+        if (string.IsNullOrWhiteSpace(urlInput))
+        {
+            errorMessage = "Please enter a valid URL";
+            return;
+        }
+
+        if (!WebScraperService.IsValidUrl(urlInput))
+        {
+            errorMessage = "Invalid URL format. Please use http:// or https://";
+            return;
+        }
+
+        isLoading = true;
+        errorMessage = null;
+        result = null;
+        llmContext = "";
+        progressPercentage = 0;
+        elapsedTime = TimeSpan.Zero;
+        
+        stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        cancellationTokenSource = new CancellationTokenSource();
+        
+        // Start progress updater
+        var progressTask = UpdateProgressAsync(cancellationTokenSource.Token);
+
+        try
+        {
+            loadingTitle = "Scraping web page...";
+            loadingSubtitle = $"Fetching content from {urlInput}";
+            progressPercentage = 10;
+            StateHasChanged();
+            
+            result = await WebScraperService.ScrapeAsync(urlInput);
+            
+            progressPercentage = 60;
+            StateHasChanged();
+            
+            if (result.Success)
+            {
+                loadingSubtitle = "Formatting content for LLM...";
+                progressPercentage = 80;
+                StateHasChanged();
+                
+                llmContext = await WebScraperService.ScrapeAsLlmContextAsync(urlInput, maxLength);
+                progressPercentage = 100;
+            }
+            else
+            {
+                errorMessage = result.ErrorMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Unexpected error: {ex.Message}";
+        }
+        finally
+        {
+            cancellationTokenSource?.Cancel();
+            stopwatch?.Stop();
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+    
+    private async Task UpdateProgressAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested && isLoading)
+            {
+                await Task.Delay(100, cancellationToken);
+                if (stopwatch != null)
+                {
+                    elapsedTime = stopwatch.Elapsed;
+                    StateHasChanged();
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal cancellation
+        }
+    }
+    
+    private void CancelScraping()
+    {
+        cancellationTokenSource?.Cancel();
+        isLoading = false;
+        errorMessage = "Scraping cancelled by user";
+        StateHasChanged();
+    }
+
+    private void ClearResult()
+    {
+        urlInput = "";
+        result = null;
+        llmContext = "";
+        errorMessage = null;
+        activeTab = "llm";
+    }
+
+    private async Task CopyToClipboard()
+    {
+        // Note: This requires JavaScript interop in a real implementation
+        // For now, just show a message
+        errorMessage = "Copy functionality requires JavaScript interop (not implemented in this demo)";
+    }
+}

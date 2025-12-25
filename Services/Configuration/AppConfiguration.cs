@@ -189,9 +189,9 @@ public class PoolSettings
 
     /// <summary>
     /// Timeout in milliseconds for model operations
-    /// Default: 45000 (45 seconds)
+    /// Default: 300000 (5 minutes - 300 seconds)
     /// </summary>
-    public int TimeoutMs { get; set; } = 45000;
+    public int TimeoutMs { get; set; } = 300000;
 }
 
 public class DebugSettings

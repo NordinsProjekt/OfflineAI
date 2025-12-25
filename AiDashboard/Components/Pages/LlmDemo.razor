@@ -1,0 +1,404 @@
+@page "/llm-demo"
+@inject AiDashboard.Services.Interfaces.ILlmResponseFormatterService Formatter
+@using System.Diagnostics
+
+<PageTitle>LLM Output Demo</PageTitle>
+
+<div class="container my-4">
+    <h1 class="mb-4">LLM Output Display Component Demo</h1>
+    
+    <div class="card mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Ask a Question</h5>
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label for="questionInput" class="form-label">Your Question:</label>
+                <input type="text" 
+                       class="form-control" 
+                       id="questionInput" 
+                       @bind="question" 
+                       @bind:event="oninput"
+                       placeholder="e.g., Write a hello world program in C#"
+                       @onkeypress="HandleKeyPress" />
+            </div>
+            
+            <button class="btn btn-primary" 
+                    @onclick="SimulateLlmQuery" 
+                    disabled="@isProcessing">
+                @if (isProcessing)
+                {
+                    <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                    <span>Processing...</span>
+                }
+                else
+                {
+                    <span>Ask LLM</span>
+                }
+            </button>
+            
+            <button class="btn btn-secondary ms-2" 
+                    @onclick="Reset" 
+                    disabled="@isProcessing">
+                Reset
+            </button>
+        </div>
+    </div>
+    
+    <LlmOutputDisplay 
+        IsLoading="@isProcessing"
+        Response="@response"
+        ErrorMessage="@errorMessage"
+        LoadingMessage="@loadingMessage"
+        ElapsedSeconds="@elapsedSeconds"
+        CompletionTime="@completionTimeSeconds"
+        AutoFormatCode="true" />
+    
+    <div class="card mt-4">
+        <div class="card-header">
+            <h5 class="mb-0">Example Responses</h5>
+        </div>
+        <div class="card-body">
+            <button class="btn btn-outline-primary btn-sm me-2 mb-2" @onclick="() => LoadExample(1)">C# Class Example</button>
+            <button class="btn btn-outline-primary btn-sm me-2 mb-2" @onclick="() => LoadExample(2)">HTML Example</button>
+            <button class="btn btn-outline-primary btn-sm me-2 mb-2" @onclick="() => LoadExample(3)">Python Example</button>
+            <button class="btn btn-outline-primary btn-sm me-2 mb-2" @onclick="() => LoadExample(4)">JavaScript Example</button>
+            <button class="btn btn-outline-primary btn-sm me-2 mb-2" @onclick="() => LoadExample(5)">Multiple Languages</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string question = "";
+    private string response = "";
+    private string errorMessage = "";
+    private string loadingMessage = "Processing your request...";
+    private bool isProcessing = false;
+    private int elapsedSeconds = 0;
+    private double completionTimeSeconds = 0;
+    private Timer? timer;
+    private Stopwatch? stopwatch;
+    
+    private async Task SimulateLlmQuery()
+    {
+        if (string.IsNullOrWhiteSpace(question))
+        {
+            errorMessage = "Please enter a question first.";
+            return;
+        }
+        
+        isProcessing = true;
+        response = "";
+        errorMessage = "";
+        elapsedSeconds = 0;
+        completionTimeSeconds = 0;
+        stopwatch = Stopwatch.StartNew();
+        
+        // Start elapsed time counter
+        timer = new Timer(_ =>
+        {
+            elapsedSeconds++;
+            InvokeAsync(StateHasChanged);
+        }, null, 1000, 1000);
+        
+        try
+        {
+            // Simulate LLM processing delay
+            await Task.Delay(3000);
+            
+            // Simulate LLM response with code
+            response = SimulateLlmResponse(question);
+            
+            stopwatch.Stop();
+            completionTimeSeconds = stopwatch.Elapsed.TotalSeconds;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            isProcessing = false;
+            timer?.Dispose();
+            timer = null;
+            StateHasChanged();
+        }
+    }
+    
+    private string SimulateLlmResponse(string q)
+    {
+        // Simulate different responses based on question
+        if (q.Contains("C#", StringComparison.OrdinalIgnoreCase) || q.Contains("csharp", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Here is a simple C# hello world program:```csharppublic static void Main(){Console.WriteLine(\"Hello, World!\");}```This program prints \"Hello, World!\" to the console.";
+        }
+        else if (q.Contains("python", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Here's a Python hello world:```pythondef main():print(\"Hello, World!\")if __name__ == \"__main__\":main()```Very simple!";
+        }
+        else if (q.Contains("javascript", StringComparison.OrdinalIgnoreCase))
+        {
+            return "JavaScript hello world:```javascriptfunction helloWorld(){console.log(\"Hello, World!\");}helloWorld();```Easy!";
+        }
+        else
+        {
+            return "Here are examples in multiple languages:\n\n" +
+                   "C#:```csharppublic static void Main(){Console.WriteLine(\"Hello!\");}```\n\n" +
+                   "Python:```pythondef hello():print(\"Hello!\")```\n\n" +
+                   "JavaScript:```javascriptconsole.log(\"Hello!\");```";
+        }
+    }
+    
+    private void LoadExample(int exampleNumber)
+    {
+        response = "";
+        errorMessage = "";
+        isProcessing = false;
+        
+        switch (exampleNumber)
+        {
+            case 1:
+                question = "Write a C# Person class with properties";
+                response = @"Here is a C# Person class with properties and methods:
+
+```csharp
+using System;
+
+namespace MyApp.Models
+{
+    /// <summary>
+    /// Represents a person with basic information.
+    /// </summary>
+    public class Person
+    {
+        // Properties
+        public string FirstName { get; set; }
+        public string LastName { get; set; }
+        public int Age { get; set; }
+        public DateTime DateOfBirth { get; set; }
+        
+        // Computed property
+        public string FullName => $""{FirstName} {LastName}"";
+        
+        // Constructor
+        public Person(string firstName, string lastName, int age)
+        {
+            FirstName = firstName;
+            LastName = lastName;
+            Age = age;
+        }
+        
+        // Method to display person info
+        public void DisplayInfo()
+        {
+            Console.WriteLine($""Name: {FullName}"");
+            Console.WriteLine($""Age: {Age}"");
+        }
+    }
+}
+```
+
+This class demonstrates properties, constructors, computed properties, and methods in C#.";
+                completionTimeSeconds = 2.5;
+                break;
+                
+            case 2:
+                question = "Create an HTML contact form";
+                response = @"Here is a responsive HTML contact form:
+
+```html
+<!DOCTYPE html>
+<html lang=""en"">
+<head>
+    <meta charset=""UTF-8"">
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1.0"">
+    <title>Contact Form</title>
+</head>
+<body>
+    <div class=""container"">
+        <h1>Contact Us</h1>
+        <form action=""/submit"" method=""post"" class=""contact-form"">
+            <div class=""form-group"">
+                <label for=""name"">Full Name:</label>
+                <input type=""text"" id=""name"" name=""name"" required />
+            </div>
+            
+            <div class=""form-group"">
+                <label for=""email"">Email Address:</label>
+                <input type=""email"" id=""email"" name=""email"" required />
+            </div>
+            
+            <div class=""form-group"">
+                <label for=""message"">Message:</label>
+                <textarea id=""message"" name=""message"" rows=""5"" required></textarea>
+            </div>
+            
+            <button type=""submit"" class=""btn btn-primary"">Send Message</button>
+        </form>
+    </div>
+</body>
+</html>
+```
+
+This form includes proper semantic HTML with labels, required fields, and accessibility features.";
+                completionTimeSeconds = 2.2;
+                break;
+                
+            case 3:
+                question = "Write a Python function to calculate factorial";
+                response = @"Here's a Python function that calculates factorial:
+
+```python
+def factorial(n):
+    """"""
+    Calculate the factorial of a number.
+    
+    Args:
+        n (int): The number to calculate factorial for
+        
+    Returns:
+        int: The factorial of n
+    """"""
+    if n < 0:
+        raise ValueError(""Factorial is not defined for negative numbers"")
+    
+    if n == 0 or n == 1:
+        return 1
+    
+    result = 1
+    for i in range(2, n + 1):
+        result *= i
+    
+    return result
+
+# Example usage
+if __name__ == ""__main__"":
+    number = 5
+    result = factorial(number)
+    print(f""Factorial of {number} is {result}"")
+```
+
+This function includes error handling, documentation, and example usage.";
+                completionTimeSeconds = 1.9;
+                break;
+                
+            case 4:
+                question = "Write a JavaScript async function to fetch data";
+                response = @"Here's a modern JavaScript async function to fetch data:
+
+```javascript
+// Async function to fetch user data from an API
+async function fetchUserData(userId) {
+    const apiUrl = `https://api.example.com/users/${userId}`;
+    
+    try {
+        // Show loading state
+        console.log('Fetching user data...');
+        
+        // Make API call
+        const response = await fetch(apiUrl);
+        
+        // Check if request was successful
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        // Parse JSON response
+        const userData = await response.json();
+        
+        // Process the data
+        console.log('User data received:', userData);
+        return userData;
+        
+    } catch (error) {
+        console.error('Error fetching user data:', error);
+        throw error;
+    }
+}
+
+// Usage example
+fetchUserData(123)
+    .then(user => console.log(user.name))
+    .catch(error => console.error('Failed:', error));
+```
+
+This demonstrates modern async/await syntax with proper error handling.";
+                completionTimeSeconds = 2.3;
+                break;
+                
+            case 5:
+                question = "Show me hello world in multiple languages";
+                response = @"Here are hello world programs in different languages:
+
+**C#:**
+```csharp
+using System;
+
+class Program
+{
+    static void Main()
+    {
+        Console.WriteLine(""Hello, World!"");
+    }
+}
+```
+
+**HTML:**
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Hello World</title>
+</head>
+<body>
+    <h1>Hello, World!</h1>
+</body>
+</html>
+```
+
+**Python:**
+```python
+def hello():
+    print(""Hello, World!"")
+
+if __name__ == ""__main__"":
+    hello()
+```
+
+**JavaScript:**
+```javascript
+const hello = () => {
+    console.log(""Hello, World!"");
+};
+
+hello();
+```
+
+Each language has its own syntax, but they all accomplish the same goal!";
+                completionTimeSeconds = 3.5;
+                break;
+        }
+        
+        StateHasChanged();
+    }
+    
+    private void Reset()
+    {
+        question = "";
+        response = "";
+        errorMessage = "";
+        isProcessing = false;
+        elapsedSeconds = 0;
+        completionTimeSeconds = 0;
+        timer?.Dispose();
+        timer = null;
+    }
+    
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !isProcessing)
+        {
+            await SimulateLlmQuery();
+        }
+    }
+}
