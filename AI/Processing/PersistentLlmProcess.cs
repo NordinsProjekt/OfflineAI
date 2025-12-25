@@ -152,17 +152,9 @@ public class PersistentLlmProcess : IPersistentLlmProcess
         var outputLock = new object();
         var fullOutput = new StringBuilder(); // Keep track of all output for debugging
 
-        // Calculate pause timeout based on overall timeout
-        // For 5-minute timeouts, use 40-second pause detection
-        // For shorter timeouts, scale proportionally
-        var pauseTimeoutMs = _timeoutMs switch
-        {
-            >= 180000 => 40000,  // 3+ minutes -> 40 second pause
-            >= 120000 => 30000,  // 2+ minutes -> 30 second pause
-            >= 60000 => 20000,   // 1+ minute -> 20 second pause
-            >= 30000 => 15000,   // 30+ seconds -> 15 second pause
-            _ => 10000           // < 30 seconds -> 10 second pause
-        };
+        // Use fixed 10-second pause timeout
+        // This detects when the LLM has stopped generating (paused for more than 10 seconds)
+        const int pauseTimeoutMs = 10000;  // 10 seconds
 
         process.OutputDataReceived += (sender, e) =>
         {
