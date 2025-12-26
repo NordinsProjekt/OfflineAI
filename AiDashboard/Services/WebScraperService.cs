@@ -149,15 +149,9 @@ public class WebScraperService : IWebScraperService
         {
             const string truncationMessage = "\n\n[Content truncated due to length...]";
             var truncateAt = maxLength - truncationMessage.Length;
-            if (truncateAt > 0)
-            {
-                context = context.Substring(0, truncateAt) + truncationMessage;
-            }
-            else
-            {
-                // If maxLength is too small to even fit the message, just truncate hard
-                context = context.Substring(0, maxLength);
-            }
+            context = truncateAt > 0 
+                ? context.Substring(0, truncateAt) + truncationMessage
+                : context.Substring(0, maxLength); // If maxLength is too small to even fit the message, just truncate hard
         }
 
         return context;
