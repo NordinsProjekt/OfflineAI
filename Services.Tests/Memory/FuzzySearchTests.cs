@@ -159,11 +159,11 @@ public class FuzzySearchTests
     }
 
     [Fact]
-    public void LevenshteinDistance_SwedishTypo_Återvinning_Returns1()
+    public void LevenshteinDistance_SwedishTypo_Atervinning_Returns1()
     {
-        // Arrange - Common typo: 'å' -> 'a'
-        var correct = "återvinning";
-        var typo = "atervinning";
+        // Arrange - Common typo: 'Å' -> 'A'
+        var correct = "Återvinning";
+        var typo = "Atervinning";
 
         // Act
         var distance = CalculateLevenshteinDistance(correct, typo);
