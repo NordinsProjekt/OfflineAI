@@ -352,6 +352,35 @@ public class DashboardState
         }
     }
 
+    // QuickAsk-specific method that always disables RAG
+    public async Task<string> SendQuickAskAsync(string message)
+    {
+        if (ChatService == null)
+        {
+            return "[ERROR] Chat service not initialized. Please check application configuration.";
+        }
+
+        try
+        {
+            var genSettings = SettingsService.ToGenerationSettings();
+
+            return await ChatService.SendMessageAsync(
+                message,
+                ragMode: false,  // Always disable RAG for QuickAsk
+                SettingsService.DebugMode,
+                SettingsService.PerformanceMetrics,
+                genSettings,
+                PersonalityService?.CurrentPersonality,
+                SettingsService.UseGpu,
+                SettingsService.GpuLayers,
+                SettingsService.TimeoutSeconds);  // Use global timeout setting
+        }
+        catch (Exception ex)
+        {
+            return $"[ERROR] Failed to send message: {ex.Message}";
+        }
+    }
+
     private void NotifyStateChanged()
     {
         if (_invokeAsync != null)

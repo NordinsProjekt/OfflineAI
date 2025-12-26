@@ -1,0 +1,33 @@
+Databaser och databasdesign
+(35 yhp)
+
+Utbildning som kursen ingår i: Systemutvecklare .NET
+
+Efter genomgången kurs ska den studerande ha följande:
+
+#Kunskaper
+Databassystems funktioner och uppbyggnad
+Relationsdatabaser som SQL Server
+Språket SQL, uppbyggnad och syntax
+Datamodeller
+Normalisering av databaser
+Lagrade procedurer och triggers i databas
+Transaktioner och ACID
+Programmering mot databaser
+Stored procedures
+Förstå skillnaden mellan Microsofts lokala och molnbaserade databaser
+
+#Färdigheter
+Skriva korrekta förfrågningar med SQL
+Skapa konceptuella, logiska och fysiska datamodeller
+Normalisera datamodeller
+Använda stored procedures, triggers och constraints
+Kunna skapa, läsa, förändra och ta bort information i en relationsdatabas via SQL
+Publicera databas till Azure
+
+#Kompetenser
+Skapa relationsdatabasmodeller
+Utifrån givna förutsättningar föreslå och motivera databasdesign samt normalisering med hänsyn tagen till prestanda och datasäkerhet
+Använda SQL som huvudspråk för att lösa databasrelaterade operationer
+Använda C# som verktyg för att lagra och hämta data via SQL-frågor
+Utifrån givna förutsättningar föreslå, motivera och skapa relevanta lösningar med hjälp av Microsofts lokala och molnbaserade databaser

@@ -1,0 +1,77 @@
+@* Reusable LLM Loading Indicator Component *@
+
+<div class="llm-loading-container">
+    @if (IsLoading)
+    {
+        <div class="llm-loading-overlay">
+            <div class="llm-loading-card">
+                <div class="llm-loading-spinner"></div>
+                <h3 class="llm-loading-title">@Title</h3>
+                
+                @if (!string.IsNullOrEmpty(Subtitle))
+                {
+                    <p class="llm-loading-subtitle">@Subtitle</p>
+                }
+                
+                <div class="llm-progress-bar-container">
+                    <div class="llm-progress-bar" style="width: @ProgressPercentage%"></div>
+                </div>
+                
+                <div class="llm-loading-stats">
+                    <span class="llm-stat">?? Elapsed: @ElapsedTimeFormatted</span>
+                    @if (EstimatedTimeRemaining.HasValue)
+                    {
+                        <span class="llm-stat">?? Est. remaining: @EstimatedTimeRemaining.Value.ToString(@"mm\:ss")</span>
+                    }
+                </div>
+                
+                @if (ShowCancelButton && OnCancel.HasDelegate)
+                {
+                    <button class="llm-cancel-button" @onclick="HandleCancel">
+                        ? Cancel Request
+                    </button>
+                }
+                
+                <p class="llm-loading-hint">
+                    ?? LLM processing can take up to 5 minutes. Please be patient...
+                </p>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public bool IsLoading { get; set; }
+    
+    [Parameter]
+    public string Title { get; set; } = "Processing with AI...";
+    
+    [Parameter]
+    public string Subtitle { get; set; } = "";
+    
+    [Parameter]
+    public double ProgressPercentage { get; set; } = 0;
+    
+    [Parameter]
+    public TimeSpan ElapsedTime { get; set; }
+    
+    [Parameter]
+    public TimeSpan? EstimatedTimeRemaining { get; set; }
+    
+    [Parameter]
+    public bool ShowCancelButton { get; set; } = true;
+    
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+    
+    private string ElapsedTimeFormatted => ElapsedTime.ToString(@"mm\:ss");
+    
+    private async Task HandleCancel()
+    {
+        if (OnCancel.HasDelegate)
+        {
+            await OnCancel.InvokeAsync();
+        }
+    }
+}

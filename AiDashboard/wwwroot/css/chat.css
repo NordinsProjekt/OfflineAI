@@ -28,12 +28,17 @@
     background: linear-gradient(135deg, rgba(21, 26, 36, 0.6), rgba(15, 20, 25, 0.6));
     backdrop-filter: blur(10px);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
 }
 
 .oa-badges {
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
+    flex: 1;
 }
 
 .oa-badge {
@@ -445,4 +450,109 @@
         font-size: 11px;
         padding: 5px 10px;
     }
+}
+
+/* Model Dropdown Styles */
+.oa-badge-dropdown {
+    display: inline-block;
+}
+
+.model-selector {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+.model-label {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.model-dropdown {
+    background: rgba(30, 35, 45, 0.95);
+    color: white;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 6px;
+    padding: 0.4rem 2rem 0.4rem 0.75rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.2s ease;
+    min-width: 180px;
+    max-width: 250px;
+    appearance: none;
+    background-image: url('data:image/svg+xml;charset=UTF-8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"><path fill="%2393c5fd" d="M6 9L1 4h10z"/></svg>');
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.model-dropdown:hover {
+    background: rgba(40, 45, 55, 0.95);
+    border-color: rgba(59, 130, 246, 0.5);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.model-dropdown:focus {
+    background: rgba(40, 45, 55, 0.95);
+    border-color: #4fc3f7;
+    box-shadow: 0 0 0 3px rgba(79, 195, 247, 0.2);
+}
+
+.model-dropdown option {
+    background: #1e2328;
+    color: white;
+    padding: 0.75rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+.model-dropdown option:hover {
+    background: #2a3038;
+}
+
+.model-dropdown option:checked {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(37, 99, 235, 0.3));
+    color: #93c5fd;
+    font-weight: 600;
+}
+
+/* Home button styles */
+.oa-home-button {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(10px);
+}
+
+.oa-home-button:hover {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.3);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.oa-home-button:active {
+    transform: translateY(0);
+}
+
+.oa-home-icon {
+    font-size: 1.1rem;
+}
+
+.oa-home-text {
+    font-family: inherit;
 }

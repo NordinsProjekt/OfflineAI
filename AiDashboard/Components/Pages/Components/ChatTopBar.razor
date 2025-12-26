@@ -1,14 +1,40 @@
 @inject DashboardState Dashboard
+@inject NavigationManager Navigation
 @implements IDisposable
 
 <div class="oa-topbar">
+    <button class="oa-home-button" @onclick="NavigateToHome" title="Back to Home">
+        <span class="oa-home-icon">&larr;</span>
+        <span class="oa-home-text">Home</span>
+    </button>
+    
     <div class="oa-badges">
         <span class="oa-badge @(Dashboard.SettingsService.RagMode ? "green" : "gray")">
             RAG: @(Dashboard.SettingsService.RagMode ? "ON" : "OFF")
         </span>
-        <span class="oa-badge blue">
-            Model: @Dashboard.ModelService.CurrentModel
-        </span>
+        
+        @* Model Dropdown Selector *@
+        @if (Dashboard.ModelService.AvailableModels.Count > 0)
+        {
+            <div class="oa-badge-dropdown">
+                <label class="oa-badge blue model-selector">
+                    <span class="model-label">Model:</span>
+                    <select class="model-dropdown" @bind="SelectedModel" @bind:after="OnModelChanged" title="@Dashboard.ModelService.CurrentModel">
+                        @foreach (var model in Dashboard.ModelService.AvailableModels)
+                        {
+                            <option value="@model" title="@model">@FormatModelName(model)</option>
+                        }
+                    </select>
+                </label>
+            </div>
+        }
+        else
+        {
+            <span class="oa-badge blue">
+                Model: @FormatModelName(Dashboard.ModelService.CurrentModel)
+            </span>
+        }
+        
         <span class="oa-badge purple">
             Temperature: @Dashboard.SettingsService.Temperature.ToString("0.0")
         </span>
@@ -19,6 +45,12 @@
 </div>
 
 @code {
+    private string SelectedModel
+    {
+        get => Dashboard.ModelService.CurrentModel;
+        set => Dashboard.ModelService.CurrentModel = value;
+    }
+
     protected override void OnInitialized()
     {
         // Subscribe to state changes so UI updates when model/RAG changes
@@ -28,6 +60,47 @@
     private void HandleStateChanged()
     {
         _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void NavigateToHome()
+    {
+        Navigation.NavigateTo("/");
+    }
+
+    private async Task OnModelChanged()
+    {
+        // The CurrentModel setter already calls NotifyStateChanged internally
+        // Just trigger a UI refresh
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private string FormatModelName(string modelFileName)
+    {
+        if (string.IsNullOrEmpty(modelFileName))
+            return modelFileName;
+
+        // Remove .gguf extension
+        var name = modelFileName.Replace(".gguf", "", StringComparison.OrdinalIgnoreCase);
+        
+        // If name is too long, truncate intelligently
+        if (name.Length > 25)
+        {
+            // Try to keep the important parts (model name and quantization)
+            // Example: "Mistral-14b-Merge-Base-Q5_K_M" -> "Mistral-14b...Q5_K_M"
+            var parts = name.Split('-', '_');
+            if (parts.Length > 3)
+            {
+                // Keep first 2 parts and last part
+                var shortened = $"{parts[0]}-{parts[1]}...{parts[^1]}";
+                if (shortened.Length < 25)
+                    return shortened;
+            }
+            
+            // Fallback: simple truncation
+            return name.Substring(0, 22) + "...";
+        }
+
+        return name;
     }
 
     public void Dispose()

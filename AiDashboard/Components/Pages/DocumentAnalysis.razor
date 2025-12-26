@@ -1,0 +1,526 @@
+@page "/document-analysis"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@inject DashboardState Dashboard
+@inject IDocumentAnalysisService AnalysisService
+@inject IKursplanAnalysisService KursplanService
+@inject IDocumentTypeDetector TypeDetector
+@inject IJSRuntime JSRuntime
+
+@using System.IO
+
+<PageTitle>Document Analysis - OfflineAI</PageTitle>
+
+<div class="oa-workflow-page">
+    <div class="oa-workflow-header">
+        <button class="oa-back-button" @onclick="@(() => Navigation.NavigateTo("/"))">
+            &larr; Back to Home
+        </button>
+        <h1>Document Analysis</h1>
+        <p class="oa-workflow-subtitle">Upload a Swedish YH course plan and extract structured objectives</p>
+    </div>
+
+    <div class="oa-workflow-content">
+        <div class="oa-upload-section">
+            <div id="upload-area" class="oa-upload-area @(isDragOver ? "drag-over" : "")"
+                 @ondrop="HandleDrop"
+                 @ondragover:preventDefault
+                 @ondragenter="HandleDragEnter"
+                 @ondragleave="HandleDragLeave">
+                
+                @if (uploadedFile == null)
+                {
+                    <div class="oa-upload-prompt">
+                        <div class="oa-upload-icon">[+]</div>
+                        <h2>Drop your YH course plan here</h2>
+                        <p>or click to browse</p>
+                        <InputFile @ref="fileInput" id="file-input" OnChange="HandleFileSelected" class="oa-file-input" accept=".txt,.doc,.docx" />
+                        <p class="oa-upload-hint">Supports: TXT, DOCX (Max 10MB)</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="oa-file-preview">
+                        <div class="oa-file-icon">[DOC]</div>
+                        <div class="oa-file-info">
+                            <h3>@uploadedFile.Name</h3>
+                            <p>@FormatFileSize(uploadedFile.Size)</p>
+                            @if (documentChunks.Count > 0)
+                            {
+                                <p class="oa-chunk-info">Loaded successfully</p>
+                            }
+                        </div>
+                        <button class="oa-remove-file" @onclick="RemoveFile">X</button>
+                    </div>
+                }
+            </div>
+
+            @* Show detected document type *@
+            @if (detectedType != null && uploadedFile != null && string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="oa-type-detection">
+                    <div class="oa-type-badge @GetTypeClass(detectedType.Type)">
+                        <span class="oa-type-icon">@TypeDetector.GetTypeIcon(detectedType.Type)</span>
+                        <span class="oa-type-name">@TypeDetector.GetTypeName(detectedType.Type)</span>
+                        <span class="oa-type-confidence">@detectedType.Confidence% confidence</span>
+                    </div>
+                    <p class="oa-type-reason">@detectedType.Reason</p>
+                </div>
+            }
+
+            @if (uploadedFile != null && !isAnalyzing && !string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="oa-error-message">
+                    <strong>Error:</strong> @errorMessage
+                </div>
+            }
+
+            @if (uploadedFile != null && !isAnalyzing && string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="oa-analysis-options">
+                    <h3>Vad vill du göra?</h3>
+                    <div class="oa-option-grid">
+                        @foreach (var action in recommendedActions)
+                        {
+                            <button class="oa-option-button @(action.IsRecommended ? "oa-featured" : "")" 
+                                    @onclick="@(() => AnalyzeDocument(action.Id))">
+                                <span class="oa-option-icon">@GetActionIcon(action.Id)</span>
+                                <span class="oa-option-text">@action.Label</span>
+                                @if (action.IsRecommended)
+                                {
+                                    <span class="oa-option-badge">Rekommenderad</span>
+                                }
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+
+        @if (isAnalyzing)
+        {
+            <div class="oa-analyzing">
+                <div class="oa-spinner"></div>
+                <h3>@analysisStatus</h3>
+                @if (!string.IsNullOrEmpty(analysisSubStatus))
+                {
+                    <p>@analysisSubStatus</p>
+                }
+                @if (showAbortButton)
+                {
+                    <p style="margin-top: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">
+                        Analysering pågår... Du kan avbryta om det tar för lång tid.
+                    </p>
+                    <button class="oa-abort-button" @onclick="AbortAnalysis">
+                        Avbryt analys
+                    </button>
+                }
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(analysisResult))
+        {
+            <div class="oa-results-section">
+                <h2>Analysresultat</h2>
+                @if (kursplanResult != null)
+                {
+                    <div class="oa-kursplan-summary">
+                        <div class="oa-summary-stat">
+                            <span class="oa-stat-number">@kursplanResult.TotalItems</span>
+                            <span class="oa-stat-label">KURSMÅL TOTALT</span>
+                        </div>
+                        <div class="oa-summary-stat">
+                            <span class="oa-stat-number">@kursplanResult.Sections.Count</span>
+                            <span class="oa-stat-label">SEKTIONER</span>
+                        </div>
+                    </div>
+                }
+                <div class="oa-result-box">
+                    <pre>@analysisResult</pre>
+                </div>
+                <div class="oa-result-actions">
+                    <button class="oa-action-button" @onclick="CopyResults">
+                        Kopiera
+                    </button>
+                    <button class="oa-action-button" @onclick="DownloadResults">
+                        Ladda ner
+                    </button>
+                    <button class="oa-action-button" @onclick="AnalyzeAnother">
+                        Analysera annat
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private IBrowserFile? uploadedFile;
+    private InputFile? fileInput;
+    private bool isDragOver;
+    private bool isAnalyzing;
+    private string analysisStatus = "";
+    private string analysisSubStatus = "";
+    private string analysisResult = "";
+    private string errorMessage = "";
+    
+    private List<DocumentChunk> documentChunks = [];
+    private string fullDocumentText = "";
+    private DocumentTypeResult? detectedType;
+    private List<AnalysisAction> recommendedActions = [];
+    private KursplanResult? kursplanResult;
+
+    private CancellationTokenSource? analysisCancellationTokenSource;
+    private DateTime analysisStartTime;
+    private bool showAbortButton = false;
+    private const int MaxAnalysisTimeMs = 300000; // 5 minutes
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("documentAnalysis.initializeDragDrop", "upload-area", "file-input");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to initialize drag-drop: {ex.Message}");
+            }
+        }
+    }
+
+    private void HandleDragEnter() => isDragOver = true;
+    private void HandleDragLeave() => isDragOver = false;
+    
+    private async Task HandleDrop()
+    {
+        isDragOver = false;
+        StateHasChanged();
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        uploadedFile = e.File;
+        errorMessage = "";
+        documentChunks.Clear();
+        analysisResult = "";
+        kursplanResult = null;
+        detectedType = null;
+        recommendedActions.Clear();
+        
+        await ExtractDocumentTextImmediately(e.File);
+        StateHasChanged();
+    }
+
+    private async Task ExtractDocumentTextImmediately(IBrowserFile file)
+    {
+        if (file == null) return;
+
+        analysisStatus = $"Läser {file.Name}...";
+        
+        try
+        {
+            var extension = Path.GetExtension(file.Name).ToLowerInvariant();
+            
+            if (extension == ".txt")
+            {
+                using var stream = file.OpenReadStream(maxAllowedSize: 10485760);
+                using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+                fullDocumentText = await reader.ReadToEndAsync();
+            }
+            else if (extension == ".docx" || extension == ".doc")
+            {
+                using var memoryStream = new MemoryStream();
+                await file.OpenReadStream(maxAllowedSize: 10485760).CopyToAsync(memoryStream);
+                memoryStream.Position = 0;
+                
+                var (success, text, error) = ExtractTextFromDocxStream(memoryStream);
+                if (!success)
+                {
+                    errorMessage = error;
+                    fullDocumentText = "";
+                    return;
+                }
+                fullDocumentText = text;
+            }
+            else
+            {
+                errorMessage = $"Filtypen {extension} stöds inte. Använd .txt eller .docx";
+                fullDocumentText = "";
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(fullDocumentText))
+            {
+                errorMessage = "Kunde inte extrahera text från filen.";
+                return;
+            }
+
+            documentChunks = AnalysisService.SplitIntoChunks(fullDocumentText);
+            detectedType = TypeDetector.DetectType(fullDocumentText);
+            recommendedActions = TypeDetector.GetRecommendedActions(detectedType.Type);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Fel vid läsning av fil: {ex.Message}";
+            fullDocumentText = "";
+        }
+    }
+
+    private (bool Success, string Text, string Error) ExtractTextFromDocxStream(MemoryStream stream)
+    {
+        try
+        {
+            using var doc = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(stream, false);
+            
+            if (doc.MainDocumentPart == null)
+            {
+                return (false, "", "Ogiltig DOCX-fil: Ingen dokumentdel hittades");
+            }
+
+            var textBuilder = new System.Text.StringBuilder();
+            var body = doc.MainDocumentPart.Document.Body;
+            
+            if (body != null)
+            {
+                foreach (var paragraph in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>())
+                {
+                    var text = paragraph.InnerText;
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        textBuilder.AppendLine(text);
+                    }
+                }
+
+                foreach (var table in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Table>())
+                {
+                    foreach (var row in table.Elements<DocumentFormat.OpenXml.Wordprocessing.TableRow>())
+                    {
+                        var rowTexts = new List<string>();
+                        foreach (var cell in row.Elements<DocumentFormat.OpenXml.Wordprocessing.TableCell>())
+                        {
+                            rowTexts.Add(cell.InnerText);
+                        }
+                        if (rowTexts.Count > 0)
+                        {
+                            textBuilder.AppendLine(string.Join("\t", rowTexts));
+                        }
+                    }
+                    textBuilder.AppendLine();
+                }
+            }
+
+            var extractedText = textBuilder.ToString().Trim();
+            
+            if (string.IsNullOrWhiteSpace(extractedText))
+            {
+                return (false, "", "Ingen textinnehåll hittades i DOCX-filen");
+            }
+
+            return (true, extractedText, "");
+        }
+        catch (Exception ex)
+        {
+            return (false, "", $"Fel vid läsning av DOCX: {ex.Message}");
+        }
+    }
+
+    private void RemoveFile()
+    {
+        uploadedFile = null;
+        analysisResult = "";
+        errorMessage = "";
+        documentChunks.Clear();
+        fullDocumentText = "";
+        detectedType = null;
+        recommendedActions.Clear();
+        kursplanResult = null;
+    }
+
+    private async Task AnalyzeDocument(string analysisType)
+    {
+        if (string.IsNullOrEmpty(fullDocumentText))
+        {
+            errorMessage = "Ingen dokumenttext tillgänglig. Ladda upp en fil.";
+            return;
+        }
+
+        isAnalyzing = true;
+        analysisStatus = "Analyserar dokument...";
+        analysisSubStatus = "";
+        kursplanResult = null;
+        showAbortButton = false;
+        analysisStartTime = DateTime.UtcNow;
+        
+        analysisCancellationTokenSource = new CancellationTokenSource();
+        analysisCancellationTokenSource.CancelAfter(MaxAnalysisTimeMs);
+
+        StateHasChanged();
+
+        _ = Task.Delay(3000).ContinueWith(_ =>
+        {
+            if (isAnalyzing)
+            {
+                showAbortButton = true;
+                StateHasChanged();
+            }
+        });
+
+        try
+        {
+            await AnalyzeKursmal();
+        }
+        catch (OperationCanceledException)
+        {
+            analysisResult = "Analys avbruten av användaren.";
+            analysisStatus = "Avbryten";
+            analysisSubStatus = "";
+        }
+        catch (Exception ex)
+        {
+            analysisResult = $"Fel vid analys: {ex.Message}";
+        }
+        finally
+        {
+            isAnalyzing = false;
+            showAbortButton = false;
+            analysisCancellationTokenSource?.Dispose();
+            analysisCancellationTokenSource = null;
+            StateHasChanged();
+        }
+    }
+
+    private void AbortAnalysis()
+    {
+        analysisCancellationTokenSource?.Cancel();
+        isAnalyzing = false;
+        showAbortButton = false;
+        analysisStatus = "";
+        analysisSubStatus = "";
+        StateHasChanged();
+    }
+
+    private async Task AnalyzeKursmal()
+    {
+        analysisStatus = "Extraherar kursmål...";
+        StateHasChanged();
+        await Task.Delay(300);
+
+        var docType = detectedType?.Type ?? DocumentTypeDetector.DocumentType.SwedishYhKursplan;
+        kursplanResult = KursplanService.ExtractKursmal(fullDocumentText, docType);
+
+        if (kursplanResult.TotalItems > 0)
+        {
+            analysisStatus = $"Hittade {kursplanResult.TotalItems} kursmål i {kursplanResult.Sections.Count} sektioner";
+            analysisSubStatus = "";
+            StateHasChanged();
+            await Task.Delay(200);
+            
+            // Use FormatResult for clean output matching your requirements
+            analysisResult = KursplanService.FormatResult(kursplanResult);
+        }
+        else
+        {
+            analysisStatus = "Inga strukturerade mål hittades";
+            analysisResult = "Kunde inte hitta Kunskaper, Färdigheter eller Kompetenser i dokumentet.\n\n";
+            analysisResult += "Förväntad struktur:\n#Kunskaper\n#Färdigheter\n#Kompetenser\n\n";
+            analysisResult += "Råtext (första 1000 tecken):\n\n";
+            analysisResult += fullDocumentText.Length > 1000 
+                ? fullDocumentText.Substring(0, 1000) + "..." 
+                : fullDocumentText;
+        }
+    }
+
+    private string GetTypeClass(DocumentTypeDetector.DocumentType type)
+    {
+        return type switch
+        {
+            DocumentTypeDetector.DocumentType.SwedishYhKursplan => "kursplan yh",
+            DocumentTypeDetector.DocumentType.SwedishSkolverketKursplan => "kursplan skolverket",
+            DocumentTypeDetector.DocumentType.SwedishKursplan => "kursplan",
+            _ => ""
+        };
+    }
+
+    private string GetActionIcon(string actionId)
+    {
+        return actionId switch
+        {
+            "kunskapsmal" => "[K]",
+            "centralinnehall" => "[CI]",
+            "amnesmal" => "[A]",
+            "betygskriterier" => "[B]",
+            _ => "[?]"
+        };
+    }
+
+    private async Task CopyResults()
+    {
+        if (string.IsNullOrEmpty(analysisResult))
+        {
+            errorMessage = "Ingen innehåll att kopiera.";
+            return;
+        }
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", analysisResult);
+            var originalResult = analysisResult;
+            analysisResult = "? Kopierad till urklipp!";
+            StateHasChanged();
+            await Task.Delay(2000);
+            analysisResult = originalResult;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Kunde inte kopiera: {ex.Message}";
+        }
+    }
+
+    private async Task DownloadResults()
+    {
+        if (string.IsNullOrEmpty(analysisResult))
+        {
+            errorMessage = "Ingen innehåll att ladda ner.";
+            return;
+        }
+
+        try
+        {
+            var fileName = $"kursmal_{DateTime.Now:yyyyMMdd_HHmmss}.txt";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(analysisResult);
+            
+            await JSRuntime.InvokeVoidAsync("documentAnalysis.downloadFile", fileName, Convert.ToBase64String(bytes));
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Kunde inte ladda ner: {ex.Message}";
+        }
+    }
+
+    private void AnalyzeAnother()
+    {
+        uploadedFile = null;
+        analysisResult = "";
+        errorMessage = "";
+        documentChunks.Clear();
+        detectedType = null;
+        recommendedActions.Clear();
+        kursplanResult = null;
+    }
+
+    private string FormatFileSize(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB"];
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len /= 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+}

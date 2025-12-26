@@ -1,0 +1,35 @@
+Webbutveckling
+(40 yhp)
+
+Utbildning som kursen ingår i: Frontend-utvecklare
+
+Efter genomgången kurs ska den studerande ha följande:
+
+#Kunskaper
+Kunskap om HTML5, CSS3 och JavaScript
+Förståelse för responsiv webbdesign och mobil-first approach
+Kunskap om webbstandarder, tillgänglighet och WCAG
+Förståelse för moderna JavaScript-ramverk som React och Vue
+Kunskap om versionskontroll med Git och GitHub
+Förståelse för webbprestanda och optimering
+Kunskap om SEO-grundprinciper
+Förståelse för webbsäkerhet och OWASP Top 10
+
+#Färdigheter
+Skapa responsiva webbsidor med HTML5 och CSS3
+Implementera interaktivitet och dynamiskt innehåll med JavaScript
+Använda Git för versionskontroll och samarbete
+Debugga och testa webbapplikationer effektivt
+Optimera webbplatser för prestanda och tillgänglighet
+Integrera API:er och hantera asynkron datahämtning
+Använda moderna utvecklingsverktyg och build-processer
+Skapa användarvänliga gränssnitt enligt UX-principer
+
+#Kompetenser
+Utveckla kompletta, skalbara webbapplikationer från grunden
+Välja och motivera lämpliga tekniker och arkitektur för olika projekttyper
+Optimera webbplatser för prestanda, tillgänglighet och SEO
+Samarbeta effektivt i utvecklingsteam med agila metoder
+Felsöka och lösa komplexa tekniska problem
+Anpassa sig till nya verktyg och ramverk i det snabbt föränderliga webbområdet
+Kommunicera tekniska lösningar till både tekniska och icke-tekniska intressenter

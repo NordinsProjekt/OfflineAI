@@ -1,0 +1,17 @@
+Testdokument med svenska tecken
+
+Detta är ett enkelt textdokument för att testa funktionalitet.
+
+Det innehåller flera rader text med svenska tecken: åäö ÅÄÖ
+
+Viktiga punkter:
+- Första punkten med åäö
+- Andra punkten med ÅÄÖ  
+- Tredje punkten med émüñ
+- Fjärde punkten för att testa längre texter
+
+Mer testinnehåll:
+Kunskapsmål och färdigheter är viktiga delar av en kursplan.
+Kompetenser beskriver vad studenten ska kunna efter kursen.
+
+Slut på testdokumentet.
