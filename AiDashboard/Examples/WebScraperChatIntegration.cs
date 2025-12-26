@@ -183,14 +183,9 @@ Please provide a detailed comparison of these web pages based on the criteria pr
 
         var result = await _webScraper.ScrapeAsync(url);
 
-        if (result.Success)
-        {
-            return (true, $"Successfully scraped: {result.Title} ({result.TextContent.Length} characters)");
-        }
-        else
-        {
-            return (false, $"Failed to scrape: {result.ErrorMessage}");
-        }
+        return result.Success
+            ? (true, $"Successfully scraped: {result.Title} ({result.TextContent.Length} characters)")
+            : (false, $"Failed to scrape: {result.ErrorMessage}");
     }
 
     /// <summary>
