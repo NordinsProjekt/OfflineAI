@@ -7,7 +7,7 @@ namespace AiDashboard.Services
 {
     /// <summary>
     /// Helper class for managing LLM request timeouts and progress tracking.
-    /// Handles the 5-minute max wait and 2-minute pause detection.
+    /// Handles the 5-minute max wait and 40-second pause detection.
     /// </summary>
     public class LlmProgressTracker : IDisposable
     {
@@ -60,7 +60,7 @@ namespace AiDashboard.Services
         /// Start tracking progress with specified timeout
         /// </summary>
         /// <param name="timeoutMs">Total timeout in milliseconds (default: 5 minutes)</param>
-        /// <param name="pauseTimeoutMs">Pause detection timeout in milliseconds (default: 2 minutes)</param>
+        /// <param name="pauseTimeoutMs">Pause detection timeout in milliseconds (default: 40 seconds)</param>
         /// <returns>CancellationToken to use for the operation</returns>
         public CancellationToken Start(int timeoutMs = MaxTotalTimeoutMs, int pauseTimeoutMs = PauseTimeoutMs)
         {

@@ -43,13 +43,13 @@ public class TimeoutConfigurationTests
     [Fact]
     public void LlmProgressTracker_PauseTimeout_ShouldBe120000Ms()
     {
-        // Verify the 2-minute pause detection timeout
+        // Verify the 40-second pause detection timeout
         var field = typeof(LlmProgressTracker).GetField("PauseTimeoutMs", 
             BindingFlags.Public | BindingFlags.Static);
         
         Assert.NotNull(field);
         var value = field!.GetValue(null);
-        Assert.Equal(120000, value); // 2 minutes in milliseconds
+        Assert.Equal(40000, value); // 40 seconds in milliseconds
     }
 
     [Fact]
@@ -191,19 +191,19 @@ public class TimeoutConfigurationTests
         // 5 minutes should be 300,000 ms
         Assert.Equal(300000, maxTimeout);
         
-        // 2 minutes should be 120,000 ms
-        Assert.Equal(120000, pauseTimeout);
+        // 40 seconds should be 40,000 ms
+        Assert.Equal(40000, pauseTimeout);
         
         // 10 seconds should be 10,000 ms
         Assert.Equal(10000, testTimeout);
 
         // Pause timeout should be less than max timeout
         Assert.True(pauseTimeout < maxTimeout, 
-            "Pause timeout (2 min) should be less than max timeout (5 min)");
+            "Pause timeout (40 sec) should be less than max timeout (5 min)");
         
         // Test timeout should be much less than production timeouts
         Assert.True(testTimeout < pauseTimeout, 
-            "Test timeout (10 sec) should be less than pause timeout (2 min)");
+            "Test timeout (10 sec) should be less than pause timeout (40 sec)");
         
         Assert.True(testTimeout < maxTimeout, 
             "Test timeout (10 sec) should be less than max timeout (5 min)");
@@ -264,8 +264,8 @@ public class TimeoutConfigurationTests
         // 5 minutes = 300 seconds = 300,000 milliseconds
         Assert.Equal(300000, LlmProgressTracker.MaxTotalTimeoutMs);
         
-        // 2 minutes = 120 seconds = 120,000 milliseconds
-        Assert.Equal(120000, LlmProgressTracker.PauseTimeoutMs);
+        // 40 seconds = 40,000 milliseconds
+        Assert.Equal(40000, LlmProgressTracker.PauseTimeoutMs);
         
         // 10 seconds = 10,000 milliseconds
         Assert.Equal(10000, LlmProgressTracker.ShortTimeoutMs);
