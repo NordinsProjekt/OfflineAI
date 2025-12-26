@@ -95,7 +95,7 @@ public class GenerationSettingsService
         }
     }
 
-    private int _timeoutSeconds = 30;
+    private int _timeoutSeconds = 300; // 5 minutes (changed from 30 seconds)
     public int TimeoutSeconds
     {
         get => _timeoutSeconds;
@@ -235,7 +235,7 @@ public class GenerationSettingsService
         RepeatPenalty = 1.1;
         PresencePenalty = 0.0;
         FrequencyPenalty = 0.0;
-        TimeoutSeconds = 30;
+        TimeoutSeconds = 300; // 5 minutes (changed from 30 seconds)
         RagMode = true;
         PerformanceMetrics = false;
         DebugMode = false;

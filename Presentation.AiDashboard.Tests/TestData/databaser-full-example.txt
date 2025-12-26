@@ -1,0 +1,64 @@
+Databaser och databasdesign 35 yhp
+
+Utbildning som kursen ingår i
+Backend-utvecklare
+
+Kursens huvudsakliga innehåll
+Kursens syfte är att den studerande utvecklar grundläggande kunskaper om databaser, SQL-frågespråk och databasdesign.
+
+Centralt innehåll
+• Databashanteringssystem
+• Relationsdatabaser
+• SQL-frågespråk
+
+Kunskapskrav/lärandemål
+Efter genomgången kurs ska den studerande ha följande kunskaper, färdigheter och kompetenser:
+
+Kunskaper 
+Efter genomgången kurs ska den studerande kunna
+
+• Databassystems funktioner och uppbyggnad
+• Relationsdatabaser som SQL Server
+• Språket SQL, uppbyggnad och syntax
+• Datamodeller
+• Normalisering av databaser
+• Lagrade procedurer och triggers i databas
+• Transaktioner och ACID
+• Programmering mot databaser
+• Stored procedures
+• Förstå skillnaden mellan Microsofts lokala och molnbaserade databaser
+
+Färdigheter
+Efter genomgången kurs ska den studerande ha färdigheter i att
+
+• skriva korrekta förfrågningar med SQL
+• skapa konceptuella, logiska och fysiska datamodeller
+• normalisera datamodeller
+• använda stored procedures, triggers och constraints
+• kunna skapa, läsa, förändra och ta bort information i en relationsdatabas via SQL
+• publicera databas till Azure
+
+Kompetenser
+Efter genomgången kurs ska den studerande ha kompetens att
+
+• skapa relationsdatabasmodeller
+• utifrån givna förutsättningar föreslå och motivera databasdesign samt normalisering med hänsyn tagen till prestanda och datasäkerhet
+• använda SQL som huvudspråk för att lösa databasrelaterade operationer
+• använda C# som verktyg för att lagra och hämta data via SQL-frågor
+• utifrån givna förutsättningar föreslå, motivera och skapa relevanta lösningar med hjälp av Microsofts lokala och molnbaserade databaser
+
+Former för kunskapskontroll
+Kunskapskontroller görs under kursen genom laborationer, muntlig redovisning. 
+Kursen avslutas med en inlämningsuppgift i grupp
+
+Principer för bedömning
+Betyg sätts i form av Icke godkänt (IG), Godkänt (G) eller Väl godkänt (VG).
+
+Icke godkänt (IG)
+Den studerande har fullföljt kursen men inte nått alla mål för kursen.
+
+Godkänt (G)
+Den studerande har nått samtliga mål för kursen gällande kunskaper, färdigheter och kompetenser.
+
+Väl godkänt (VG)
+Den studerande har nått samtliga mål för kursen. Den studerande har även under kursens gång visat en större förståelse.
