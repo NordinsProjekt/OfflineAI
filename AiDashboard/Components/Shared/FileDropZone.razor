@@ -1,0 +1,137 @@
+@using Microsoft.AspNetCore.Components.Forms
+@inject IJSRuntime JSRuntime
+
+<div class="file-dropzone @ThemeClass @(IsDragOver ? "drag-over" : "")"
+     @ref="dropZoneElement"
+     @ondrop="HandleDrop"
+     @ondrop:preventDefault
+     @ondragover:preventDefault
+     @ondragenter="HandleDragEnter"
+     @ondragenter:preventDefault
+     @ondragleave="HandleDragLeave">
+    
+    <div class="dropzone-content">
+        <div class="dropzone-icon">@Icon</div>
+        <h2 class="dropzone-title">@Title</h2>
+        <p class="dropzone-prompt">@PromptText</p>
+        
+        <InputFile @ref="fileInput" 
+                   id="@InputId" 
+                   OnChange="HandleFileSelected" 
+                   class="dropzone-input" 
+                   accept="@AcceptedTypes"
+                   multiple="@AllowMultiple" />
+        
+        <label for="@InputId" class="dropzone-browse-btn">
+            Browse Files
+        </label>
+        
+        @if (!string.IsNullOrEmpty(HintText))
+        {
+            <p class="dropzone-hint">@HintText</p>
+        }
+    </div>
+    
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="dropzone-error">
+            <strong>Error:</strong> @ErrorMessage
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "Drop your file here";
+    [Parameter] public string PromptText { get; set; } = "or click to browse";
+    [Parameter] public string HintText { get; set; } = "Supports: TXT, DOCX, PDF (Max 10MB)";
+    [Parameter] public string Icon { get; set; } = "??";
+    [Parameter] public string AcceptedTypes { get; set; } = ".txt,.doc,.docx,.pdf";
+    [Parameter] public long MaxFileSizeBytes { get; set; } = 10485760; // 10MB default
+    [Parameter] public bool AllowMultiple { get; set; } = false;
+    [Parameter] public bool DarkMode { get; set; } = true;
+    [Parameter] public EventCallback<InputFileChangeEventArgs> OnFileSelected { get; set; }
+    [Parameter] public EventCallback<string> OnError { get; set; }
+    
+    private ElementReference dropZoneElement;
+    private InputFile? fileInput;
+    private bool IsDragOver { get; set; }
+    private string ErrorMessage { get; set; } = "";
+    private string InputId { get; set; } = $"file-input-{Guid.NewGuid():N}";
+    private bool _jsInitialized = false;
+    
+    private string ThemeClass => DarkMode ? "theme-dark" : "theme-light";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_jsInitialized)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("fileDropZone.initialize", dropZoneElement, InputId);
+                _jsInitialized = true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"FileDropZone: Failed to initialize JavaScript: {ex.Message}");
+            }
+        }
+    }
+    
+    private void HandleDragEnter()
+    {
+        IsDragOver = true;
+    }
+    
+    private void HandleDragLeave()
+    {
+        IsDragOver = false;
+    }
+    
+    private async Task HandleDrop()
+    {
+        IsDragOver = false;
+        await Task.CompletedTask;
+    }
+    
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        ErrorMessage = "";
+        
+        // Validate file size
+        if (e.File != null && e.File.Size > MaxFileSizeBytes)
+        {
+            ErrorMessage = $"File size ({FormatFileSize(e.File.Size)}) exceeds maximum allowed ({FormatFileSize(MaxFileSizeBytes)})";
+            await OnError.InvokeAsync(ErrorMessage);
+            return;
+        }
+        
+        // Validate file type if AcceptedTypes is specified
+        if (!string.IsNullOrEmpty(AcceptedTypes) && e.File != null)
+        {
+            var extension = System.IO.Path.GetExtension(e.File.Name).ToLowerInvariant();
+            var acceptedExtensions = AcceptedTypes.Split(',').Select(t => t.Trim()).ToList();
+            
+            if (!acceptedExtensions.Contains(extension))
+            {
+                ErrorMessage = $"File type '{extension}' is not supported. Accepted types: {AcceptedTypes}";
+                await OnError.InvokeAsync(ErrorMessage);
+                return;
+            }
+        }
+        
+        await OnFileSelected.InvokeAsync(e);
+    }
+    
+    private string FormatFileSize(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB"];
+        double len = bytes;
+        int order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len /= 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+}

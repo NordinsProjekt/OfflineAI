@@ -17,7 +17,7 @@
             &larr; Back to Home
         </button>
         <h1>Document Analysis</h1>
-        <p class="oa-workflow-subtitle">Upload a Swedish YH course plan and extract structured objectives</p>
+        <p class="oa-workflow-subtitle">Upload any document and choose how you want to analyze it</p>
     </div>
 
     <div class="oa-workflow-content">
@@ -78,8 +78,24 @@
             @if (uploadedFile != null && !isAnalyzing && string.IsNullOrEmpty(errorMessage))
             {
                 <div class="oa-analysis-options">
-                    <h3>Vad vill du göra?</h3>
+                    <h3>What would you like to do with this document?</h3>
+                    <p class="oa-options-subtitle">Choose an analysis type below</p>
+                    
                     <div class="oa-option-grid">
+                        @* Generic Options - Always Shown *@
+                        <button class="oa-option-button" @onclick='@(() => AnalyzeDocument("summarize"))'>
+                            <span class="oa-option-icon">[SUM]</span>
+                            <span class="oa-option-text">Summarize</span>
+                            <span class="oa-option-description">Get a concise summary</span>
+                        </button>
+
+                        <button class="oa-option-button" @onclick='@(() => AnalyzeDocument("qa"))'>
+                            <span class="oa-option-icon">[Q&A]</span>
+                            <span class="oa-option-text">Ask Questions</span>
+                            <span class="oa-option-description">Interactive Q&A mode</span>
+                        </button>
+
+                        @* Recommended Actions from TypeDetector *@
                         @foreach (var action in recommendedActions)
                         {
                             <button class="oa-option-button @(action.IsRecommended ? "oa-featured" : "")" 
@@ -369,7 +385,31 @@
 
         try
         {
-            await AnalyzeKursmal();
+            switch (analysisType)
+            {
+                case "summarize":
+                    analysisStatus = "Generating summary...";
+                    StateHasChanged();
+                    await Task.Delay(500);
+                    analysisResult = "SUMMARY\n\n";
+                    analysisResult += "This feature will use AI to create a concise summary of your document.\n\n";
+                    analysisResult += "Feature coming soon!";
+                    break;
+                    
+                case "qa":
+                    analysisStatus = "Preparing Q&A mode...";
+                    StateHasChanged();
+                    await Task.Delay(500);
+                    analysisResult = "QUESTION & ANSWER MODE\n\n";
+                    analysisResult += "This feature will allow you to ask specific questions about the document.\n\n";
+                    analysisResult += "Feature coming soon!";
+                    break;
+                    
+                default:
+                    // Handle Swedish kursplan actions (kunskapsmal, etc.)
+                    await AnalyzeKursmal();
+                    break;
+            }
         }
         catch (OperationCanceledException)
         {

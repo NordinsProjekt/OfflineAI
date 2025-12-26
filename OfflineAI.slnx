@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/1. Domain/">
     <Project Path="Entities/Entities.csproj" Id="179e4a29-6336-4ef4-8dba-fdeddd799797" />
+    <Project Path="Types/Types.csproj" Id="8e013c47-93b1-4905-835a-4e7ccb335e75" />
   </Folder>
   <Folder Name="/2. Application/">
     <Project Path="AI/AI.csproj" Id="92289308-2ae0-4c05-b3d7-44ae55221e1f" />
