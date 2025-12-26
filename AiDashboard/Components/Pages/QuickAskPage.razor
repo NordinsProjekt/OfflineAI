@@ -57,7 +57,7 @@
                                             @msg.Timestamp.Value.ToString("HH:mm:ss")
                                             @if (msg.TokensPerSecond.HasValue)
                                             {
-                                                <span class="oa-msg-speed">• @msg.TokensPerSecond.Value.ToString("F1") tokens/s</span>
+                                                <span class="oa-msg-speed">â€¢ @msg.TokensPerSecond.Value.ToString("F1") tokens/s</span>
                                             }
                                         </div>
                                     }
@@ -145,7 +145,7 @@
 @code {
     private string currentQuestion = "";
     private bool isProcessing = false;
-    private List<QuickAskMessage> messages = new();
+    private readonly List<QuickAskMessage> messages = new();
     
     private string SelectedModel
     {
