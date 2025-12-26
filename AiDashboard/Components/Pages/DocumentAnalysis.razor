@@ -8,6 +8,7 @@
 @inject IJSRuntime JSRuntime
 
 @using System.IO
+@using UglyToad.PdfPig
 
 <PageTitle>Document Analysis - OfflineAI</PageTitle>
 
@@ -32,10 +33,10 @@
                 {
                     <div class="oa-upload-prompt">
                         <div class="oa-upload-icon">[+]</div>
-                        <h2>Drop your YH course plan here</h2>
+                        <h2>Drop your document here</h2>
                         <p>or click to browse</p>
-                        <InputFile @ref="fileInput" id="file-input" OnChange="HandleFileSelected" class="oa-file-input" accept=".txt,.doc,.docx" />
-                        <p class="oa-upload-hint">Supports: TXT, DOCX (Max 10MB)</p>
+                        <InputFile @ref="fileInput" id="file-input" OnChange="HandleFileSelected" class="oa-file-input" accept=".txt,.doc,.docx,.pdf" />
+                        <p class="oa-upload-hint">Supports: TXT, DOCX, PDF (Max 10MB)</p>
                     </div>
                 }
                 else
@@ -151,20 +152,83 @@
                         </div>
                     </div>
                 }
-                <div class="oa-result-box">
-                    <pre>@analysisResult</pre>
-                </div>
-                <div class="oa-result-actions">
-                    <button class="oa-action-button" @onclick="CopyResults">
-                        Kopiera
-                    </button>
-                    <button class="oa-action-button" @onclick="DownloadResults">
-                        Ladda ner
-                    </button>
-                    <button class="oa-action-button" @onclick="AnalyzeAnother">
-                        Analysera annat
-                    </button>
-                </div>
+                
+                @if (isQAMode)
+                {
+                    @* Q&A Interactive Mode *@
+                    <div class="oa-qa-container">
+                        @* Q&A History *@
+                        @if (qaHistory.Count > 0)
+                        {
+                            <div class="oa-qa-history">
+                                @foreach (var (question, answer) in qaHistory)
+                                {
+                                    <div class="oa-qa-exchange">
+                                        <div class="oa-qa-question">
+                                            <span class="oa-qa-label">Q:</span>
+                                            <span class="oa-qa-text">@question</span>
+                                        </div>
+                                        <div class="oa-qa-answer">
+                                            <span class="oa-qa-label">A:</span>
+                                            <span class="oa-qa-text">@answer</span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+
+                        @* Q&A Input *@
+                        <div class="oa-qa-input-section">
+                            <h3>Ask a question about the document</h3>
+                            <div class="oa-qa-input-box">
+                                <input type="text" 
+                                       class="oa-qa-input" 
+                                       placeholder="Type your question here..."
+                                       @bind="currentQuestion"
+                                       @bind:event="oninput"
+                                       @onkeypress="HandleQuestionKeyPress"
+                                       disabled="@isAnalyzing" />
+                                <button class="oa-qa-send-btn" 
+                                        @onclick="AskQuestion"
+                                        disabled="@(isAnalyzing || string.IsNullOrWhiteSpace(currentQuestion))">
+                                    Ask
+                                </button>
+                            </div>
+                        </div>
+
+                        @* Exit Q&A Mode *@
+                        <div class="oa-qa-actions">
+                            <button class="oa-action-button" @onclick="ExitQAMode">
+                                Exit Q&A Mode
+                            </button>
+                            <button class="oa-action-button" @onclick="ClearQAHistory">
+                                Clear History
+                            </button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    @* Regular Result Display *@
+                    <div class="oa-result-box">
+                        <pre>@analysisResult</pre>
+                    </div>
+                }
+                
+                @if (!isQAMode)
+                {
+                    <div class="oa-result-actions">
+                        <button class="oa-action-button" @onclick="CopyResults">
+                            Kopiera
+                        </button>
+                        <button class="oa-action-button" @onclick="DownloadResults">
+                            Ladda ner
+                        </button>
+                        <button class="oa-action-button" @onclick="AnalyzeAnother">
+                            Analysera annat
+                        </button>
+                    </div>
+                }
             </div>
         }
     </div>
@@ -190,6 +254,11 @@
     private DateTime analysisStartTime;
     private bool showAbortButton = false;
     private const int MaxAnalysisTimeMs = 300000; // 5 minutes
+
+    // Q&A mode state
+    private bool isQAMode = false;
+    private string currentQuestion = "";
+    private List<(string Question, string Answer)> qaHistory = [];
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -260,9 +329,24 @@
                 }
                 fullDocumentText = text;
             }
+            else if (extension == ".pdf")
+            {
+                using var memoryStream = new MemoryStream();
+                await file.OpenReadStream(maxAllowedSize: 10485760).CopyToAsync(memoryStream);
+                memoryStream.Position = 0;
+                
+                var (success, text, error) = ExtractTextFromPdfStream(memoryStream);
+                if (!success)
+                {
+                    errorMessage = error;
+                    fullDocumentText = "";
+                    return;
+                }
+                fullDocumentText = text;
+            }
             else
             {
-                errorMessage = $"Filtypen {extension} stöds inte. Använd .txt eller .docx";
+                errorMessage = $"File type {extension} is not supported. Use .txt, .docx, or .pdf";
                 fullDocumentText = "";
                 return;
             }
@@ -342,6 +426,33 @@
         }
     }
 
+    private (bool Success, string Text, string Error) ExtractTextFromPdfStream(MemoryStream stream)
+    {
+        try
+        {
+            using var pdf = PdfDocument.Open(stream);
+            var textBuilder = new System.Text.StringBuilder();
+
+            foreach (var page in pdf.GetPages())
+            {
+                textBuilder.AppendLine(page.Text);
+            }
+
+            var extractedText = textBuilder.ToString().Trim();
+
+            if (string.IsNullOrWhiteSpace(extractedText))
+            {
+                return (false, "", "Ingen textinnehåll hittades i PDF-filen");
+            }
+
+            return (true, extractedText, "");
+        }
+        catch (Exception ex)
+        {
+            return (false, "", $"Fel vid läsning av PDF: {ex.Message}");
+        }
+    }
+
     private void RemoveFile()
     {
         uploadedFile = null;
@@ -388,21 +499,11 @@
             switch (analysisType)
             {
                 case "summarize":
-                    analysisStatus = "Generating summary...";
-                    StateHasChanged();
-                    await Task.Delay(500);
-                    analysisResult = "SUMMARY\n\n";
-                    analysisResult += "This feature will use AI to create a concise summary of your document.\n\n";
-                    analysisResult += "Feature coming soon!";
+                    await AnalyzeSummarize();
                     break;
                     
                 case "qa":
-                    analysisStatus = "Preparing Q&A mode...";
-                    StateHasChanged();
-                    await Task.Delay(500);
-                    analysisResult = "QUESTION & ANSWER MODE\n\n";
-                    analysisResult += "This feature will allow you to ask specific questions about the document.\n\n";
-                    analysisResult += "Feature coming soon!";
+                    await AnalyzeQA();
                     break;
                     
                 default:
@@ -439,6 +540,166 @@
         analysisStatus = "";
         analysisSubStatus = "";
         StateHasChanged();
+    }
+
+    private async Task AnalyzeSummarize()
+    {
+        analysisStatus = "Generating summary...";
+        analysisSubStatus = "Processing document with AI";
+        StateHasChanged();
+        await Task.Delay(300);
+
+        // Check if chat service is available
+        if (Dashboard.ChatService == null)
+        {
+            analysisResult = "ERROR\n\nAI Chat Service is not initialized. Please ensure the LLM is loaded.";
+            return;
+        }
+
+        try
+        {
+            // Create a summarization prompt
+            var prompt = $@"Please provide a concise summary of the following document. Focus on the main points, key information, and overall purpose.
+
+Document to summarize:
+
+{fullDocumentText}
+
+Provide a clear, well-structured summary in 3-5 paragraphs.";
+
+            // Update status
+            analysisStatus = "AI is analyzing the document...";
+            StateHasChanged();
+
+            // Get current generation settings
+            var settings = Dashboard.SettingsService.ToGenerationSettings();
+
+            // Get summary from LLM
+            var summary = await Dashboard.ChatService.SendMessageAsync(
+                message: prompt,
+                ragMode: false,  // Don't use RAG for summarization
+                debugMode: false,
+                showPerformanceMetrics: false,
+                generationSettings: settings,
+                personality: null,
+                useGpu: true,
+                gpuLayers: 35
+            );
+
+            // Format the result
+            analysisResult = $"DOCUMENT SUMMARY\n\n{summary}";
+            
+            analysisStatus = "Summary complete!";
+            analysisSubStatus = "";
+        }
+        catch (Exception ex)
+        {
+            analysisResult = $"ERROR\n\nFailed to generate summary: {ex.Message}";
+            analysisStatus = "Summary failed";
+        }
+    }
+
+    private async Task AnalyzeQA()
+    {
+        analysisStatus = "Initializing Q&A mode...";
+        StateHasChanged();
+        await Task.Delay(300);
+
+        // Check if chat service is available
+        if (Dashboard.ChatService == null)
+        {
+            analysisResult = "ERROR\n\nAI Chat Service is not initialized. Please ensure the LLM is loaded.";
+            return;
+        }
+
+        // Enable Q&A mode
+        isQAMode = true;
+        qaHistory.Clear();
+        currentQuestion = "";
+        analysisResult = "Q&A_MODE_ACTIVE"; // Marker to show results section
+
+        analysisStatus = "Q&A mode ready";
+        analysisSubStatus = "Ask questions about your document";
+    }
+
+    private async Task AskQuestion()
+    {
+        if (string.IsNullOrWhiteSpace(currentQuestion) || Dashboard.ChatService == null)
+            return;
+
+        var question = currentQuestion.Trim();
+        currentQuestion = ""; // Clear input
+
+        isAnalyzing = true;
+        analysisStatus = $"Processing question...";
+        StateHasChanged();
+
+        try
+        {
+            // Create Q&A prompt with document context
+            var prompt = $@"Based on the following document, please answer this question:
+
+Question: {question}
+
+Document content:
+{fullDocumentText}
+
+Provide a clear, accurate answer based only on the information in the document. If the answer is not in the document, please say so.";
+
+            // Get current generation settings
+            var settings = Dashboard.SettingsService.ToGenerationSettings();
+
+            // Get answer from LLM
+            var answer = await Dashboard.ChatService.SendMessageAsync(
+                message: prompt,
+                ragMode: false,
+                debugMode: false,
+                showPerformanceMetrics: false,
+                generationSettings: settings,
+                personality: null,
+                useGpu: true,
+                gpuLayers: 35
+            );
+
+            // Add to history
+            qaHistory.Add((question, answer));
+
+            analysisStatus = $"Ready for next question ({qaHistory.Count} asked)";
+            analysisSubStatus = "";
+        }
+        catch (Exception ex)
+        {
+            qaHistory.Add((question, $"ERROR: {ex.Message}"));
+            analysisStatus = "Error processing question";
+        }
+        finally
+        {
+            isAnalyzing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleQuestionKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(currentQuestion) && !isAnalyzing)
+        {
+            await AskQuestion();
+        }
+    }
+
+    private void ExitQAMode()
+    {
+        isQAMode = false;
+        analysisResult = ""; // Clear results
+        qaHistory.Clear();
+        currentQuestion = "";
+    }
+
+    private void ClearQAHistory()
+    {
+        qaHistory.Clear();
+        analysisStatus = "Q&A mode ready";
+        analysisSubStatus = "Ask questions about your document";
     }
 
     private async Task AnalyzeKursmal()
