@@ -94,7 +94,7 @@
                         disabled="@(string.IsNullOrWhiteSpace(currentQuestion) || isProcessing)">
                     @if (isProcessing)
                     {
-                        <span></span>
+                        <span>Generating...</span>
                     }
                     else
                     {
@@ -205,7 +205,7 @@
         finally
         {
             isProcessing = false;
-            StateHasChanged();
+            await InvokeAsync(StateHasChanged);
         }
     }
 
