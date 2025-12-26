@@ -1,0 +1,227 @@
+.llm-output-container {
+    margin: 1rem 0;
+    padding: 1rem;
+    background: #f8f9fa;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.loading-section {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 2rem;
+    text-align: center;
+    justify-content: center;
+}
+
+.loading-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.loading-text p {
+    margin: 0;
+    font-weight: 500;
+    color: #495057;
+}
+
+.response-section {
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.response-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.response-content {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 6px;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.response-content p {
+    margin: 0.5rem 0;
+    line-height: 1.6;
+    color: #212529;
+}
+
+.response-content pre {
+    margin: 0;
+    padding: 1rem;
+    background: #f8f9fa;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+/* Code block styling */
+.code-block {
+    margin: 1rem 0;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.code-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 0.75rem 1rem;
+    font-weight: 600;
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.code-content {
+    background: #1e1e1e; /* VS Code dark theme background */
+    color: #d4d4d4; /* VS Code default text color */
+    margin: 0;
+    padding: 1.5rem;
+    overflow-x: auto;
+    font-family: 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+
+.code-content code {
+    color: #d4d4d4;
+    background: transparent;
+}
+
+/* IDE-like Syntax Highlighting Colors (VS Code Dark+ theme inspired) */
+
+/* Keywords (purple/blue) */
+.code-content .syntax-keyword {
+    color: #569cd6;
+    font-weight: 500;
+}
+
+/* Strings (orange/brown) */
+.code-content .syntax-string {
+    color: #ce9178;
+}
+
+/* Comments (green) */
+.code-content .syntax-comment {
+    color: #6a9955;
+    font-style: italic;
+}
+
+/* Numbers (light green) */
+.code-content .syntax-number {
+    color: #b5cea8;
+}
+
+/* Types/Classes (cyan) */
+.code-content .syntax-type {
+    color: #4ec9b0;
+}
+
+/* HTML Tags (blue-green) */
+.code-content .syntax-tag {
+    color: #569cd6;
+}
+
+/* HTML Attributes (light blue) */
+.code-content .syntax-attribute {
+    color: #9cdcfe;
+}
+
+/* Razor syntax (magenta) */
+.code-content .syntax-razor {
+    color: #c586c0;
+    font-weight: 500;
+}
+
+/* CSS Selectors (yellow) */
+.code-content .syntax-selector {
+    color: #d7ba7d;
+}
+
+/* CSS Properties (light blue) */
+.code-content .syntax-property {
+    color: #9cdcfe;
+}
+
+/* CSS Values (light green) */
+.code-content .syntax-value {
+    color: #ce9178;
+}
+
+/* Spinner animation */
+.spinner-border {
+    width: 3rem;
+    height: 3rem;
+    border-width: 0.3rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .llm-output-container {
+        padding: 0.75rem;
+    }
+    
+    .loading-section {
+        padding: 1.5rem;
+        flex-direction: column;
+    }
+    
+    .response-content {
+        padding: 1rem;
+    }
+    
+    .code-content {
+        padding: 1rem;
+        font-size: 0.85rem;
+    }
+}
+
+/* Code syntax highlighting hints */
+.code-content {
+    tab-size: 4;
+    -moz-tab-size: 4;
+}
+
+/* Alert styling */
+.alert {
+    margin-top: 1rem;
+}
+
+/* Scrollbar styling for code blocks (for Webkit browsers) */
+.code-content::-webkit-scrollbar {
+    height: 8px;
+}
+
+.code-content::-webkit-scrollbar-track {
+    background: #252526;
+}
+
+.code-content::-webkit-scrollbar-thumb {
+    background: #424242;
+    border-radius: 4px;
+}
+
+.code-content::-webkit-scrollbar-thumb:hover {
+    background: #4e4e4e;
+}

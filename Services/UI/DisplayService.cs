@@ -129,6 +129,90 @@ public static class DisplayService
     #region Response Formatting
     
     /// <summary>
+    /// Format and display an LLM response with proper code block formatting.
+    /// </summary>
+    /// <param name="response">Raw LLM response</param>
+    /// <param name="useFormatter">Whether to apply code formatting. Default is true.</param>
+    public static void ShowLlmResponse(string response, bool useFormatter = true)
+    {
+        if (useFormatter)
+        {
+            // Use the formatter service if available
+            // For now, we'll do basic formatting inline
+            response = FormatCodeBlocks(response);
+        }
+        
+        Console.WriteLine(response);
+    }
+    
+    /// <summary>
+    /// Basic code block formatting for console output.
+    /// Detects ```language code``` patterns and formats them.
+    /// </summary>
+    private static string FormatCodeBlocks(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+        
+        // Pattern to detect code blocks
+        var pattern = @"```([a-zA-Z]+)(.*?)```";
+        var matches = System.Text.RegularExpressions.Regex.Matches(text, pattern, 
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        
+        if (matches.Count == 0)
+            return text; // No code blocks found
+        
+        var result = text;
+        foreach (System.Text.RegularExpressions.Match match in matches)
+        {
+            var language = match.Groups[1].Value;
+            var code = match.Groups[2].Value.Trim();
+            
+            // Format the code block with headers
+            var formatted = $"\n{'='}{language.ToUpper()} CODE{'='}\n{FormatCode(code)}\n{'='}\n";
+            result = result.Replace(match.Value, formatted);
+        }
+        
+        return result;
+    }
+    
+    /// <summary>
+    /// Format code with basic indentation.
+    /// </summary>
+    private static string FormatCode(string code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+            return code;
+        
+        var lines = code.Split(new[] { '\n', '\r' }, StringSplitOptions.None);
+        var formatted = new List<string>();
+        var indent = 0;
+        
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+            if (string.IsNullOrEmpty(trimmed))
+            {
+                formatted.Add("");
+                continue;
+            }
+            
+            // Decrease indent for closing braces
+            if (trimmed.StartsWith("}") || trimmed.StartsWith("]"))
+                indent = Math.Max(0, indent - 1);
+            
+            // Add indented line
+            formatted.Add(new string(' ', indent * 4) + trimmed);
+            
+            // Increase indent for opening braces
+            if (trimmed.EndsWith("{") || trimmed.EndsWith("["))
+                indent++;
+        }
+        
+        return string.Join(Environment.NewLine, formatted);
+    }
+    
+    /// <summary>
     /// Format performance metrics to append to a response.
     /// </summary>
     /// <param name="totalTimeMs">Total time in milliseconds</param>

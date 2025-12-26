@@ -1,6 +1,6 @@
 using AiDashboard.Components;
 using AiDashboard.Services;
-using System.IO;
+using AiDashboard.Services.Interfaces;
 using Application.AI.Pooling;
 using Application.AI.Management;
 using Application.AI.Embeddings;
@@ -12,6 +12,7 @@ using Infrastructure.Data.Dapper;
 using Services.Configuration;
 using Services.Management;
 using Services.Language;
+using Services.QuickAsk;
 
 namespace AiDashboard;
 
@@ -32,11 +33,26 @@ public class Program
         // Register language services for stop words filtering
         builder.Services.AddSingleton<ILanguageStopWordsService, LanguageStopWordsService>();
 
+        // Register LLM response formatter service
+        builder.Services.AddSingleton<ILlmResponseFormatterService, LlmResponseFormatterService>();
+
+        // Register QuickAsk service for conversation management
+        builder.Services.AddSingleton<IQuickAskService, QuickAskService>();
+
+        // Register document analysis services
+        builder.Services.AddScoped<IDocumentAnalysisService, DocumentAnalysisService>();
+        builder.Services.AddScoped<IKursplanAnalysisService, KursplanAnalysisService>();
+        builder.Services.AddScoped<IDocumentTypeDetector, DocumentTypeDetector>();
+
+        // Register web scraper service
+        builder.Services.AddHttpClient();
+        builder.Services.AddScoped<IWebScraperService, WebScraperService>();
+
         // Read configuration for LLM
         var llmExe = appConfig.Llm?.ExecutablePath ?? builder.Configuration["AppConfiguration:Llm:ExecutablePath"] ?? string.Empty;
         var llmModel = appConfig.Llm?.ModelPath ?? builder.Configuration["AppConfiguration:Llm:ModelPath"] ?? string.Empty;
         var poolMax = appConfig.Pool?.MaxInstances ?? (int.TryParse(builder.Configuration["AppConfiguration:Pool:MaxInstances"], out var m) ? m : 3);
-        var poolTimeout = appConfig.Pool?.TimeoutMs ?? (int.TryParse(builder.Configuration["AppConfiguration:Pool:TimeoutMs"], out var t) ? t : 30000);
+        var poolTimeout = appConfig.Pool?.TimeoutMs ?? (int.TryParse(builder.Configuration["AppConfiguration:Pool:TimeoutMs"], out var t) ? t : 300000); // 5 minutes default (changed from 30 seconds)
 
         // Read embedding configuration
         var embeddingModelPath = appConfig.Embedding?.ModelPath ?? builder.Configuration["AppConfiguration:Embedding:ModelPath"] ?? string.Empty;

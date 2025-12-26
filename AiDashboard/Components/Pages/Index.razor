@@ -1,0 +1,149 @@
+@page "/"
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@inject DashboardState Dashboard
+
+<PageTitle>OfflineAI - Home</PageTitle>
+
+<div class="oa-home-landing">
+    <div class="oa-home-container">
+        <div class="oa-home-header">
+            <h1 class="oa-home-title">
+                <span class="oa-logo-icon">[AI]</span>
+                OfflineAI
+            </h1>
+            <p class="oa-home-subtitle">Your Private AI Assistant Platform</p>
+            <p class="oa-home-description">
+                Choose your AI workflow below. All processing happens locally on your machine - 
+                your data never leaves your computer.
+            </p>
+        </div>
+
+        <div class="oa-home-grid">
+            <!-- Chat Dashboard -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/chat"))">
+                <div class="oa-card-icon">[CHAT]</div>
+                <h2 class="oa-card-title">Chat Dashboard</h2>
+                <p class="oa-card-description">
+                    Interactive chat with RAG (Retrieval-Augmented Generation). 
+                    Talk to your AI with full control over settings, models, and knowledge base.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">RAG Mode</span>
+                    <span class="oa-feature-badge">Knowledge Base</span>
+                    <span class="oa-feature-badge">Model Settings</span>
+                </div>
+                <button class="oa-card-button">
+                    Open Chat Dashboard &rarr;
+                </button>
+            </div>
+
+            <!-- Document Analysis -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/document-analysis"))">
+                <div class="oa-card-icon">[DOC]</div>
+                <h2 class="oa-card-title">Document Analysis</h2>
+                <p class="oa-card-description">
+                    Upload a document and get instant AI-powered analysis. 
+                    Extract insights, summaries, and answers from your documents.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">PDF Support</span>
+                    <span class="oa-feature-badge">Text Extraction</span>
+                    <span class="oa-feature-badge">Q&A</span>
+                </div>
+                <button class="oa-card-button">
+                    Analyze Document &rarr;
+                </button>
+            </div>
+
+            <!-- Batch Processing -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/batch-processing"))">
+                <div class="oa-card-icon">[BATCH]</div>
+                <h2 class="oa-card-title">Batch Processing</h2>
+                <p class="oa-card-description">
+                    Process multiple documents at once. Perfect for building knowledge bases 
+                    from document collections.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">Bulk Upload</span>
+                    <span class="oa-feature-badge">Auto-Vectorize</span>
+                    <span class="oa-feature-badge">Progress Tracking</span>
+                </div>
+                <button class="oa-card-button">
+                    Start Batch Job &rarr;
+                </button>
+            </div>
+
+            <!-- Quick Ask -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/quick-ask"))">
+                <div class="oa-card-icon">[Q]</div>
+                <h2 class="oa-card-title">Quick Ask</h2>
+                <p class="oa-card-description">
+                    Simple, fast AI queries without setup. Just ask a question and get an answer.
+                    No knowledge base, pure LLM conversation.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">No Setup</span>
+                    <span class="oa-feature-badge">Fast Response</span>
+                    <span class="oa-feature-badge">Direct Mode</span>
+                </div>
+                <button class="oa-card-button">
+                    Ask Question &rarr;
+                </button>
+            </div>
+
+            <!-- Knowledge Base Builder -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/knowledge-builder"))">
+                <div class="oa-card-icon">[KB]</div>
+                <h2 class="oa-card-title">Knowledge Base</h2>
+                <p class="oa-card-description">
+                    Manage your knowledge collections. View, edit, and organize your 
+                    vectorized documents and embeddings.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">Collections</span>
+                    <span class="oa-feature-badge">Search</span>
+                    <span class="oa-feature-badge">Manage</span>
+                </div>
+                <button class="oa-card-button">
+                    Manage Knowledge &rarr;
+                </button>
+            </div>
+
+            <!-- Settings & Config -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/settings"))">
+                <div class="oa-card-icon">[SET]</div>
+                <h2 class="oa-card-title">Settings</h2>
+                <p class="oa-card-description">
+                    Configure models, personalities, GPU settings, and advanced options. 
+                    Customize your AI experience.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">Models</span>
+                    <span class="oa-feature-badge">GPU Config</span>
+                    <span class="oa-feature-badge">Personalities</span>
+                </div>
+                <button class="oa-card-button">
+                    Open Settings &rarr;
+                </button>
+            </div>
+        </div>
+
+        <div class="oa-home-footer">
+            <p class="oa-footer-text">
+                <strong>100% Private:</strong> All AI processing runs locally on your machine. 
+                No data is sent to external servers.
+            </p>
+            <p class="oa-footer-stats">
+                <span>Model: @ModelInfo</span>
+                <span class="separator">•</span>
+                <span>Status: @StatusInfo</span>
+            </p>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string ModelInfo => Dashboard.ModelService?.CurrentModel ?? "Loading...";
+    private string StatusInfo => Dashboard.ModelService?.CurrentModel != null ? "Ready" : "Initializing...";
+}

@@ -138,7 +138,7 @@ namespace AiDashboard.Services
             BotPersonalityEntity? personality = null,
             bool useGpu = false,
             int gpuLayers = 0,
-            int timeoutSeconds = 30)
+            int timeoutSeconds = 300) // Changed from 30 to 300 (5 minutes)
         {
             if (string.IsNullOrWhiteSpace(message))
                 throw new ArgumentNullException(nameof(message));
@@ -146,7 +146,7 @@ namespace AiDashboard.Services
             // Ensure pool is initialized before first use
             await EnsurePoolInitializedAsync();
 
-            // Update timeout in the model pool
+            // Update timeout in the model pool (5 minutes = 300,000 ms)
             _modelPool.TimeoutMs = timeoutSeconds * 1000;
 
             // Check pool health

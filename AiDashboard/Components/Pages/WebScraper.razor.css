@@ -1,0 +1,237 @@
+.web-scraper-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+.web-scraper-container h3 {
+    color: #2c3e50;
+    margin-bottom: 0.5rem;
+}
+
+.description {
+    color: #7f8c8d;
+    margin-bottom: 2rem;
+}
+
+.scraper-form {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.input-group {
+    margin-bottom: 1rem;
+}
+
+.input-group label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: #2c3e50;
+}
+
+.url-input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 2px solid #ddd;
+    border-radius: 6px;
+    font-size: 1rem;
+    transition: border-color 0.2s;
+}
+
+.url-input:focus {
+    outline: none;
+    border-color: #3498db;
+}
+
+.max-length-input {
+    width: 200px;
+    padding: 0.75rem;
+    border: 2px solid #ddd;
+    border-radius: 6px;
+    font-size: 1rem;
+}
+
+.button-group {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.btn-primary, .btn-secondary, .btn-copy {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-primary {
+    background: #3498db;
+    color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #2980b9;
+}
+
+.btn-primary:disabled {
+    background: #bdc3c7;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: #95a5a6;
+    color: white;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: #7f8c8d;
+}
+
+.btn-copy {
+    background: #27ae60;
+    color: white;
+    margin-bottom: 1rem;
+}
+
+.btn-copy:hover {
+    background: #229954;
+}
+
+.error-message {
+    background: #fee;
+    border-left: 4px solid #e74c3c;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border-radius: 4px;
+    color: #c0392b;
+}
+
+.result-section {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+
+.result-section h4 {
+    color: #2c3e50;
+    margin-bottom: 1rem;
+}
+
+.metadata {
+    background: #f8f9fa;
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.metadata-item {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #ecf0f1;
+}
+
+.metadata-item:last-child {
+    border-bottom: none;
+}
+
+.metadata-item strong {
+    color: #2c3e50;
+    margin-right: 0.5rem;
+}
+
+.metadata-item a {
+    color: #3498db;
+    text-decoration: none;
+}
+
+.metadata-item a:hover {
+    text-decoration: underline;
+}
+
+.metadata-section {
+    margin-bottom: 1.5rem;
+}
+
+.metadata-section h5 {
+    color: #2c3e50;
+    margin-bottom: 0.75rem;
+}
+
+.tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    border-bottom: 2px solid #ecf0f1;
+}
+
+.tab-button {
+    background: transparent;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #7f8c8d;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: all 0.2s;
+}
+
+.tab-button:hover {
+    color: #2c3e50;
+}
+
+.tab-button.active {
+    color: #3498db;
+    border-bottom-color: #3498db;
+}
+
+.tab-content {
+    margin-top: 1rem;
+}
+
+.content-box {
+    background: #f8f9fa;
+    border-radius: 6px;
+    padding: 1rem;
+}
+
+.copy-button-container {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.llm-context, .raw-content {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 1rem;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.headers-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.headers-list li {
+    padding: 0.5rem;
+    border-bottom: 1px solid #ecf0f1;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.headers-list li:last-child {
+    border-bottom: none;
+}

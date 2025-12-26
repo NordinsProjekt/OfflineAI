@@ -1,0 +1,43 @@
+Programmering i C#
+(50 yhp)
+
+Utbildning: Systemutvecklare .NET
+Kursnummer: SU201
+Valbar kurs: Nej
+Förkunskapskrav: Grundläggande programmering
+
+Efter genomgången kurs ska den studerande ha följande:
+
+#Kunskaper
+Objektorienterad programmering och designmönster
+C# syntax, datatyper och kontrollstrukturer
+Klasser, objekt, arv och polymorfism
+Interfaces och abstrakta klasser
+LINQ och lambda-uttryck
+Asynkron programmering med async/await
+Exception handling och felhantering
+Enhetstestning med xUnit
+Dependency Injection och IoC-containers
+.NET Core och .NET Framework skillnader
+
+#Färdigheter
+Skriva välstrukturerad och underhållbar C#-kod
+Implementera objektorienterade designmönster
+Använda LINQ för datamanipulering
+Skriva och köra enhetstester
+Debugga och profilera C#-applikationer
+Arbeta med asynkron kod och Tasks
+Hantera fel och exceptions på ett robust sätt
+Använda Visual Studio och Visual Studio Code effektivt
+Implementera dependency injection i applikationer
+Versionshantera kod med Git
+
+#Kompetenser
+Utveckla kompletta C#-applikationer med god kodkvalitet
+Designa och implementera skalbara och testbara lösningar
+Välja lämpliga designmönster för olika problemställningar
+Refaktorera och optimera befintlig kod
+Samarbeta i team med kodgranskning och pair programming
+Felsöka komplexa problem systematiskt
+Dokumentera kod och tekniska lösningar tydligt
+Hålla sig uppdaterad med nya C#-funktioner och best practices

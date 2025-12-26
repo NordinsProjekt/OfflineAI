@@ -1,0 +1,113 @@
+@using AiDashboard.Services.Interfaces
+@using System.Text
+@inject ILlmResponseFormatterService Formatter
+
+<div class="llm-output-container">
+    @if (IsLoading)
+    {
+        <div class="loading-section">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <div class="loading-text">
+                <p>@LoadingMessage</p>
+                @if (ShowProgress && ElapsedSeconds > 0)
+                {
+                    <small class="text-muted">Elapsed: @ElapsedSeconds seconds</small>
+                }
+            </div>
+        </div>
+    }
+    
+    @if (!string.IsNullOrEmpty(Response) && !IsLoading)
+    {
+        <div class="response-section">
+            <div class="response-header">
+                <span class="badge bg-success">? Complete</span>
+                @if (CompletionTime > 0)
+                {
+                    <small class="text-muted ms-2">(@CompletionTime seconds)</small>
+                }
+            </div>
+            
+            <div class="response-content">
+                @if (FormattedResponse != null)
+                {
+                    @((MarkupString)FormattedResponse)
+                }
+                else
+                {
+                    <pre>@Response</pre>
+                }
+            </div>
+        </div>
+    }
+    
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="alert alert-danger" role="alert">
+            <strong>Error:</strong> @ErrorMessage
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public bool IsLoading { get; set; }
+    [Parameter] public string? Response { get; set; }
+    [Parameter] public string? ErrorMessage { get; set; }
+    [Parameter] public string LoadingMessage { get; set; } = "Processing your request...";
+    [Parameter] public bool ShowProgress { get; set; } = true;
+    [Parameter] public int ElapsedSeconds { get; set; }
+    [Parameter] public double CompletionTime { get; set; }
+    [Parameter] public bool AutoFormatCode { get; set; } = true;
+    
+    private string? FormattedResponse => AutoFormatCode && !string.IsNullOrEmpty(Response) 
+        ? FormatResponseAsHtml(Formatter.FormatResponse(Response))
+        : null;
+    
+    private string FormatResponseAsHtml(string formattedText)
+    {
+        if (string.IsNullOrWhiteSpace(formattedText))
+            return string.Empty;
+        
+        var html = new StringBuilder();
+        var lines = formattedText.Split('\n');
+        bool inCodeBlock = false;
+        string currentLanguage = "";
+        
+        foreach (var line in lines)
+        {
+            // Detect code block start
+            if (line.StartsWith("[") && line.Contains(" Code]"))
+            {
+                inCodeBlock = true;
+                currentLanguage = line.Replace("[", "").Replace(" Code]", "").Trim();
+                html.AppendLine($"<div class='code-block'>");
+                html.AppendLine($"<div class='code-header'>{currentLanguage}</div>");
+                html.AppendLine($"<pre class='code-content'><code>");
+                continue;
+            }
+            
+            // Detect code block end
+            if (line.StartsWith("[End ") && line.Contains(" Code]"))
+            {
+                html.AppendLine("</code></pre>");
+                html.AppendLine("</div>");
+                inCodeBlock = false;
+                continue;
+            }
+            
+            // Add line content
+            if (inCodeBlock)
+            {
+                html.AppendLine(System.Web.HttpUtility.HtmlEncode(line));
+            }
+            else
+            {
+                html.AppendLine($"<p>{System.Web.HttpUtility.HtmlEncode(line)}</p>");
+            }
+        }
+        
+        return html.ToString();
+    }
+}

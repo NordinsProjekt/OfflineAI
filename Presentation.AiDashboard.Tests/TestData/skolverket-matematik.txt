@@ -1,0 +1,40 @@
+## Matematik 1c
+*(Gymnasieskolan, 100 poäng)*
+
+### Ämnets syfte
+Undervisningen i ämnet matematik ska syfta till att eleverna utvecklar kunskaper om matematik och matematikens användning i vardagen och inom olika ämnesområden. Undervisningen ska bidra till att eleverna utvecklar intresse för matematik och tilltro till sin förmåga att använda matematik i olika sammanhang.
+
+### Centralt innehåll
+
+**Aritmetik, algebra och geometri**
+- Hantering av algebraiska uttryck, inklusive faktorisering och utveckling av kvadreringsregler och konjugatregeln
+- Begreppet linjär olikhet samt hur man löser linjära ekvationer, olikheter och andra typer av ekvationer genom att använda ett logiskt resonemang, grundläggande räknetekniker och kontroll av lösningar
+- Hur linjära ekvationssystem kan ställas upp och lösas med olika metoder
+- Begreppet funktion och hur man beskriver den
+- Begreppen linjär och exponentiell funktion samt egenskaper hos dessa funktioner
+- Representationer av funktioner i form av ord, funktionsuttryck, tabeller och grafer
+
+**Samband och förändring**
+- Skillnaden mellan ekvation och funktion
+- Hur olika representationer av en funktion kan användas i olika sammanhang
+- Hur man undersöker och beskriver förändringshastighet
+
+**Sannolikhet och statistik**
+- Begreppen oberoende och beroende händelse samt komplementhändelse
+- Metoder för beräkning av sannolikheter vid slumpförsök i flera steg med exempel från spel och risk- och säkerhetsbedömningar
+- Hur man identifierar samband mellan två variabler
+- Skillnaden mellan korrelation och kausalitet
+
+### Kunskapskrav
+
+**Betyg E**
+Eleven kan **översiktligt** beskriva begrepp och samband mellan begrepp samt använda dem i **enkla** situationer.
+Eleven kan välja och använda **i huvudsak fungerande** matematiska metoder med **viss** anpassning till sammanhanget för att göra beräkningar och lösa rutinuppgifter inom aritmetik, algebra, geometri, sannolikhet, statistik samt samband och förändring med **tillfredsställande** resultat.
+
+**Betyg C**
+Eleven kan **utförligt** beskriva begrepp och samband mellan begrepp samt använda dem i olika situationer.
+Eleven kan välja och använda **ändamålsenliga** matematiska metoder med **relativt god** anpassning till sammanhanget för att göra beräkningar och lösa rutinuppgifter inom aritmetik, algebra, geometri, sannolikhet, statistik samt samband och förändring med **gott** resultat.
+
+**Betyg A**
+Eleven kan **utförligt och nyanserat** beskriva begrepp och samband mellan begrepp samt använda dem i **nya** situationer.
+Eleven kan välja och använda **ändamålsenliga och effektiva** matematiska metoder med **god** anpassning till sammanhanget för att göra beräkningar och lösa rutinuppgifter inom aritmetik, algebra, geometri, sannolikhet, statistik samt samband och förändring med **mycket gott** resultat.

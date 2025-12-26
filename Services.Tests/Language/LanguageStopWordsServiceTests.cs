@@ -421,7 +421,7 @@ public class LanguageStopWordsServiceTests
     }
 
     [Fact]
-    public void FilterSwedishQuery_VarKanJagLämnaBatterier_ShouldKeepBatterier()
+    public void FilterSwedishQuery_VarKanJagLamnaBatterier_ShouldKeepBatterier()
     {
         // Arrange
         var query = "Var kan jag lämna batterier?";
