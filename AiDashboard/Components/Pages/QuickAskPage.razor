@@ -1,0 +1,222 @@
+@page "/quick-ask"
+@namespace AiDashboard.Components.Pages
+@using global::Services.QuickAsk
+
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@inject DashboardState Dashboard
+@inject AiDashboard.Services.Interfaces.ILlmResponseFormatterService Formatter
+@inject IQuickAskService QuickAskService
+
+<PageTitle>Quick Ask - OfflineAI</PageTitle>
+
+<div class="oa-quick-ask-page">
+    <div class="oa-quick-header">
+        <button class="oa-back-button" @onclick="@(() => Navigation.NavigateTo("/"))">
+            Back to Home
+        </button>
+        <h1>Quick Ask</h1>
+        <p class="oa-quick-subtitle">Ask anything, get instant answers from your local AI</p>
+    </div>
+
+    <div class="oa-quick-container">
+        <div class="oa-quick-card">
+            <div class="oa-conversation">
+                @if (messages.Count == 0)
+                {
+                    <div class="oa-welcome">
+                        <h2>Ready to help!</h2>
+                        <p>Ask me anything - I'm running locally on your machine.</p>
+                        <div class="oa-example-questions">
+                            <p class="oa-examples-label">Try asking:</p>
+                            <button class="oa-example-chip" @onclick="@(() => AskExample("Explain quantum computing in simple terms"))">
+                                Explain quantum computing
+                            </button>
+                            <button class="oa-example-chip" @onclick="@(() => AskExample("Write a haiku about programming"))">
+                                Write a haiku about programming
+                            </button>
+                            <button class="oa-example-chip" @onclick="@(() => AskExample("What are the benefits of local AI?"))">
+                                Benefits of local AI
+                            </button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="oa-messages-list">
+                        @foreach (var msg in messages)
+                        {
+                            <div class="oa-message @(msg.IsUser ? "user" : "ai")">
+                                <div class="oa-msg-avatar">
+                                </div>
+                                <div class="oa-msg-content">
+                                    <div class="oa-msg-text">@((MarkupString)msg.FormattedText)</div>
+                                    @if (!msg.IsUser && msg.Timestamp.HasValue)
+                                    {
+                                        <div class="oa-msg-meta">
+                                            @msg.Timestamp.Value.ToString("HH:mm:ss")
+                                            @if (msg.TokensPerSecond.HasValue)
+                                            {
+                                                <span class="oa-msg-speed">• @msg.TokensPerSecond.Value.ToString("F1") tokens/s</span>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        @if (isProcessing)
+                        {
+                            <div class="oa-message ai">
+                                <div class="oa-msg-avatar"></div>
+                                <div class="oa-msg-content">
+                                    <div class="oa-typing-indicator">
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="oa-input-area">
+                <textarea class="oa-quick-input"
+                          placeholder="Type your question here..."
+                          @bind="currentQuestion"
+                          @onkeydown="HandleKeyPress"
+                          rows="3"
+                          disabled="@isProcessing"></textarea>
+                <button class="oa-send-button"
+                        @onclick="SendQuestion"
+                        disabled="@(string.IsNullOrWhiteSpace(currentQuestion) || isProcessing)">
+                    @if (isProcessing)
+                    {
+                        <span></span>
+                    }
+                    else
+                    {
+                        <span>Send</span>
+                    }
+                </button>
+            </div>
+
+            @if (messages.Count > 0)
+            {
+                <div class="oa-quick-actions">
+                    <button class="oa-action-btn" @onclick="ClearConversation">
+                        Clear Chat
+                    </button>
+                </div>
+            }
+        </div>
+
+        <div class="oa-quick-info">
+            <div class="oa-info-badge">
+                <span>100% Private - Runs on your machine</span>
+            </div>
+            <div class="oa-info-badge">
+                <span>No setup required - Just ask!</span>
+            </div>
+            @if (Dashboard.ModelService.AvailableModels.Count > 0)
+            {
+                <div class="oa-info-badge oa-model-selector">
+                    <span class="model-label-text">Model:</span>
+                    <select class="oa-model-dropdown" @bind="SelectedModel" @bind:after="OnModelChanged" title="@Dashboard.ModelService.CurrentModel">
+                        @foreach (var model in Dashboard.ModelService.AvailableModels)
+                        {
+                            <option value="@model" title="@model">@QuickAskService.FormatModelName(model)</option>
+                        }
+                    </select>
+                </div>
+            }
+            else
+            {
+                <div class="oa-info-badge">
+                    <span>Model: @QuickAskService.FormatModelName(Dashboard.ModelService.CurrentModel)</span>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private string currentQuestion = "";
+    private bool isProcessing = false;
+    private List<QuickAskMessage> messages = new();
+    
+    private string SelectedModel
+    {
+        get => Dashboard.ModelService.CurrentModel;
+        set => Dashboard.ModelService.CurrentModel = value;
+    }
+
+    private async Task AskExample(string question)
+    {
+        currentQuestion = question;
+        await SendQuestion();
+    }
+
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey && !isProcessing)
+        {
+            await SendQuestion();
+        }
+    }
+
+    private async Task SendQuestion()
+    {
+        if (string.IsNullOrWhiteSpace(currentQuestion) || isProcessing)
+            return;
+
+        // Create user message using service
+        var userMessage = QuickAskService.CreateUserMessage(currentQuestion);
+        messages.Add(userMessage);
+
+        var question = currentQuestion;
+        currentQuestion = "";
+        isProcessing = true;
+        StateHasChanged();
+
+        var startTime = DateTime.Now;
+
+        try
+        {
+            // Call the QuickAsk-specific method that disables RAG
+            var response = await Dashboard.SendQuickAskAsync(question);
+
+            // Create AI message using service
+            var aiMessage = QuickAskService.CreateAiMessage(response, startTime);
+            
+            // Apply full formatting to AI response
+            aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
+            
+            messages.Add(aiMessage);
+        }
+        catch (Exception ex)
+        {
+            // Create error message using service
+            var errorMessage = QuickAskService.CreateErrorMessage(ex.Message);
+            messages.Add(errorMessage);
+        }
+        finally
+        {
+            isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ClearConversation()
+    {
+        messages.Clear();
+    }
+
+    private async Task OnModelChanged()
+    {
+        // Trigger UI refresh
+        await InvokeAsync(StateHasChanged);
+    }
+}

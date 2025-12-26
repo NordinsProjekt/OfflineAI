@@ -1,7 +1,6 @@
 using AiDashboard.Components;
 using AiDashboard.Services;
 using AiDashboard.Services.Interfaces;
-using System.IO;
 using Application.AI.Pooling;
 using Application.AI.Management;
 using Application.AI.Embeddings;
@@ -13,6 +12,7 @@ using Infrastructure.Data.Dapper;
 using Services.Configuration;
 using Services.Management;
 using Services.Language;
+using Services.QuickAsk;
 
 namespace AiDashboard;
 
@@ -35,6 +35,9 @@ public class Program
 
         // Register LLM response formatter service
         builder.Services.AddSingleton<ILlmResponseFormatterService, LlmResponseFormatterService>();
+
+        // Register QuickAsk service for conversation management
+        builder.Services.AddSingleton<IQuickAskService, QuickAskService>();
 
         // Register document analysis services
         builder.Services.AddScoped<IDocumentAnalysisService, DocumentAnalysisService>();
