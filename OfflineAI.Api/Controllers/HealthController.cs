@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using OfflineAI.Api.Models;
+using Services.Configuration;
 
 namespace OfflineAI.Api.Controllers;
 
@@ -11,10 +12,14 @@ namespace OfflineAI.Api.Controllers;
 public class HealthController : ControllerBase
 {
     private readonly ILogger<HealthController> _logger;
+    private readonly AppConfiguration _appConfig;
 
-    public HealthController(ILogger<HealthController> logger)
+    public HealthController(
+        ILogger<HealthController> logger,
+        AppConfiguration appConfig)
     {
         _logger = logger;
+        _appConfig = appConfig;
     }
 
     /// <summary>
@@ -44,19 +49,50 @@ public class HealthController : ControllerBase
     [ProducesResponseType(typeof(List<ModelInfo>), StatusCodes.Status200OK)]
     public ActionResult<List<ModelInfo>> GetModels()
     {
-        // TODO: Get actual models from configuration/service
-        var models = new List<ModelInfo>
+        var models = new List<ModelInfo>();
+        var llmSettings = _appConfig.Llm;
+
+        if (llmSettings != null && !string.IsNullOrEmpty(llmSettings.ModelPath))
         {
-            new ModelInfo
+            // Extract model name from path if not explicitly set
+            var modelName = llmSettings.ModelName;
+            if (string.IsNullOrEmpty(modelName))
             {
-                Name = "tinyllama",
-                DisplayName = "TinyLlama 1.1B",
-                Description = "Fast, lightweight model for quick responses",
-                IsDefault = true,
-                MaxContextLength = 2048,
-                IsAvailable = true
+                modelName = Path.GetFileNameWithoutExtension(llmSettings.ModelPath);
             }
-        };
+
+            // Determine display name
+            var displayName = llmSettings.ModelType ?? modelName ?? "Local LLM";
+
+            // Check if model file exists
+            var isAvailable = !string.IsNullOrEmpty(llmSettings.ModelPath) &&
+                            !string.IsNullOrEmpty(llmSettings.ExecutablePath) &&
+                            System.IO.File.Exists(llmSettings.ModelPath) &&
+                            System.IO.File.Exists(llmSettings.ExecutablePath);
+
+            models.Add(new ModelInfo
+            {
+                Name = modelName?.ToLowerInvariant() ?? "local-llm",
+                DisplayName = displayName,
+                Description = $"Local LLM model{(llmSettings.UseGpu ? " (GPU-accelerated)" : "")}",
+                IsDefault = true,
+                MaxContextLength = llmSettings.ContextSize > 0 ? llmSettings.ContextSize : 2048,
+                IsAvailable = isAvailable
+            });
+        }
+        else
+        {
+            // Return default entry if no configuration is available
+            models.Add(new ModelInfo
+            {
+                Name = "not-configured",
+                DisplayName = "No Model Configured",
+                Description = "Please configure LLM settings in appsettings.json or User Secrets",
+                IsDefault = true,
+                MaxContextLength = 0,
+                IsAvailable = false
+            });
+        }
 
         return Ok(models);
     }

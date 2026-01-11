@@ -13,6 +13,7 @@
   </Folder>
   <Folder Name="/4. Presentation/">
     <Project Path="AiDashboard/AiDashboard.csproj" Id="8786bc8e-07bd-4bb8-9bd3-3fd5cefbdf5b" />
+    <Project Path="OfflineAI.Api/OfflineAI.Api.csproj" />
   </Folder>
   <Folder Name="/98. Benchmarks/" />
   <Folder Name="/99. UnitTests/">

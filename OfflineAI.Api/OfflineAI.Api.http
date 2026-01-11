@@ -1,6 +1,88 @@
-@OfflineAI.Api_HostAddress = http://localhost:5118
+@OfflineAI.Api_HostAddress = https://localhost:7015
 
-GET {{OfflineAI.Api_HostAddress}}/weatherforecast/
+### Health Check
+GET {{OfflineAI.Api_HostAddress}}/api/Health
 Accept: application/json
 
-###
+### Get Available Models
+GET {{OfflineAI.Api_HostAddress}}/api/Health/models
+Accept: application/json
+
+### Simple Query - Math Question
+POST {{OfflineAI.Api_HostAddress}}/api/Query
+Content-Type: application/json
+
+{
+  "question": "What is 10+9?",
+  "enableRag": false,
+  "maxTokens": 512,
+  "temperature": 0.3,
+  "topK": 3,
+  "minRelevanceScore": 0.5
+}
+
+### Query with Context
+POST {{OfflineAI.Api_HostAddress}}/api/Query
+Content-Type: application/json
+
+{
+  "question": "Who is the main character?",
+  "context": "In the story of Harry Potter, a young wizard attends Hogwarts School of Witchcraft and Wizardry.",
+  "enableRag": true,
+  "maxTokens": 512,
+  "temperature": 0.3,
+  "topK": 3,
+  "minRelevanceScore": 0.5
+}
+
+### Creative Query - Higher Temperature
+POST {{OfflineAI.Api_HostAddress}}/api/Query
+Content-Type: application/json
+
+{
+  "question": "Write a short poem about coding",
+  "enableRag": false,
+  "maxTokens": 256,
+  "temperature": 0.9,
+  "topK": 3,
+  "minRelevanceScore": 0.5
+}
+
+### Validate Request - Valid
+POST {{OfflineAI.Api_HostAddress}}/api/Query/validate
+Content-Type: application/json
+
+{
+  "question": "What is 10+9?",
+  "enableRag": false,
+  "maxTokens": 512,
+  "temperature": 0.3,
+  "topK": 3,
+  "minRelevanceScore": 0.5
+}
+
+### Validate Request - Invalid (missing question)
+POST {{OfflineAI.Api_HostAddress}}/api/Query/validate
+Content-Type: application/json
+
+{
+  "question": "",
+  "enableRag": false,
+  "maxTokens": 512,
+  "temperature": 0.3,
+  "topK": 3,
+  "minRelevanceScore": 0.5
+}
+
+### Validate Request - Invalid (bad temperature)
+POST {{OfflineAI.Api_HostAddress}}/api/Query/validate
+Content-Type: application/json
+
+{
+  "question": "Test question",
+  "enableRag": false,
+  "maxTokens": 512,
+  "temperature": 3.5,
+  "topK": 3,
+  "minRelevanceScore": 0.5
+}

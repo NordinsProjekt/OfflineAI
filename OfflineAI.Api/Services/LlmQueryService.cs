@@ -1,4 +1,5 @@
 using Application.AI.Chat;
+using Application.AI.Models;
 using Application.AI.Pooling;
 using Entities;
 using OfflineAI.Api.Models;
@@ -34,24 +35,35 @@ public class LlmQueryService : ILlmQueryService
         try
         {
             // Get model settings
-            var llmSettings = _appConfig.LlmSettings;
-            if (llmSettings == null)
+            var llmSettings = _appConfig.Llm;
+            if (llmSettings == null || string.IsNullOrEmpty(llmSettings.ExecutablePath) || string.IsNullOrEmpty(llmSettings.ModelPath))
             {
-                throw new InvalidOperationException("LLM settings not configured");
+                throw new InvalidOperationException(
+                    "LLM is not configured. Please set ExecutablePath and ModelPath in User Secrets. " +
+                    "Right-click the project > Manage User Secrets");
+            }
+
+            // Verify files exist
+            if (!System.IO.File.Exists(llmSettings.ExecutablePath))
+            {
+                throw new InvalidOperationException($"LLM executable not found at: {llmSettings.ExecutablePath}");
+            }
+
+            if (!System.IO.File.Exists(llmSettings.ModelPath))
+            {
+                throw new InvalidOperationException($"LLM model file not found at: {llmSettings.ModelPath}");
             }
 
             // Create generation settings from request
-            var generationSettings = new GenerationSettingsService
+            var generationSettings = new GenerationSettings
             {
-                Temperature = request.Temperature,
+                Temperature = (float)request.Temperature,
                 MaxTokens = request.MaxTokens,
-                TopK = 40, // Default
-                TopP = 0.95f, // Default
+                TopK = 40,
+                TopP = 0.95f,
                 RepeatPenalty = 1.1f,
                 PresencePenalty = 0.0f,
                 FrequencyPenalty = 0.0f,
-                TimeoutSeconds = 30,
-                RagMode = request.EnableRag,
                 RagTopK = request.TopK,
                 RagMinRelevanceScore = request.MinRelevanceScore
             };
@@ -65,29 +77,32 @@ public class LlmQueryService : ILlmQueryService
                 warnings.Add("RAG requested but no context provided and embedding service not configured");
             }
 
-            // Build system prompt
-            var systemPrompt = BuildSystemPrompt(ragContext);
+            // Create simple memory instances for the chat service
+            var memory = new SimpleMemory();
+            var conversationMemory = new SimpleMemory();
 
-            // Create chat service
+            // Create chat service with correct parameter order
             var chatService = new AiChatServicePooled(
+                memory,
+                conversationMemory,
                 _modelPool,
-                request.EnableRag && !string.IsNullOrEmpty(ragContext),
-                llmSettings,
                 generationSettings,
-                ragContext);
+                llmSettings,
+                debugMode: false,
+                enableRag: request.EnableRag && !string.IsNullOrEmpty(ragContext),
+                showPerformanceMetrics: false);
 
             // Execute query
-            _logger.LogInformation("Executing LLM query with timeout {Timeout}s", generationSettings.TimeoutSeconds);
+            _logger.LogInformation("Executing LLM query for question: {Question}", request.Question);
 
             var answer = await chatService.SendMessageAsync(
-                systemPrompt,
                 request.Question,
                 cancellationToken);
 
             stopwatch.Stop();
 
             // Parse answer and estimate tokens
-            var (promptTokens, completionTokens) = EstimateTokens(systemPrompt, request.Question, answer);
+            var (promptTokens, completionTokens) = EstimateTokens(request.Question, answer);
 
             var response = new QueryResponse
             {
@@ -111,6 +126,11 @@ public class LlmQueryService : ILlmQueryService
 
             return response;
         }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex, "Configuration error");
+            throw new InvalidOperationException(ex.Message, ex);
+        }
         catch (OperationCanceledException)
         {
             _logger.LogWarning("Query was cancelled");
@@ -123,22 +143,6 @@ public class LlmQueryService : ILlmQueryService
         }
     }
 
-    private static string BuildSystemPrompt(string? ragContext)
-    {
-        if (string.IsNullOrEmpty(ragContext))
-        {
-            return "You are a helpful AI assistant. Provide accurate and concise answers.";
-        }
-
-        return $@"You are a helpful AI assistant. Use the following context to answer the user's question.
-If the answer cannot be found in the context, say so clearly.
-
-Context:
-{ragContext}
-
-Provide accurate and concise answers based on the context above.";
-    }
-
     private static string CleanAnswer(string answer)
     {
         // Remove common LLM artifacts
@@ -148,25 +152,17 @@ Provide accurate and concise answers based on the context above.";
         var endMarkers = new[] { "[end of text]", "<|endoftext|>", "</s>", "[EOS]" };
         foreach (var marker in endMarkers)
         {
-            var index = answer.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-            if (index >= 0)
-            {
-                answer = answer.Substring(0, index).Trim();
-            }
+            answer = answer.Replace(marker, "", StringComparison.OrdinalIgnoreCase);
         }
 
-        return answer;
+        return answer.Trim();
     }
 
-    private static (int PromptTokens, int CompletionTokens) EstimateTokens(
-        string systemPrompt,
-        string question,
-        string answer)
+    private static (int promptTokens, int completionTokens) EstimateTokens(string question, string answer)
     {
         // Simple estimation: ~4 characters per token
-        var promptTokens = (systemPrompt.Length + question.Length) / 4;
+        var promptTokens = question.Length / 4;
         var completionTokens = answer.Length / 4;
-
         return (promptTokens, completionTokens);
     }
 }
