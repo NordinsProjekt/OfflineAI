@@ -1,0 +1,6 @@
+@OfflineAI.Api_HostAddress = http://localhost:5118
+
+GET {{OfflineAI.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
