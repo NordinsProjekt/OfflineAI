@@ -35,6 +35,11 @@ public class AppConfiguration
     /// LLM generation parameters
     /// </summary>
     public GenerationSettings Generation { get; set; } = new();
+
+    /// <summary>
+    /// Database configuration for vector memory
+    /// </summary>
+    public DatabaseSettings Database { get; set; } = new();
 }
 
 public class LlmSettings
@@ -220,4 +225,30 @@ public class DebugSettings
     /// Default: "game-rules-mpnet"
     /// </summary>
     public string CollectionName { get; set; } = "game-rules-mpnet";
+}
+
+public class DatabaseSettings
+{
+    /// <summary>
+    /// Connection string for the database
+    /// Example: "Host=myserver;Database=mydb;Username=myuser;Password=mypass"
+    /// </summary>
+    public string ConnectionString { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Type of the database (e.g., "PostgreSQL", "SQLServer")
+    /// </summary>
+    public string DatabaseType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional schema name (for databases that supportschemas)
+    /// Example: "public"
+    /// </summary>
+    public string Schema { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Active table/collection name for vector memory
+    /// Example: "MemoryFragments", "game-rules-mpnet"
+    /// </summary>
+    public string ActiveTableName { get; set; } = "MemoryFragments";
 }

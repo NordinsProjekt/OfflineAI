@@ -16,16 +16,41 @@ public class QueryRequest
     public string? Model { get; set; }
     
     /// <summary>
-    /// Optional: Additional context to include in the query.
-    /// If not provided, RAG will search the knowledge base.
+    /// Optional: Pre-retrieved context to include in the query.
+    /// 
+    /// Two RAG modes supported:
+    /// 1. Manual Context: Provide context directly (ignores vector search)
+    /// 2. Auto Vector Search: Leave empty to automatically search the knowledge base
+    /// 
+    /// Example manual context for game rules:
+    /// "In Monopoly, players roll two dice to move around the board. 
+    ///  When you land on an unowned property, you may buy it.
+    ///  If another player owns the property, you must pay rent."
     /// </summary>
     public string? Context { get; set; }
     
     /// <summary>
     /// Enable or disable RAG (Retrieval-Augmented Generation).
+    /// 
+    /// When true and Context is null: Performs vector search on knowledge base
+    /// When true and Context is provided: Uses the provided context
+    /// When false: Direct LLM query without additional context
+    /// 
     /// Default: true
     /// </summary>
     public bool EnableRag { get; set; } = true;
+    
+    /// <summary>
+    /// Optional: Domain filters for vector search (only used when Context is null and EnableRag is true).
+    /// 
+    /// Examples:
+    /// - ["monopoly"] - Only search Monopoly game rules
+    /// - ["chess", "checkers"] - Search both Chess and Checkers rules
+    /// - null or empty - Search all domains
+    /// 
+    /// Domain IDs are lowercase, hyphen-separated (e.g., "board-games", "card-games")
+    /// </summary>
+    public List<string>? DomainFilter { get; set; }
     
     /// <summary>
     /// Maximum number of tokens to generate.
@@ -41,14 +66,15 @@ public class QueryRequest
     public float Temperature { get; set; } = 0.3f;
     
     /// <summary>
-    /// Number of relevant documents to retrieve for RAG (if EnableRag is true).
+    /// Number of relevant documents to retrieve for RAG (if EnableRag is true and Context is null).
     /// Default: 3
     /// </summary>
     public int TopK { get; set; } = 3;
     
     /// <summary>
     /// Minimum relevance score for RAG documents (0.0 - 1.0).
+    /// Higher values = stricter matching, Lower values = more results.
     /// Default: 0.5
     /// </summary>
-    public float MinRelevanceScore { get; set; } = 0.5f;
+    public double MinRelevanceScore { get; set; } = 0.5;
 }
