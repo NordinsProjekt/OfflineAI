@@ -112,9 +112,10 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
     {
-        policy.AllowAnyOrigin()
+        policy.SetIsOriginAllowed(origin => true) // Allow any origin for local network access
               .AllowAnyMethod()
-              .AllowAnyHeader();
+              .AllowAnyHeader()
+              .AllowCredentials();
     });
 });
 
@@ -172,14 +173,29 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger";
 });
 
-app.UseHttpsRedirection();
+// IMPORTANT: CORS must come before UseHttpsRedirection to handle preflight requests
 app.UseCors("AllowAll");
+
+// Only use HTTPS redirection if the app is configured to use HTTPS
+if (app.Environment.IsDevelopment())
+{
+    // In development, don't force HTTPS redirection to allow HTTP access from network
+    // Comment out the line below to enable HTTPS redirection in development
+    // app.UseHttpsRedirection();
+}
+else
+{
+    app.UseHttpsRedirection();
+}
+
 app.UseAuthorization();
 app.MapControllers();
 
 Console.WriteLine("========================================");
 Console.WriteLine("? OfflineAI API is running");
-Console.WriteLine($"?? Swagger UI: https://localhost:7015/swagger");
+Console.WriteLine($"?? Swagger UI (HTTPS): https://localhost:7015/swagger");
+Console.WriteLine($"?? Swagger UI (HTTP): http://localhost:5118/swagger");
+Console.WriteLine($"?? Network Access (HTTP): http://<your-ip>:5118/swagger");
 Console.WriteLine($"?? LLM Configured: {!configErrors.Any()}");
 
 // Get final pool status
