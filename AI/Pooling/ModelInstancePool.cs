@@ -110,6 +110,14 @@ public class ModelInstancePool : IModelInstancePool
             throw new InvalidOperationException("Failed to initialize any LLM instances");
         }
 
+        // Drain the semaphore for any instances that failed to start so that
+        // the number of available permits always matches the actual instance count.
+        int missing = _maxInstances - _availableInstances.Count;
+        for (int i = 0; i < missing; i++)
+        {
+            await _semaphore.WaitAsync();
+        }
+
         Console.WriteLine($"? Pool initialized: {_availableInstances.Count}/{_maxInstances} instances");
     }
 
@@ -264,12 +272,14 @@ public class ModelInstancePool : IModelInstancePool
                 {
                     var replacement = await PersistentLlmProcess.CreateAsync(_llmPath, _modelPath, _timeoutMs);
                     
+                    bool added = false;
                     lock (_lock)
                     {
                         if (!_disposed && _totalInstancesCreated < _maxInstances)
                         {
                             _availableInstances.Add(replacement);
                             _totalInstancesCreated++;
+                            added = true;
                             Console.WriteLine($"[+] Replacement instance created and added to pool");
                         }
                         else
@@ -277,12 +287,23 @@ public class ModelInstancePool : IModelInstancePool
                             replacement.Dispose();
                         }
                     }
+
+                    // Only release the semaphore when the replacement was successfully
+                    // added to the pool. If it was not added (disposed branch), the
+                    // permit is already accounted for by the pool reaching capacity.
+                    if (added)
+                        _semaphore.Release();
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[!] Failed to create replacement instance: {ex.Message}");
+                    // Do NOT release the semaphore here. The unhealthy instance has been
+                    // removed but no replacement was added, so the pool has shrunk by one.
+                    // Releasing the semaphore without a corresponding instance would let a
+                    // caller acquire a slot that has no backing instance, causing
+                    // "No healthy instances available in pool".
                 }
-            }).ContinueWith(_ => _semaphore.Release()); // Release semaphore after replacement attempt
+            });
         }
     }
 
