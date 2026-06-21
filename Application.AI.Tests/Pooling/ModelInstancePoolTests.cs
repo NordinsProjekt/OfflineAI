@@ -1,6 +1,7 @@
 using Application.AI.Pooling;
 using Application.AI.Processing;
 using Moq;
+using System.Collections.Concurrent;
 
 namespace Application.AI.Tests.Pooling;
 
@@ -249,7 +250,9 @@ public class ModelInstancePoolTests : IDisposable
     {
         // Arrange
         var pool = new ModelInstancePool("invalid-path", "invalid-model", maxInstances: 2);
-        var progressCalls = new List<(int current, int total)>();
+        // ConcurrentBag is used instead of List because the callback is invoked from
+        // parallel tasks and List<T> is not thread-safe.
+        var progressCalls = new ConcurrentBag<(int current, int total)>();
 
         // Act
         try
@@ -324,7 +327,9 @@ public class ModelInstancePoolTests : IDisposable
     {
         // Arrange
         var pool = new ModelInstancePool("invalid-path", "invalid-model", maxInstances: 2);
-        var progressCalls = new List<(int current, int total)>();
+        // ConcurrentBag is used instead of List because the callback is invoked from
+        // parallel tasks and List<T> is not thread-safe.
+        var progressCalls = new ConcurrentBag<(int current, int total)>();
 
         // Act
         try
@@ -887,6 +892,152 @@ public class ModelInstancePoolTests : IDisposable
         var property = typeof(ModelInstancePool).GetProperty(nameof(pool.TotalInstances));
         Assert.NotNull(property);
         Assert.Null(property.GetSetMethod());
+    }
+
+    #endregion
+
+    #region Semaphore Consistency Tests (Fixes for partial initialization and return race)
+
+    /// <summary>
+    /// Regression test for Fix 1: after InitializeAsync fails to create all instances the
+    /// exception is surfaced and the pool's AvailableCount stays at 0.
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_AllInstancesFail_ThrowsAndAvailableCountIsZero()
+    {
+        // Arrange
+        var pool = new ModelInstancePool("invalid-llm", "invalid-model", maxInstances: 3);
+
+        // Act & Assert
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await pool.InitializeAsync());
+
+        Assert.Contains("Failed to initialize any LLM instances", ex.Message);
+        Assert.Equal(0, pool.AvailableCount);
+        Assert.Equal(0, pool.TotalInstances);
+
+        pool.Dispose();
+    }
+
+    /// <summary>
+    /// Regression test for Fix 1: after InitializeAsync fails to create all instances the
+    /// exception is thrown before any semaphore draining occurs, so a subsequent AcquireAsync
+    /// propagates the expected "No healthy instances" error and does NOT block indefinitely.
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_AllInstancesFail_AcquireThrowsNoHealthyInstances()
+    {
+        // Arrange – pool whose InitializeAsync throws (all instances fail)
+        var pool = new ModelInstancePool("invalid-llm", "invalid-model", maxInstances: 1);
+
+        try { await pool.InitializeAsync(); }
+        catch (InvalidOperationException) { /* expected */ }
+
+        // Act & Assert – AcquireAsync should not block; it should surface the
+        // "No healthy instances" error since the bag is empty.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await pool.AcquireAsync());
+
+        Assert.Contains("No healthy instances available in pool", ex.Message);
+
+        pool.Dispose();
+    }
+
+    /// <summary>
+    /// Regression test for Fix 1: when InitializeAsync fails to create all instances, the
+    /// exception is thrown before any semaphore draining occurs, so all maxInstances permits
+    /// are still available. This verifies the semaphore state is consistent with the pool
+    /// being in a failed/unusable state (all permits present, zero instances).
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_AllInstancesFail_SemaphoreRetainsAllPermits()
+    {
+        // Arrange – 3-instance pool where all fail
+        const int maxInstances = 3;
+        var pool = new ModelInstancePool("invalid-llm", "invalid-model", maxInstances: maxInstances);
+
+        try { await pool.InitializeAsync(); }
+        catch (InvalidOperationException) { /* expected – all fail */ }
+
+        // Read the private semaphore via reflection
+        var semaphoreField = typeof(ModelInstancePool)
+            .GetField("_semaphore", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.NotNull(semaphoreField);
+
+        var semaphore = (SemaphoreSlim?)semaphoreField!.GetValue(pool);
+        Assert.NotNull(semaphore);
+
+        // When all instances fail the throw occurs before draining, so all maxInstances
+        // permits are still available (pool never became usable).
+        Assert.Equal(maxInstances, semaphore!.CurrentCount);
+
+        pool.Dispose();
+    }
+
+    /// <summary>
+    /// Regression test for Fix 2: ReturnInstance must not release the semaphore when the
+    /// background replacement task fails to create a new instance. Without the fix a
+    /// .ContinueWith(_ => _semaphore.Release()) would release a permit even when no
+    /// instance was added, causing a phantom slot that leads to "No healthy instances".
+    ///
+    /// This test creates a real pool using temp files, acquires the sole instance, then
+    /// switches the pool's internal paths to invalid ones so that the replacement task
+    /// will fail. It marks the acquired instance as unhealthy and returns it, then asserts
+    /// that the semaphore count remains 0 (no phantom release occurred).
+    /// </summary>
+    [Fact]
+    public async Task ReturnInstance_UnhealthyInstanceAndReplacementFails_SemaphoreNotReleased()
+    {
+        // Create real temp files so the initial pool can be constructed
+        var tempLlm = Path.GetTempFileName();
+        var tempModel = Path.GetTempFileName();
+
+        try
+        {
+            var pool = new ModelInstancePool(tempLlm, tempModel, maxInstances: 1);
+            await pool.InitializeAsync();
+
+            // Read private fields via reflection
+            var bindingFlags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+
+            var semaphoreField = typeof(ModelInstancePool).GetField("_semaphore", bindingFlags);
+            var semaphore = (SemaphoreSlim?)semaphoreField!.GetValue(pool);
+            Assert.NotNull(semaphore);
+
+            // Switch the pool's internal paths to invalid so the replacement will fail
+            typeof(ModelInstancePool).GetField("_llmPath", bindingFlags)!.SetValue(pool, "invalid-now");
+            typeof(ModelInstancePool).GetField("_modelPath", bindingFlags)!.SetValue(pool, "invalid-now");
+
+            // Acquire the only instance (semaphore → 0)
+            var pooled = await pool.AcquireAsync();
+            Assert.Equal(0, semaphore!.CurrentCount);
+
+            // Mark the instance as unhealthy so ReturnInstance takes the replacement path
+            var isHealthyBacking = typeof(PersistentLlmProcess)
+                .GetField("<IsHealthy>k__BackingField", bindingFlags);
+            if (isHealthyBacking != null)
+            {
+                isHealthyBacking.SetValue(pooled.Process, false);
+            }
+
+            // Return the unhealthy instance – triggers the background replacement task
+            pooled.Dispose();
+
+            // Allow time for the background task to attempt (and fail) replacement.
+            // The replacement CreateAsync fails instantly (bad path), so 50 ms is plenty.
+            await Task.Delay(50);
+
+            // Assert: since replacement failed, the semaphore must still be 0.
+            // With the old code (.ContinueWith(Release)) it would be 1 here.
+            Assert.Equal(0, semaphore.CurrentCount);
+
+            pool.Dispose();
+        }
+        finally
+        {
+            if (File.Exists(tempLlm)) File.Delete(tempLlm);
+            if (File.Exists(tempModel)) File.Delete(tempModel);
+        }
     }
 
     #endregion
