@@ -1,22 +1,24 @@
 @page "/quick-ask"
 @namespace AiDashboard.Components.Pages
 @using global::Services.QuickAsk
+@using global::Services.FileAgent
 
 @rendermode InteractiveServer
 @inject NavigationManager Navigation
 @inject DashboardState Dashboard
 @inject AiDashboard.Services.Interfaces.ILlmResponseFormatterService Formatter
 @inject IQuickAskService QuickAskService
+@inject IFileAgentService FileAgent
 
 <PageTitle>Quick Ask - OfflineAI</PageTitle>
 
 <div class="oa-quick-ask-page">
     <div class="oa-quick-header">
-        <button class="oa-back-button" @onclick="@(() => Navigation.NavigateTo("/"))">
-            Back to Home
-        </button>
-        <h1>Quick Ask</h1>
-        <p class="oa-quick-subtitle">Ask anything, get instant answers from your local AI</p>
+        <button class="oa-back-button" @onclick="@(() => Navigation.NavigateTo("/"))">Back to Home</button>
+        <div class="oa-quick-header-center">
+            <h1>Quick Ask</h1>
+            <p class="oa-quick-subtitle">Ask anything, get instant answers from your local AI</p>
+        </div>
     </div>
 
     <div class="oa-quick-container">
@@ -138,6 +140,15 @@
                     <span>Model: @QuickAskService.FormatModelName(Dashboard.ModelService.CurrentModel)</span>
                 </div>
             }
+            <div class="oa-info-badge oa-model-selector">
+                <span class="model-label-text">Tokens:</span>
+                <select class="oa-model-dropdown oa-tokens-dropdown" @bind="_selectedMaxTokens">
+                    @foreach (var preset in Enum.GetValues<MaxTokensPreset>())
+                    {
+                        <option value="@preset">@preset.ToLabel()</option>
+                    }
+                </select>
+            </div>
         </div>
     </div>
 </div>
@@ -146,7 +157,8 @@
     private string currentQuestion = "";
     private bool isProcessing = false;
     private readonly List<QuickAskMessage> messages = new();
-    
+    private MaxTokensPreset _selectedMaxTokens = MaxTokensPreset.Tokens128K;
+
     private string SelectedModel
     {
         get => Dashboard.ModelService.CurrentModel;
@@ -172,33 +184,101 @@
         if (string.IsNullOrWhiteSpace(currentQuestion) || isProcessing)
             return;
 
-        // Create user message using service
-        var userMessage = QuickAskService.CreateUserMessage(currentQuestion);
+        var input = currentQuestion.Trim();
+
+        // Add user message to chat history
+        var userMessage = QuickAskService.CreateUserMessage(input);
         messages.Add(userMessage);
 
-        var question = currentQuestion;
         currentQuestion = "";
         isProcessing = true;
+
+        // Apply the selected MaxTokens preset before every call
+        Dashboard.SettingsService.MaxTokens = _selectedMaxTokens.ToInt();
+
         StateHasChanged();
 
         var startTime = DateTime.Now;
 
         try
         {
-            // Call the QuickAsk-specific method that disables RAG
-            var response = await Dashboard.SendQuickAskAsync(question);
+            if (FileAgent.IsCommand(input))
+            {
+                var result = await FileAgent.ExecuteAsync(input);
 
-            // Create AI message using service
-            var aiMessage = QuickAskService.CreateAiMessage(response, startTime);
-            
-            // Apply full formatting to AI response
-            aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
-            
-            messages.Add(aiMessage);
+                if (result.ResultType == FileAgentResultType.FileRead && result.IsSuccess
+                    && result.InjectedContext is not null)
+                {
+                    // /läs: forward file content to the LLM as the prompt
+                    var response = await Dashboard.SendQuickAskAsync(result.InjectedContext);
+                    var aiMessage = QuickAskService.CreateAiMessage(response, startTime);
+                    aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
+                    messages.Add(aiMessage);
+                }
+                else if (result.ResultType == FileAgentResultType.FillRequested && result.IsSuccess
+                    && result.LlmPrompt is not null)
+                {
+                    // /fyll: send structured prompt to the LLM
+                    var response = await Dashboard.SendQuickAskAsync(result.LlmPrompt);
+
+                    if (FileAgent.TryExtractFileContent(response, out var fileContent))
+                    {
+                        await FileAgent.WriteExtractedContentAsync(result.TargetFilename!, fileContent);
+
+                        var displayText = FileAgent.StripFileMarkers(response);
+                        var aiMessage = QuickAskService.CreateAiMessage(displayText, startTime);
+                        aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
+                        messages.Add(aiMessage);
+
+                        messages.Add(new QuickAskMessage
+                        {
+                            IsUser        = false,
+                            Text          = $"✓ Fil sparad: {result.TargetFilename}",
+                            FormattedText = $"✓ Fil sparad: {result.TargetFilename}",
+                            Timestamp     = DateTime.Now
+                        });
+                    }
+                    else
+                    {
+                        // LLM did not use markers — show raw response + warning
+                        var aiMessage = QuickAskService.CreateAiMessage(response, startTime);
+                        aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
+                        messages.Add(aiMessage);
+
+                        messages.Add(new QuickAskMessage
+                        {
+                            IsUser        = false,
+                            Text          = "⚠ Kunde inte extrahera filinnehåll — filen sparades inte.",
+                            FormattedText = "⚠ Kunde inte extrahera filinnehåll — filen sparades inte.",
+                            Timestamp     = DateTime.Now
+                        });
+                    }
+                }
+                else
+                {
+                    // /skapa or error: show as a plain system message (no tokens/s)
+                    messages.Add(new QuickAskMessage
+                    {
+                        IsUser        = false,
+                        Text          = result.Message,
+                        FormattedText = result.Message,
+                        Timestamp     = DateTime.Now
+                    });
+                }
+            }
+            else
+            {
+                // Regular question — pass full conversation history
+                var response = await Dashboard.SendQuickAskAsync(
+                    messages.Select(t => t.FormattedText).ToList());
+
+                var aiMessage = QuickAskService.CreateAiMessage(response, startTime);
+                aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
+                messages.Add(aiMessage);
+            }
         }
         catch (Exception ex)
         {
-            // Create error message using service
             var errorMessage = QuickAskService.CreateErrorMessage(ex.Message);
             messages.Add(errorMessage);
         }

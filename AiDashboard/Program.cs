@@ -12,6 +12,7 @@ using Infrastructure.Data.Dapper;
 using Services.Configuration;
 using Services.Management;
 using Services.Language;
+using Services.FileAgent;
 using Services.QuickAsk;
 
 namespace AiDashboard;
@@ -38,6 +39,17 @@ public class Program
 
         // Register QuickAsk service for conversation management
         builder.Services.AddSingleton<IQuickAskService, QuickAskService>();
+
+        // Register file agent service for /skapa, /fyll, /läs chat commands
+        builder.Services.AddSingleton<IFileAgentService>(_ =>
+        {
+            var agentDir = !string.IsNullOrWhiteSpace(appConfig.Folders.AgentFilesFolder)
+                ? appConfig.Folders.AgentFilesFolder
+                : Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                    "OfflineAI", "AgentFiles");
+            return new FileAgentService(agentDir);
+        });
 
         // Register document analysis services
         builder.Services.AddScoped<IDocumentAnalysisService, DocumentAnalysisService>();

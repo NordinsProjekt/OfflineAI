@@ -86,6 +86,7 @@ public class PersistentLlmProcess : IPersistentLlmProcess
             throw new InvalidOperationException("Process manager is not healthy");
 
         await _requestLock.WaitAsync();
+        string? tempPromptFile = null;
         try
         {
             LastUsed = DateTime.UtcNow;
@@ -93,12 +94,20 @@ public class PersistentLlmProcess : IPersistentLlmProcess
             // Build the full prompt
             var fullPrompt = $"{systemPrompt}\n\nUser: {userQuestion}\nAssistant:";
 
+            // Write the prompt to a temp file instead of embedding it inline with -p "...".
+            // Passing the prompt via -p "..." breaks on Windows whenever the content contains
+            // double-quote characters (code samples, SQL strings, etc.) or real newlines,
+            // because CreateProcess argument parsing terminates the quoted token at the first
+            // unescaped " it encounters.  Using -f <file> bypasses all of that entirely.
+            tempPromptFile = Path.GetTempFileName();
+            await File.WriteAllTextAsync(tempPromptFile, fullPrompt, System.Text.Encoding.UTF8);
+
             // Create process for this query
             var processInfo = LlmFactory.CreateForLlama(_llmPath, _modelPath);
-            
-            // Add the prompt directly to arguments
-            processInfo.Arguments += $" -p \"{fullPrompt}\"";
-            
+
+            // Use -f (prompt file) instead of -p (inline prompt) to safely pass any content
+            processInfo.Arguments += $" -f \"{tempPromptFile}\"";
+
             // Set context size to prevent memory issues (2048 tokens = ~1500 chars of context)
             processInfo.Arguments += $" -c 2048";
             
@@ -138,6 +147,12 @@ public class PersistentLlmProcess : IPersistentLlmProcess
         finally
         {
             _requestLock.Release();
+
+            // Clean up the temp prompt file regardless of success or failure
+            if (tempPromptFile != null && File.Exists(tempPromptFile))
+            {
+                try { File.Delete(tempPromptFile); } catch { /* ignore cleanup errors */ }
+            }
         }
     }
 

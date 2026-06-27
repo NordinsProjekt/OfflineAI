@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.Web;
 using AiDashboard.State;
 using AiDashboard.Models;
 using AiDashboard.Services.Interfaces;
+using Services.FileAgent;
 
 namespace AiDashboard.Components.Pages;
 
@@ -10,6 +11,7 @@ public partial class Home : IDisposable
 {
     [Inject] private DashboardState Dashboard { get; set; } = default!;
     [Inject] private ILlmResponseFormatterService Formatter { get; set; } = default!;
+    [Inject] private IFileAgentService FileAgent { get; set; } = default!;
 
     private string composerText = string.Empty;
     private bool isProcessing = false;
@@ -90,7 +92,7 @@ public partial class Home : IDisposable
         composerText = string.Empty;
         isProcessing = true;
 
-        // Add user message
+        // Add user message to chat history
         var userMsg = new ChatMessageModel { IsUser = true, Text = userMessage };
         userMsg.FormattedText = FormatMessage(userMsg.Text, isUser: true);
         messages.Add(userMsg);
@@ -98,13 +100,76 @@ public partial class Home : IDisposable
 
         try
         {
-            // Get AI response
-            var response = await Dashboard.SendMessageAsync(userMessage);
+            if (FileAgent.IsCommand(userMessage))
+            {
+                var result = await FileAgent.ExecuteAsync(userMessage);
 
-            // Add AI response - formatter handles all formatting
-            var aiMsg = new ChatMessageModel { IsUser = false, Text = response };
-            aiMsg.FormattedText = FormatMessage(aiMsg.Text, isUser: false);
-            messages.Add(aiMsg);
+                if (result.ResultType == FileAgentResultType.FileRead && result.IsSuccess
+                    && result.InjectedContext is not null)
+                {
+                    // /läs: forward the file content to the AI as the actual prompt
+                    var response = await Dashboard.SendMessageAsync(result.InjectedContext);
+                    var aiMsg = new ChatMessageModel { IsUser = false, Text = response };
+                    aiMsg.FormattedText = FormatMessage(aiMsg.Text, isUser: false);
+                    messages.Add(aiMsg);
+                }
+                else if (result.ResultType == FileAgentResultType.FillRequested && result.IsSuccess
+                    && result.LlmPrompt is not null)
+                {
+                    // /fyll: send the structured prompt to the LLM
+                    var response = await Dashboard.SendMessageAsync(result.LlmPrompt);
+
+                    if (FileAgent.TryExtractFileContent(response, out var fileContent))
+                    {
+                        // Save the extracted block to the file
+                        await FileAgent.WriteExtractedContentAsync(result.TargetFilename!, fileContent);
+
+                        // Show the response with markers stripped
+                        var displayText = FileAgent.StripFileMarkers(response);
+                        var aiMsg = new ChatMessageModel { IsUser = false, Text = displayText };
+                        aiMsg.FormattedText = FormatMessage(displayText, isUser: false);
+                        messages.Add(aiMsg);
+
+                        var confirmMsg = new ChatMessageModel
+                        {
+                            IsUser = false,
+                            Text   = $"✓ Fil sparad: {result.TargetFilename}"
+                        };
+                        confirmMsg.FormattedText = FormatMessage(confirmMsg.Text, isUser: false);
+                        messages.Add(confirmMsg);
+                    }
+                    else
+                    {
+                        // LLM did not use markers — show raw response + warning
+                        var aiMsg = new ChatMessageModel { IsUser = false, Text = response };
+                        aiMsg.FormattedText = FormatMessage(response, isUser: false);
+                        messages.Add(aiMsg);
+
+                        var warnMsg = new ChatMessageModel
+                        {
+                            IsUser = false,
+                            Text   = $"⚠ Kunde inte extrahera filinnehåll — filen sparades inte. Kontrollera att LLM:n använde markörerna <<<FIL>>> och <<<SLUT>>>."
+                        };
+                        warnMsg.FormattedText = FormatMessage(warnMsg.Text, isUser: false);
+                        messages.Add(warnMsg);
+                    }
+                }
+                else
+                {
+                    // /skapa or error: show the result as a system message
+                    var sysMsg = new ChatMessageModel { IsUser = false, Text = result.Message };
+                    sysMsg.FormattedText = FormatMessage(sysMsg.Text, isUser: false);
+                    messages.Add(sysMsg);
+                }
+            }
+            else
+            {
+                // Regular AI message
+                var response = await Dashboard.SendMessageAsync(userMessage);
+                var aiMsg = new ChatMessageModel { IsUser = false, Text = response };
+                aiMsg.FormattedText = FormatMessage(aiMsg.Text, isUser: false);
+                messages.Add(aiMsg);
+            }
         }
         catch (Exception ex)
         {

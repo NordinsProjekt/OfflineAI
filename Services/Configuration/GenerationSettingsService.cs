@@ -1,5 +1,3 @@
-using System;
-
 namespace Services.Configuration;
 
 /// <summary>
@@ -23,7 +21,7 @@ public class GenerationSettingsService
         }
     }
 
-    private int _maxTokens = 512;
+    private int _maxTokens = 128000;
     public int MaxTokens
     {
         get => _maxTokens;

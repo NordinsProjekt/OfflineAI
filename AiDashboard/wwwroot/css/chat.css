@@ -98,6 +98,67 @@
     scrollbar-color: var(--border-color) transparent;
 }
 
+/***** QuickAsk message classes – dark overrides for chat dashboard *****/
+.oa-chat .oa-messages-list {
+    gap: 1.25rem;
+}
+
+.oa-chat .oa-msg-text {
+    background: linear-gradient(135deg, rgba(21, 26, 36, 0.7), rgba(15, 20, 25, 0.7));
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 16px;
+    border-top-left-radius: 4px;
+    backdrop-filter: blur(10px);
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s ease;
+}
+
+.oa-chat .oa-msg-text:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.oa-chat .oa-message.user .oa-msg-text {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(37, 99, 235, 0.15));
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-top-left-radius: 16px;
+    border-top-right-radius: 4px;
+}
+
+.oa-chat .oa-msg-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    border: 2px solid rgba(59, 130, 246, 0.2);
+    box-shadow: var(--shadow-md);
+}
+
+.oa-chat .oa-message.user .oa-msg-avatar {
+    background: linear-gradient(135deg, var(--accent-success), #059669);
+    border-color: rgba(16, 185, 129, 0.2);
+}
+
+.oa-chat .oa-msg-content {
+    max-width: 75%;
+}
+
+.oa-chat .oa-msg-meta {
+    color: var(--text-muted);
+}
+
+.oa-chat .oa-typing-indicator {
+    background: linear-gradient(135deg, rgba(21, 26, 36, 0.7), rgba(15, 20, 25, 0.7));
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    border-top-left-radius: 4px;
+}
+
+.oa-chat .oa-typing-indicator span {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+}
+
 .oa-message {
     display: flex;
     gap: 14px;

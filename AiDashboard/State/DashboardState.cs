@@ -1,5 +1,3 @@
-using System;
-using System.Threading.Tasks;
 using AiDashboard.Services;
 using Application.AI.Management;
 using Services.Configuration;
@@ -17,10 +15,10 @@ public class DashboardState
 {
     // Change notification for Blazor components
     public event Action? OnChange;
-    
+
     // Blazor dispatcher callback for thread-safe UI updates
     private Func<Action, Task>? _invokeAsync;
-    
+
     /// <summary>
     /// Set the InvokeAsync callback from a Blazor component to enable thread-safe UI updates.
     /// This should be called once during initialization from a ComponentBase.
@@ -36,15 +34,15 @@ public class DashboardState
     public CollectionManagementService? CollectionService { get; private set; }
     public InboxProcessingService? InboxService { get; private set; }
     public BotPersonalityService? PersonalityService { get; private set; }
-    
+
     private DashboardChatService? _chatService;
-    public DashboardChatService? ChatService 
-    { 
+    public DashboardChatService? ChatService
+    {
         get => _chatService;
         set
         {
             _chatService = value;
-            
+
             // If we have a chat service, inject the model name provider
             if (_chatService != null)
             {
@@ -157,7 +155,7 @@ public class DashboardState
             };
             InboxService.OnProcessingComplete += NotifyStateChanged;
         }
-        
+
         if (personalityService != null)
         {
             PersonalityService = personalityService;
@@ -229,15 +227,15 @@ public class DashboardState
         }
 
         var (success, message) = await CollectionService.ValidateCollectionAsync(collectionName);
-        
+
         // IMPORTANT: Update the DatabaseVectorMemory to use the new collection
         if (success && ChatService != null)
         {
             ChatService.UpdateCollectionName(collectionName);
         }
-        
+
         StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
-        
+
         // Note: DatabaseVectorMemory queries collections on-demand, no need to load into memory
     }
 
@@ -259,11 +257,12 @@ public class DashboardState
             var domainDetector = _chatService?.DomainDetector;
             if (domainDetector != null)
             {
+                Console.WriteLine("Found Domain");
                 await domainDetector.RegisterDomainFromCategoryAsync(category, categoryType);
             }
         };
 
-        var (success, message, filesProcessed, fragmentsCreated) = 
+        var (success, message, filesProcessed, fragmentsCreated) =
             await InboxService.ProcessInboxAsync(CollectionService.CurrentCollection);
 
         if (success && filesProcessed > 0)
@@ -285,7 +284,7 @@ public class DashboardState
         var (success, message, filesConverted) = await InboxService.ConvertPdfToTxtAsync();
         StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
     }
-    
+
     // Personality operations
     public async Task RefreshPersonalitiesAsync()
     {
@@ -301,7 +300,7 @@ public class DashboardState
             StatusMessage = $"[ERROR] {message}";
         }
     }
-    
+
     public async Task SelectPersonalityAsync(string personalityId)
     {
         if (PersonalityService == null)
@@ -311,7 +310,7 @@ public class DashboardState
         }
 
         var (success, message) = await PersonalityService.SelectPersonalityAsync(personalityId);
-        
+
         // If a personality with a default collection is selected, switch to that collection
         if (success && PersonalityService.CurrentPersonality?.DefaultCollection != null && CollectionService != null)
         {
@@ -319,7 +318,7 @@ public class DashboardState
             CollectionService.CurrentCollection = collectionName;
             await LoadCollectionAsync(collectionName);
         }
-        
+
         StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
     }
 
@@ -366,6 +365,34 @@ public class DashboardState
 
             return await ChatService.SendMessageAsync(
                 message,
+                ragMode: false,  // Always disable RAG for QuickAsk
+                SettingsService.DebugMode,
+                SettingsService.PerformanceMetrics,
+                genSettings,
+                PersonalityService?.CurrentPersonality,
+                SettingsService.UseGpu,
+                SettingsService.GpuLayers,
+                SettingsService.TimeoutSeconds);  // Use global timeout setting
+        }
+        catch (Exception ex)
+        {
+            return $"[ERROR] Failed to send message: {ex.Message}";
+        }
+    }
+
+    public async Task<string> SendQuickAskAsync(List<string> message)
+    {
+        if (ChatService == null)
+        {
+            return "[ERROR] Chat service not initialized. Please check application configuration.";
+        }
+
+        try
+        {
+            var genSettings = SettingsService.ToGenerationSettings();
+
+            return await ChatService.SendMessageAsync(
+                string.Concat(message.Select(t => t + "\n")),
                 ragMode: false,  // Always disable RAG for QuickAsk
                 SettingsService.DebugMode,
                 SettingsService.PerformanceMetrics,

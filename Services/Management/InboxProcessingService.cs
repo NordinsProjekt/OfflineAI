@@ -359,6 +359,7 @@ public class InboxProcessingService(
     private void UpdateStatus(string status)
     {
         _currentStatus = status;
+        Console.WriteLine($"[InboxProcessing] {status}");
         OnProgressUpdate?.Invoke(status);
     }
 }

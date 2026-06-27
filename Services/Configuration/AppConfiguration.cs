@@ -30,7 +30,7 @@ public class AppConfiguration
     /// Debug and logging settings
     /// </summary>
     public DebugSettings Debug { get; set; } = new();
-    
+
     /// <summary>
     /// LLM generation parameters
     /// </summary>
@@ -87,10 +87,10 @@ public class GenerationSettings
 {
     /// <summary>
     /// Maximum number of tokens to generate
-    /// Default: 200
+    /// Default: 2048
     /// Range: 1-2048 (model dependent)
     /// </summary>
-    public int MaxTokens { get; set; } = 200;
+    public int MaxTokens { get; set; } = 2048;
 
     /// <summary>
     /// Temperature for sampling (higher = more creative, lower = more focused)
@@ -182,6 +182,12 @@ public class FolderSettings
     /// Example: "d:\tinyllama\archive"
     /// </summary>
     public string ArchiveFolder { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Base directory used by the file agent (/skapa, /fyll, /läs commands).
+    /// Defaults to Documents\OfflineAI\AgentFiles when left empty.
+    /// </summary>
+    public string AgentFilesFolder { get; set; } = string.Empty;
 }
 
 public class PoolSettings

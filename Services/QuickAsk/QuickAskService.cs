@@ -122,4 +122,42 @@ public class QuickAskService : IQuickAskService
 
         return name;
     }
+
+    /// <summary>
+    /// Strips common LLM artifacts from a raw response before display or further processing.
+    /// Removes instruction tokens ([/INST]), metadata headers/footers, and other model-specific markers
+    /// that are emitted by models such as Llama, Mistral, and Qwen.
+    /// </summary>
+    public string SanitizeLlmResponse(string response)
+    {
+        if (string.IsNullOrWhiteSpace(response))
+            return response;
+
+        // Strip Llama / Mistral / Qwen instruction tokens: [INST], [/INST], <<SYS>> ... <</SYS>>
+        response = Regex.Replace(response, @"\[/?INST\]", string.Empty, RegexOptions.IgnoreCase);
+        response = Regex.Replace(response, @"<<SYS>>.*?<</SYS>>", string.Empty,
+            RegexOptions.Singleline | RegexOptions.IgnoreCase);
+
+        // Strip ChatML-style tokens: <|im_start|>, <|im_end|>, <|endoftext|>, etc.
+        response = Regex.Replace(response, @"<\|[^|]*\|>", string.Empty);
+
+        // Strip metadata header lines emitted by some wrappers:
+        //   [Detected format: Assistant:]   [System:]   [User:]
+        response = Regex.Replace(response,
+            @"^\[(?:Detected format|System|User|Assistant)[^\]]*\]\s*",
+            string.Empty,
+            RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        // Strip generation-complete footers:
+        //   [Generation complete - 10s pause detected]
+        response = Regex.Replace(response,
+            @"\[Generation complete[^\]]*\]\s*$",
+            string.Empty,
+            RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        // Collapse runs of blank lines left after stripping
+        response = Regex.Replace(response, @"\n{3,}", "\n\n");
+
+        return response.Trim();
+    }
 }

@@ -48,6 +48,13 @@
 - Generation parameter tuning
 - Collection and domain management
 
+### ?? File Agent (Slash Commands)
+- `/skapa <fil>` — create a text file directly from the chat
+- `/fyll <fil> <innehåll>` — write inline content to a file
+- `/läs <fil>` / `/las <fil>` — read a file and send its content as the LLM prompt
+- Configurable storage folder; path traversal protection built-in
+- Reusable `IFileAgentService` available across the entire solution
+
 ---
 
 ## ??? Architecture
@@ -277,6 +284,16 @@ Located in `appsettings.json` or User Secrets:
 
 - **Comprehensive documentation** available in `/Docs`
 - Covers setup, architecture, guides, and more
+
+### Key Guides
+
+| Document | Description |
+|----------|-------------|
+| [FILE-AGENT-COMMANDS.md](Docs/FILE-AGENT-COMMANDS.md) | Slash commands for file creation, writing, and prompt loading |
+| [QUICKASK-FILE-AGENT-AND-MAXTOKENS.md](Docs/QUICKASK-FILE-AGENT-AND-MAXTOKENS.md) | File agent in QuickAsk + MaxTokens preset selector |
+| [QUICK-LLM-CHAT-GUIDE.md](Docs/QUICK-LLM-CHAT-GUIDE.md) | Quick chat interface guide |
+| [QUICKASK-SERVICE-EXTRACTION.md](Docs/QUICKASK-SERVICE-EXTRACTION.md) | QuickAsk service layer pattern |
+| [OFFLINEAI-API-COMPLETE-GUIDE.md](Docs/OFFLINEAI-API-COMPLETE-GUIDE.md) | REST API reference |
 
 ---
 

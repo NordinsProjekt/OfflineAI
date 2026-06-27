@@ -24,7 +24,8 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         "xml",
         "bash", "sh",
         "powershell", "ps1",
-        "razor", "cshtml"
+        "razor", "cshtml",
+        "php"
     };
 
     /// <summary>
@@ -37,16 +38,25 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         if (string.IsNullOrWhiteSpace(response))
             return response;
 
-        // First, try to detect markdown-style code blocks (```language ... ```
+        // Step 1: ensure numbered list items each start on a new line (handles concatenated output)
+        response = InsertLineBreaksBeforeNumberedItems(response);
+
+        // Step 2a: handle [Language Code] ... [End Language Code] markers produced by some LLMs
+        response = FormatCustomCodeMarkers(response);
+
+        // Step 2b: format markdown-style code blocks (```language ... ```)
         var formattedResponse = FormatMarkdownCodeBlocks(response);
-        
-        // If no markdown blocks found, try to detect inline code patterns
+
+        // If no code blocks were found at all, try to detect inline code patterns
         if (formattedResponse == response)
         {
             formattedResponse = FormatInlineCodePatterns(response);
         }
 
-        // Convert line breaks to <br> ONLY for text outside <pre> tags
+        // Step 3: convert numbered list runs to <ol> (skips content inside <pre> blocks)
+        formattedResponse = FormatNumberedLists(formattedResponse);
+
+        // Step 4: convert remaining newlines to <br> outside <pre> tags
         formattedResponse = ConvertNewlinesToBrTagsOutsidePre(formattedResponse);
 
         return formattedResponse;
@@ -146,7 +156,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
 
         // Pattern to match markdown code blocks using known language names
         // Order languages by length (longest first) to ensure proper matching
-        var languages = new[] { "javascript", "typescript", "powershell", "csharp", "python", "bash", "html", "razor", "cshtml", "java", "json", "css", "sql", "xml", "c#", "ts", "js", "py", "cs", "sh", "ps1" };
+        var languages = new[] { "javascript", "typescript", "powershell", "csharp", "python", "bash", "html", "razor", "cshtml", "java", "json", "css", "sql", "xml", "php", "c#", "ts", "js", "py", "cs", "sh", "ps1" };
         var pattern = $@"```({string.Join("|", languages.Select(Regex.Escape))})(.*?)```";
         var matches = Regex.Matches(text, pattern, RegexOptions.Singleline | RegexOptions.IgnoreCase);
 
@@ -188,7 +198,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     {
         // Pattern to match ```language code``` where language is one of our known languages
         // Order languages by length (longest first) to ensure proper matching
-        var languages = new[] { "javascript", "typescript", "powershell", "csharp", "python", "bash", "html", "razor", "cshtml", "java", "json", "css", "sql", "xml", "c#", "ts", "js", "py", "cs", "sh", "ps1" };
+        var languages = new[] { "javascript", "typescript", "powershell", "csharp", "python", "bash", "html", "razor", "cshtml", "java", "json", "css", "sql", "xml", "php", "c#", "ts", "js", "py", "cs", "sh", "ps1" };
         var pattern = $@"```({string.Join("|", languages.Select(Regex.Escape))})(.*?)```";
         
         return Regex.Replace(response, pattern, match =>
@@ -229,6 +239,33 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         }
 
         return response;
+    }
+
+    /// <summary>
+    /// Handles [Language Code] ... [End Language Code] markers that some LLMs emit directly.
+    /// Extracts the code, re-formats it with proper indentation and syntax highlighting,
+    /// and wraps it in the same HTML structure used for markdown code blocks.
+    /// </summary>
+    private string FormatCustomCodeMarkers(string response)
+    {
+        // Matches e.g. [C# Code] ... [End C# Code] or [Python Code] ... [End Python Code]
+        var pattern = @"\[([A-Za-z#+ ]+?) Code\](.*?)\[End \1 Code\]";
+
+        return Regex.Replace(response, pattern, match =>
+        {
+            var languageRaw = match.Groups[1].Value.Trim();
+            var rawCode = match.Groups[2].Value.Trim();
+
+            if (string.IsNullOrWhiteSpace(rawCode))
+                return match.Value;
+
+            var language = languageRaw.ToLowerInvariant();
+            var formattedCode = FormatCode(rawCode, language);
+            var highlightedCode = ApplySyntaxHighlighting(formattedCode, language);
+            var languageDisplay = NormalizeLanguageName(language);
+
+            return $"<br><br><div class=\"code-block-header\">[{languageDisplay} Code]</div><pre class=\"code-block\">{highlightedCode}</pre><div class=\"code-block-footer\">[End {languageDisplay} Code]</div><br><br>";
+        }, RegexOptions.Singleline | RegexOptions.IgnoreCase);
     }
 
     private CodeBlock? DetectInlineCode(string text)
@@ -301,6 +338,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
             "css" => HighlightCss(code),
             "json" => HighlightJson(code),
             "sql" => HighlightSql(code),
+            "php" => HighlightPhp(code),
             _ => System.Net.WebUtility.HtmlEncode(code) // Fallback: just HTML encode
         };
     }
@@ -328,9 +366,9 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         
         foreach (var keyword in keywords)
         {
-            code = Regex.Replace(code, $@"\b({keyword})\b", "<span class='syntax-keyword'>$1</span>");
+            code = ReplaceKeywordOutsideTags(code, keyword);
         }
-        
+
         // String literals (double quotes)
         code = Regex.Replace(code, @"&quot;([^&]|&(?!quot;))*?&quot;", "<span class='syntax-string'>$0</span>");
         
@@ -375,25 +413,73 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     private string HighlightJavaScript(string code)
     {
         code = System.Net.WebUtility.HtmlEncode(code);
-        
+
+        // Apply single-quoted strings before keyword spans are added (same reason as HighlightPhp).
+        code = Regex.Replace(code, @"'([^'\r\n])*?'", "<span class='syntax-string'>$0</span>");
+
         var keywords = new[] { 
             "function", "const", "let", "var", "if", "else", "return", "for", "while", 
             "switch", "case", "break", "continue", "try", "catch", "finally", "throw",
             "new", "this", "null", "undefined", "true", "false",
             "async", "await", "class", "extends", "static", "import", "export", "from"
         };
-        
+
         foreach (var keyword in keywords)
         {
-            code = Regex.Replace(code, $@"\b({keyword})\b", "<span class='syntax-keyword'>$1</span>");
+            code = ReplaceKeywordOutsideTags(code, keyword);
         }
-        
+
         code = Regex.Replace(code, @"&quot;([^&]|&(?!quot;))*?&quot;", "<span class='syntax-string'>$0</span>");
-        code = Regex.Replace(code, @"'([^'])*?'", "<span class='syntax-string'>$0</span>");
         code = Regex.Replace(code, @"//.*?(?=\r?\n|$)", "<span class='syntax-comment'>$0</span>");
         code = Regex.Replace(code, @"/\*[\s\S]*?\*/", "<span class='syntax-comment'>$0</span>");
         code = Regex.Replace(code, @"\b(\d+\.?\d*)\b", "<span class='syntax-number'>$1</span>");
-        
+
+        return code;
+    }
+
+    private string HighlightPhp(string code)
+    {
+        // HTML encode first
+        code = System.Net.WebUtility.HtmlEncode(code);
+
+        // Apply single-quoted string replacement BEFORE adding any span tags.
+        // If applied after keyword/variable spans, the pattern '...' matches the
+        // single-quoted attribute values inside those spans (e.g. class='syntax-keyword')
+        // and produces malformed HTML that the browser silently drops.
+        code = Regex.Replace(code, @"'([^'\r\n])*?'", "<span class='syntax-string'>$0</span>");
+
+        var keywords = new[]
+        {
+            "echo", "print", "isset", "empty", "unset", "var_dump",
+            "if", "else", "elseif", "while", "for", "foreach", "switch", "case", "break", "continue", "return",
+            "function", "class", "interface", "extends", "implements", "new", "self", "parent",
+            "public", "private", "protected", "static", "abstract", "final",
+            "include", "require", "include_once", "require_once",
+            "namespace", "use", "try", "catch", "finally", "throw",
+            "true", "false", "null", "array", "list"
+        };
+
+        // Use tag-aware replacement so that the keyword 'class' (and others) cannot match
+        // inside the span attribute values added by the single-quoted string step above.
+        foreach (var keyword in keywords)
+        {
+            code = ReplaceKeywordOutsideTags(code, keyword, ignoreCase: true);
+        }
+
+        // PHP variables ($varName) — '$' never appears in generated span attributes, safe to run as-is
+        code = Regex.Replace(code, @"\$[a-zA-Z_]\w*", "<span class='syntax-variable'>$0</span>");
+
+        // String literals (double-quoted – encoded as &quot; after HtmlEncode)
+        code = Regex.Replace(code, @"&quot;([^&]|&(?!quot;))*?&quot;", "<span class='syntax-string'>$0</span>");
+
+        // Comments
+        code = Regex.Replace(code, @"//.*?(?=\r?\n|$)", "<span class='syntax-comment'>$0</span>");
+        code = Regex.Replace(code, @"/\*[\s\S]*?\*/", "<span class='syntax-comment'>$0</span>");
+        code = Regex.Replace(code, @"#.*?(?=\r?\n|$)", "<span class='syntax-comment'>$0</span>");
+
+        // Numbers
+        code = Regex.Replace(code, @"\b(\d+\.?\d*)\b", "<span class='syntax-number'>$1</span>");
+
         return code;
     }
 
@@ -447,15 +533,99 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
             "CREATE", "TABLE", "ALTER", "DROP", "PRIMARY KEY", "FOREIGN KEY"
         };
         
+        // Apply string literals before keyword spans to avoid '...' matching span attribute values.
+        code = Regex.Replace(code, @"'([^'\r\n])*?'", "<span class='syntax-string'>$0</span>");
+
         foreach (var keyword in keywords)
         {
-            code = Regex.Replace(code, $@"\b({keyword})\b", "<span class='syntax-keyword'>$1</span>", RegexOptions.IgnoreCase);
+            code = ReplaceKeywordOutsideTags(code, keyword, ignoreCase: true);
         }
-        
-        code = Regex.Replace(code, @"'([^'])*?'", "<span class='syntax-string'>$0</span>");
+
         code = Regex.Replace(code, @"--.*?(?=\r?\n|$)", "<span class='syntax-comment'>$0</span>");
-        
+
         return code;
+    }
+
+    /// <summary>
+    /// Ensures each numbered list item starts on its own line.
+    /// Handles LLM responses where items are concatenated without newlines,
+    /// e.g. "...sentence.1. Next item 2. Another item".
+    /// </summary>
+    private string InsertLineBreaksBeforeNumberedItems(string text)
+    {
+        // Insert a newline before "N. " or "NN. " patterns that don't already start a line.
+        // Require the item text to begin with an uppercase letter or digit to avoid false positives
+        // like "e.g.", "i.e.", or version numbers.
+        return Regex.Replace(text, @"(?<!\n)(?<=\S[ \t]*)(\d{1,2})\.\s+(?=[A-Z0-9])", "\n$1. ");
+    }
+
+    /// <summary>
+    /// Finds numbered list runs in the non-code parts of HTML and wraps them in &lt;ol&gt; tags.
+    /// Works on the output of FormatMarkdownCodeBlocks so that &lt;pre&gt; blocks are skipped.
+    /// Only converts a run to &lt;ol&gt; when two or more consecutive items are found.
+    /// </summary>
+    private string FormatNumberedLists(string html)
+    {
+        var result = new StringBuilder();
+        var i = 0;
+
+        while (i < html.Length)
+        {
+            var preStart = html.IndexOf("<pre", i, StringComparison.OrdinalIgnoreCase);
+
+            if (preStart < 0)
+            {
+                // No more <pre> blocks — convert lists in the remaining text
+                result.Append(ConvertNumberedListsToHtml(html[i..]));
+                break;
+            }
+
+            // Convert lists in the text before the <pre> block
+            result.Append(ConvertNumberedListsToHtml(html[i..preStart]));
+
+            // Find matching </pre>
+            var preEnd = html.IndexOf("</pre>", preStart, StringComparison.OrdinalIgnoreCase);
+            if (preEnd < 0)
+            {
+                result.Append(html[preStart..]);
+                break;
+            }
+
+            // Copy the entire <pre>…</pre> block unchanged
+            result.Append(html[preStart..(preEnd + 6)]);
+            i = preEnd + 6;
+        }
+
+        return result.ToString();
+    }
+
+    /// <summary>
+    /// Replaces runs of "N. text" lines in plain text with an HTML &lt;ol&gt; list.
+    /// </summary>
+    private string ConvertNumberedListsToHtml(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        // Match a consecutive block of numbered items, each on its own line.
+        // A single isolated "1." is left unchanged to avoid false positives.
+        return Regex.Replace(
+            text,
+            @"(?:^|\n)((?:\d{1,2}\.\s+[^\n]+\n?){2,})",
+            match =>
+            {
+                var listText = match.Groups[1].Value;
+                var items = Regex.Matches(listText, @"\d{1,2}\.\s+([^\n]+)");
+                if (items.Count < 2)
+                    return match.Value;
+
+                var sb = new StringBuilder("\n<ol class=\"llm-list\">");
+                foreach (Match item in items)
+                    sb.Append($"<li>{item.Groups[1].Value.Trim()}</li>");
+                sb.Append("</ol>\n");
+                return sb.ToString();
+            },
+            RegexOptions.Multiline);
     }
 
     private string FormatCode(string rawCode, string language)
@@ -465,6 +635,13 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
 
         // FIRST: Insert line breaks based on code structure if there are none
         rawCode = InsertLineBreaksInCode(rawCode, language);
+
+        // SECOND: for brace-based languages, merge continuation lines and normalise internal whitespace
+        if (IsBraceBasedLanguage(language.ToLowerInvariant()))
+        {
+            rawCode = JoinContinuationLines(rawCode);
+            rawCode = NormalizeInternalWhitespace(rawCode);
+        }
 
         var lines = rawCode.Split(new[] { '\n', '\r' }, StringSplitOptions.None);
         var formattedLines = new List<string>();
@@ -522,7 +699,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
 
     private bool IsBraceBasedLanguage(string language)
     {
-        var braceLanguages = new[] { "csharp", "cs", "c#", "java", "javascript", "js", "typescript", "ts", "css" };
+        var braceLanguages = new[] { "csharp", "cs", "c#", "java", "javascript", "js", "typescript", "ts", "css", "php" };
         return braceLanguages.Contains(language);
     }
 
@@ -557,6 +734,72 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         }
         
         return code;
+    }
+
+    /// <summary>
+    /// Merges lines that don't end a statement or block into the following line.
+    /// Fixes LLM output like "public partial\nclass Course{" → "public partial class Course{".
+    /// </summary>
+    private static string JoinContinuationLines(string code)
+    {
+        var rawLines = code.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+        var result = new List<string>();
+
+        for (int i = 0; i < rawLines.Length; i++)
+        {
+            var trimmed = rawLines[i].Trim();
+
+            if (string.IsNullOrEmpty(trimmed))
+            {
+                result.Add(string.Empty);
+                continue;
+            }
+
+            // Comments and attributes are never continuation lines
+            if (trimmed.StartsWith("//") || trimmed.StartsWith("/*") ||
+                trimmed.StartsWith("*") || trimmed.StartsWith("["))
+            {
+                result.Add(trimmed);
+                continue;
+            }
+
+            // A line is complete when it ends with one of these terminators
+            var isComplete = trimmed.EndsWith(";") || trimmed.EndsWith("{") ||
+                             trimmed.EndsWith("}") || trimmed.EndsWith(",") ||
+                             trimmed.EndsWith(":");
+
+            if (!isComplete && i + 1 < rawLines.Length)
+            {
+                var next = rawLines[i + 1].Trim();
+                if (!string.IsNullOrEmpty(next) &&
+                    !next.StartsWith("//") &&
+                    !next.StartsWith("["))
+                {
+                    result.Add(trimmed + " " + next);
+                    i++; // skip the merged line
+                    continue;
+                }
+            }
+
+            result.Add(trimmed);
+        }
+
+        return string.Join("\n", result);
+    }
+
+    /// <summary>
+    /// Collapses runs of two or more spaces within each code line to a single space.
+    /// Fixes LLM output like "Apply(event)    {" → "Apply(event) {".
+    /// </summary>
+    private static string NormalizeInternalWhitespace(string code)
+    {
+        var lines = code.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (!string.IsNullOrWhiteSpace(lines[i]))
+                lines[i] = Regex.Replace(lines[i].Trim(), @" {2,}", " ");
+        }
+        return string.Join("\n", lines);
     }
 
     private (int newIndentLevel, int lineIndent) CalculateIndent(string line, int currentIndent, string language)
@@ -670,6 +913,46 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return (newIndentLevel, lineIndent);
     }
 
+    /// <summary>
+    /// Replaces keyword occurrences only in text nodes, skipping content inside HTML tags.
+    /// Prevents keyword substitution from corrupting span attributes that were generated
+    /// by earlier highlighting passes (e.g. matching 'class' in class='syntax-keyword').
+    /// </summary>
+    private static string ReplaceKeywordOutsideTags(string html, string keyword, bool ignoreCase = false)
+    {
+        var result = new StringBuilder(html.Length + 64);
+        var options = ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None;
+        var pattern = new Regex($@"\b{Regex.Escape(keyword)}\b", options);
+        var i = 0;
+
+        while (i < html.Length)
+        {
+            if (html[i] == '<')
+            {
+                // Copy the entire tag (<...>) unchanged
+                var tagEnd = html.IndexOf('>', i + 1);
+                if (tagEnd < 0)
+                {
+                    result.Append(html[i..]);
+                    break;
+                }
+                result.Append(html[i..(tagEnd + 1)]);
+                i = tagEnd + 1;
+            }
+            else
+            {
+                // Plain-text segment — apply keyword replacement here only
+                var nextTag = html.IndexOf('<', i);
+                if (nextTag < 0) nextTag = html.Length;
+                var segment = html[i..nextTag];
+                result.Append(pattern.Replace(segment, "<span class='syntax-keyword'>$0</span>"));
+                i = nextTag;
+            }
+        }
+
+        return result.ToString();
+    }
+
     private string NormalizeLanguageName(string language)
     {
         return language.ToLowerInvariant() switch
@@ -687,6 +970,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
             "bash" or "sh" => "Bash",
             "powershell" or "ps1" => "PowerShell",
             "razor" or "cshtml" => "Razor",
+            "php" => "PHP",
             _ => char.ToUpper(language[0]) + language.Substring(1).ToLower()
         };
     }
