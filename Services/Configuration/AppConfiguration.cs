@@ -40,6 +40,12 @@ public class AppConfiguration
     /// Database configuration for vector memory
     /// </summary>
     public DatabaseSettings Database { get; set; } = new();
+
+    /// <summary>
+    /// Gemma 4 CLI (llama-cli subprocess) settings.
+    /// Leave <see cref="Gemma4CliSettings.ModelPath"/> empty to disable.
+    /// </summary>
+    public Gemma4CliSettings Gemma4Cli { get; set; } = new();
 }
 
 public class LlmSettings
@@ -231,6 +237,47 @@ public class DebugSettings
     /// Default: "game-rules-mpnet"
     /// </summary>
     public string CollectionName { get; set; } = "game-rules-mpnet";
+}
+
+/// <summary>
+/// Configuration for the local Gemma 4 CLI service (llama-cli subprocess).
+/// </summary>
+public class Gemma4CliSettings
+{
+    /// <summary>
+    /// Path to llama-cli.exe. Falls back to <see cref="LlmSettings.ExecutablePath"/> when empty.
+    /// </summary>
+    public string LlamaCliPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Path to the Gemma 4 GGUF model file.
+    /// Leave empty to disable the Gemma 4 CLI service.
+    /// </summary>
+    public string ModelPath { get; set; } = string.Empty;
+
+    /// <summary>Number of GPU layers to offload (0 = CPU only).</summary>
+    public int GpuLayers { get; set; } = 0;
+
+    /// <summary>Context window size in tokens (default: 4096).</summary>
+    public int ContextSize { get; set; } = 4096;
+
+    /// <summary>Maximum tokens to generate per request (default: 2048).</summary>
+    public int MaxTokens { get; set; } = 2048;
+
+    /// <summary>Sampling temperature (default: 0.7).</summary>
+    public float Temperature { get; set; } = 0.7f;
+
+    /// <summary>Top-p nucleus sampling (default: 0.9).</summary>
+    public float TopP { get; set; } = 0.9f;
+
+    /// <summary>Top-k sampling (default: 40).</summary>
+    public int TopK { get; set; } = 40;
+
+    /// <summary>Per-request timeout in milliseconds (default: 120 000 = 2 min).</summary>
+    public int TimeoutMs { get; set; } = 120_000;
+
+    /// <summary>Maximum tool-call iterations per request (default: 3).</summary>
+    public int MaxToolCallIterations { get; set; } = 3;
 }
 
 public class DatabaseSettings

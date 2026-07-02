@@ -4,7 +4,7 @@
 
 Two features added to the **QuickAsk** page (`/quick-ask`):
 
-1. **File Agent commands** — `/skapa`, `/fyll`, `/läs` now work in QuickAsk, identical to the Dashboard (Home) page.
+1. **File Agent commands** — `/skapa`, `/fyll`, `/läs <fil> <instruktion>`, `/lista` now work in QuickAsk, identical to the Dashboard (Home) page. Regular questions also route through the [agentic tool-calling pattern](AGENTIC-CHAT-TOOL-CALLING.md), letting the LLM invoke these commands itself.
 2. **MaxTokens preset selector** — a dropdown in the info bar lets the user choose how many output tokens the LLM may generate per response.
 
 ---
@@ -13,11 +13,17 @@ Two features added to the **QuickAsk** page (`/quick-ask`):
 
 ### What changed
 
-`QuickAskPage.razor` now injects `IFileAgentService` and intercepts slash commands in `SendQuestion()` before the message reaches the LLM.
+`QuickAskPage.razor` now injects `IFileAgentService` and `IAgenticChatService`, and intercepts
+slash commands in `SendQuestion()` before the message reaches the LLM. Regular (non-command)
+questions are routed through `IAgenticChatService` instead of calling the backend directly, so
+the LLM can request a file-agent tool itself while answering — see
+[AGENTIC-CHAT-TOOL-CALLING.md](AGENTIC-CHAT-TOOL-CALLING.md) for that flow.
 
 ```razor
 @using global::Services.FileAgent
+@using global::Services.AgentTools
 @inject IFileAgentService FileAgent
+@inject IAgenticChatService AgenticChat
 ```
 
 ### Flow in `SendQuestion()`
@@ -27,15 +33,15 @@ User types message
         ↓
 FileAgent.IsCommand(input)?
         ↓ yes                              ↓ no
-ExecuteAsync(input)           SendQuickAskAsync(conversation history)
+ExecuteAsync(input)           AgenticChat.SendWithToolsAsync(input, SendQuickAskActiveAsync)
         ↓                                     ↓
-┌─────────────────────┐           LLM generates response
+┌─────────────────────┐           LLM generates response (may invoke a tool internally)
 │ FileCreated/        │
 │ FileFilled / Error  │ → plain system message in chat (no tokens/s shown)
 │                     │
-│ FileRead            │ → SendQuickAskAsync(InjectedContext)
+│ FileRead            │ → SendQuickAskAsync(InjectedContext) // instruction + file content
 └─────────────────────┘        ↓
-                        LLM responds to file content
+                        LLM responds per the instruction, using the file content as context
 ```
 
 ### System message for /skapa and /fyll
@@ -138,3 +144,11 @@ Matches the existing `GenerationSettingsService` default of `128000`.
 | `Services/QuickAsk/MaxTokensPreset.cs` | New — `MaxTokensPreset` enum + `ToInt()` / `ToLabel()` extensions |
 | `AiDashboard/Components/Pages/QuickAskPage.razor` | `@using` + `@inject IFileAgentService`; `_selectedMaxTokens` field; Tokens dropdown in info bar; `SendQuestion()` rewritten |
 | `AiDashboard/wwwroot/css/quickask.css` | New `.oa-tokens-dropdown` class (narrower width override) |
+
+### Agentic tool-calling extension
+
+| File | Change |
+|------|--------|
+| `AiDashboard/Components/Pages/QuickAskPage.razor` | `@inject IAgenticChatService AgenticChat`; regular questions routed through `AgenticChat.SendWithToolsAsync`; tool-usage status messages rendered before the final answer |
+
+> See [AGENTIC-CHAT-TOOL-CALLING.md](AGENTIC-CHAT-TOOL-CALLING.md) for the full design of the agentic pattern shared with the Dashboard chat.

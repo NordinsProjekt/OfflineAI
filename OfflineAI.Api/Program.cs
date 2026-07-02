@@ -1,7 +1,7 @@
 using OfflineAI.Api.Services;
 using Application.AI.Pooling;
 using Services.Configuration;
-using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 

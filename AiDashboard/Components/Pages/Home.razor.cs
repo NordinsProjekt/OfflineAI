@@ -4,6 +4,7 @@ using AiDashboard.State;
 using AiDashboard.Models;
 using AiDashboard.Services.Interfaces;
 using Services.FileAgent;
+using Services.AgentTools;
 
 namespace AiDashboard.Components.Pages;
 
@@ -12,6 +13,7 @@ public partial class Home : IDisposable
     [Inject] private DashboardState Dashboard { get; set; } = default!;
     [Inject] private ILlmResponseFormatterService Formatter { get; set; } = default!;
     [Inject] private IFileAgentService FileAgent { get; set; } = default!;
+    [Inject] private IAgenticChatService AgenticChat { get; set; } = default!;
 
     private string composerText = string.Empty;
     private bool isProcessing = false;
@@ -107,8 +109,9 @@ public partial class Home : IDisposable
                 if (result.ResultType == FileAgentResultType.FileRead && result.IsSuccess
                     && result.InjectedContext is not null)
                 {
-                    // /läs: forward the file content to the AI as the actual prompt
-                    var response = await Dashboard.SendMessageAsync(result.InjectedContext);
+                    // /läs: file content is combined with the user-supplied instruction into
+                    // InjectedContext (see FileAgentService.ReadFileAsync), then forwarded to the AI
+                    var response = await Dashboard.SendActiveAsync(result.InjectedContext);
                     var aiMsg = new ChatMessageModel { IsUser = false, Text = response };
                     aiMsg.FormattedText = FormatMessage(aiMsg.Text, isUser: false);
                     messages.Add(aiMsg);
@@ -117,7 +120,7 @@ public partial class Home : IDisposable
                     && result.LlmPrompt is not null)
                 {
                     // /fyll: send the structured prompt to the LLM
-                    var response = await Dashboard.SendMessageAsync(result.LlmPrompt);
+                    var response = await Dashboard.SendActiveAsync(result.LlmPrompt);
 
                     if (FileAgent.TryExtractFileContent(response, out var fileContent))
                     {
@@ -154,6 +157,46 @@ public partial class Home : IDisposable
                         messages.Add(warnMsg);
                     }
                 }
+                else if (result.ResultType == FileAgentResultType.EditRequested && result.IsSuccess
+                    && result.LlmPrompt is not null)
+                {
+                    // /redigera: send the numbered-content prompt to the LLM and expect one or
+                    // more <REDIGERA RAD=...> blocks describing which lines to replace
+                    var response = await Dashboard.SendActiveAsync(result.LlmPrompt);
+
+                    if (FileAgent.TryExtractLineEdits(response, out var edits))
+                    {
+                        var applyResult = await FileAgent.ApplyLineEditsAsync(result.TargetFilename!, edits);
+
+                        // Show any explanatory text the LLM wrote outside the edit blocks
+                        var displayText = FileAgent.StripEditMarkers(response);
+                        if (!string.IsNullOrWhiteSpace(displayText))
+                        {
+                            var aiMsg = new ChatMessageModel { IsUser = false, Text = displayText };
+                            aiMsg.FormattedText = FormatMessage(displayText, isUser: false);
+                            messages.Add(aiMsg);
+                        }
+
+                        var resultMsg = new ChatMessageModel { IsUser = false, Text = applyResult.Message };
+                        resultMsg.FormattedText = FormatMessage(applyResult.Message, isUser: false);
+                        messages.Add(resultMsg);
+                    }
+                    else
+                    {
+                        // LLM did not use the expected format — show raw response + warning
+                        var aiMsg = new ChatMessageModel { IsUser = false, Text = response };
+                        aiMsg.FormattedText = FormatMessage(response, isUser: false);
+                        messages.Add(aiMsg);
+
+                        var warnMsg = new ChatMessageModel
+                        {
+                            IsUser = false,
+                            Text   = "⚠ Kunde inte tolka radändringar — filen ändrades inte."
+                        };
+                        warnMsg.FormattedText = FormatMessage(warnMsg.Text, isUser: false);
+                        messages.Add(warnMsg);
+                    }
+                }
                 else
                 {
                     // /skapa or error: show the result as a system message
@@ -164,9 +207,24 @@ public partial class Home : IDisposable
             }
             else
             {
-                // Regular AI message
-                var response = await Dashboard.SendMessageAsync(userMessage);
-                var aiMsg = new ChatMessageModel { IsUser = false, Text = response };
+                // Regular AI message — let the LLM decide (agentic pattern) whether it needs to
+                // use a file tool; AgenticChat primes it with the tool dictionary, detects any
+                // slash command in the reply via string search, executes it, and feeds the
+                // result back to the LLM for a final answer.
+                var agentResult = await AgenticChat.SendWithToolsAsync(userMessage, Dashboard.SendActiveAsync);
+
+                foreach (var invocation in agentResult.ToolInvocations)
+                {
+                    var toolMsg = new ChatMessageModel
+                    {
+                        IsUser = false,
+                        Text   = $"🔧 Used {invocation.Command} — {invocation.ResultSummary}"
+                    };
+                    toolMsg.FormattedText = FormatMessage(toolMsg.Text, isUser: false);
+                    messages.Add(toolMsg);
+                }
+
+                var aiMsg = new ChatMessageModel { IsUser = false, Text = agentResult.FinalResponse };
                 aiMsg.FormattedText = FormatMessage(aiMsg.Text, isUser: false);
                 messages.Add(aiMsg);
             }

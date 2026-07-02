@@ -28,9 +28,27 @@ public enum FileAgentResultType
     FillRequested,
 
     /// <summary>
+    /// The /redigera command was parsed; the caller should send <see cref="FileAgentResult.LlmPrompt"/>
+    /// to the LLM, then call <see cref="IFileAgentService.TryExtractLineEdits"/> on the response
+    /// and apply the result with <see cref="IFileAgentService.ApplyLineEditsAsync"/>.
+    /// </summary>
+    EditRequested,
+
+    /// <summary>
     /// A file was read; its content is available in <see cref="FileAgentResult.InjectedContext"/>.
     /// </summary>
     FileRead,
+
+    /// <summary>
+    /// A file was successfully edited via line-range replacements requested through /redigera.
+    /// </summary>
+    FileEdited,
+
+    /// <summary>
+    /// The files in the agent directory were listed; the listing is available in
+    /// <see cref="FileAgentResult.InjectedContext"/>.
+    /// </summary>
+    FilesListed,
 
     /// <summary>
     /// The command was recognized but failed (invalid filename, file not found, etc.).
@@ -59,8 +77,10 @@ public class FileAgentResult
     public string Message { get; init; } = string.Empty;
 
     /// <summary>
-    /// For <see cref="FileAgentResultType.FileRead"/> results, contains the file content
-    /// that should be forwarded to the AI as the prompt.
+    /// For <see cref="FileAgentResultType.FileRead"/> results, contains the content that should
+    /// be forwarded to the AI as the prompt. When produced via the chat-facing <c>/läs</c>
+    /// command this is the user's instruction combined with the file content; when produced via
+    /// <see cref="IFileAgentService.ReadFileRawAsync"/> it is the raw file content only.
     /// Null for all other result types.
     /// </summary>
     public string? InjectedContext { get; init; }
@@ -97,10 +117,30 @@ public class FileAgentResult
         };
 
     /// <summary>
+    /// Creates an EditRequested result carrying the target filename and the LLM prompt used to
+    /// request line-level edits.
+    /// </summary>
+    public static FileAgentResult EditRequest(string filename, string llmPrompt) =>
+        new()
+        {
+            ResultType     = FileAgentResultType.EditRequested,
+            IsSuccess      = true,
+            Message        = $"Analyserar radändringar för: {filename}",
+            TargetFilename = filename,
+            LlmPrompt      = llmPrompt
+        };
+
+    /// <summary>
     /// Creates a successful FileRead result containing the file content.
     /// </summary>
     public static FileAgentResult ReadSuccess(string message, string content) =>
         new() { ResultType = FileAgentResultType.FileRead, IsSuccess = true, Message = message, InjectedContext = content };
+
+    /// <summary>
+    /// Creates a successful FilesListed result containing the file listing.
+    /// </summary>
+    public static FileAgentResult ListSuccess(string message, string content) =>
+        new() { ResultType = FileAgentResultType.FilesListed, IsSuccess = true, Message = message, InjectedContext = content };
 
     /// <summary>
     /// Creates an error result.

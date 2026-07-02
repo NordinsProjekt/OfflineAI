@@ -2,6 +2,8 @@
 @namespace AiDashboard.Components.Pages
 @using global::Services.QuickAsk
 @using global::Services.FileAgent
+@using global::Services.AgentTools
+@using AiDashboard.State
 
 @rendermode InteractiveServer
 @inject NavigationManager Navigation
@@ -9,6 +11,7 @@
 @inject AiDashboard.Services.Interfaces.ILlmResponseFormatterService Formatter
 @inject IQuickAskService QuickAskService
 @inject IFileAgentService FileAgent
+@inject IAgenticChatService AgenticChat
 
 <PageTitle>Quick Ask - OfflineAI</PageTitle>
 
@@ -149,6 +152,16 @@
                     }
                 </select>
             </div>
+            @if (Dashboard.IsGemma4Available)
+            {
+                <div class="oa-info-badge oa-model-selector">
+                    <span class="model-label-text">Backend:</span>
+                    <select class="oa-model-dropdown" @bind="_selectedBackend">
+                        <option value="@LlmBackend.Classic">Classic</option>
+                        <option value="@LlmBackend.Gemma4Cli">Gemma 4 CLI</option>
+                    </select>
+                </div>
+            }
         </div>
     </div>
 </div>
@@ -158,6 +171,12 @@
     private bool isProcessing = false;
     private readonly List<QuickAskMessage> messages = new();
     private MaxTokensPreset _selectedMaxTokens = MaxTokensPreset.Tokens128K;
+    private LlmBackend _selectedBackend = LlmBackend.Classic;
+
+    protected override void OnInitialized()
+    {
+        _selectedBackend = Dashboard.SelectedBackend;
+    }
 
     private string SelectedModel
     {
@@ -196,6 +215,9 @@
         // Apply the selected MaxTokens preset before every call
         Dashboard.SettingsService.MaxTokens = _selectedMaxTokens.ToInt();
 
+        // Sync selected backend to DashboardState
+        Dashboard.SelectedBackend = _selectedBackend;
+
         StateHasChanged();
 
         var startTime = DateTime.Now;
@@ -209,8 +231,9 @@
                 if (result.ResultType == FileAgentResultType.FileRead && result.IsSuccess
                     && result.InjectedContext is not null)
                 {
-                    // /läs: forward file content to the LLM as the prompt
-                    var response = await Dashboard.SendQuickAskAsync(result.InjectedContext);
+                    // /läs: file content is combined with the user-supplied instruction into
+                    // InjectedContext (see FileAgentService.ReadFileAsync), then forwarded to the LLM
+                    var response = await Dashboard.SendQuickAskActiveAsync(result.InjectedContext);
                     var aiMessage = QuickAskService.CreateAiMessage(response, startTime);
                     aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
                     messages.Add(aiMessage);
@@ -219,7 +242,7 @@
                     && result.LlmPrompt is not null)
                 {
                     // /fyll: send structured prompt to the LLM
-                    var response = await Dashboard.SendQuickAskAsync(result.LlmPrompt);
+                    var response = await Dashboard.SendQuickAskActiveAsync(result.LlmPrompt);
 
                     if (FileAgent.TryExtractFileContent(response, out var fileContent))
                     {
@@ -254,6 +277,50 @@
                         });
                     }
                 }
+                else if (result.ResultType == FileAgentResultType.EditRequested && result.IsSuccess
+                    && result.LlmPrompt is not null)
+                {
+                    // /redigera: send the numbered-content prompt to the LLM and expect one or
+                    // more <REDIGERA RAD=...> blocks describing which lines to replace
+                    var response = await Dashboard.SendQuickAskActiveAsync(result.LlmPrompt);
+
+                    if (FileAgent.TryExtractLineEdits(response, out var edits))
+                    {
+                        var applyResult = await FileAgent.ApplyLineEditsAsync(result.TargetFilename!, edits);
+
+                        // Show any explanatory text the LLM wrote outside the edit blocks
+                        var displayText = FileAgent.StripEditMarkers(response);
+                        if (!string.IsNullOrWhiteSpace(displayText))
+                        {
+                            var aiMessage = QuickAskService.CreateAiMessage(displayText, startTime);
+                            aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
+                            messages.Add(aiMessage);
+                        }
+
+                        messages.Add(new QuickAskMessage
+                        {
+                            IsUser        = false,
+                            Text          = applyResult.Message,
+                            FormattedText = applyResult.Message,
+                            Timestamp     = DateTime.Now
+                        });
+                    }
+                    else
+                    {
+                        // LLM did not use the expected format — show raw response + warning
+                        var aiMessage = QuickAskService.CreateAiMessage(response, startTime);
+                        aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
+                        messages.Add(aiMessage);
+
+                        messages.Add(new QuickAskMessage
+                        {
+                            IsUser        = false,
+                            Text          = "⚠ Kunde inte tolka radändringar — filen ändrades inte.",
+                            FormattedText = "⚠ Kunde inte tolka radändringar — filen ändrades inte.",
+                            Timestamp     = DateTime.Now
+                        });
+                    }
+                }
                 else
                 {
                     // /skapa or error: show as a plain system message (no tokens/s)
@@ -268,11 +335,25 @@
             }
             else
             {
-                // Regular question — pass full conversation history
-                var response = await Dashboard.SendQuickAskAsync(
-                    messages.Select(t => t.FormattedText).ToList());
+                // Regular question — let the LLM decide (agentic pattern) whether it needs to
+                // use a file tool; AgenticChat primes it with the tool dictionary, detects any
+                // slash command in the reply via string search, executes it, and feeds the
+                // result back to the LLM for a final answer.
+                var agentResult = await AgenticChat.SendWithToolsAsync(input, Dashboard.SendQuickAskActiveAsync);
 
-                var aiMessage = QuickAskService.CreateAiMessage(response, startTime);
+                foreach (var invocation in agentResult.ToolInvocations)
+                {
+                    var toolText = $"🔧 Used {invocation.Command} — {invocation.ResultSummary}";
+                    messages.Add(new QuickAskMessage
+                    {
+                        IsUser        = false,
+                        Text          = toolText,
+                        FormattedText = toolText,
+                        Timestamp     = DateTime.Now
+                    });
+                }
+
+                var aiMessage = QuickAskService.CreateAiMessage(agentResult.FinalResponse, startTime);
                 aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
                 messages.Add(aiMessage);
             }

@@ -49,11 +49,13 @@
 - Collection and domain management
 
 ### ?? File Agent (Slash Commands)
-- `/skapa <fil>` — create a text file directly from the chat
-- `/fyll <fil> <innehåll>` — write inline content to a file
-- `/läs <fil>` / `/las <fil>` — read a file and send its content as the LLM prompt
+- `/skapa <fil>` - create a text file directly from the chat
+- `/fyll <fil> <innehall>` - write inline content to a file
+- `/las <fil> <instruktion>` - read a file and send it to the LLM together with an explicit instruction
+- `/lista` - list all files currently stored in the agent folder
 - Configurable storage folder; path traversal protection built-in
 - Reusable `IFileAgentService` available across the entire solution
+- Agentic tool-calling: the LLM is told about these commands and can invoke them itself while answering a regular question (see [AGENTIC-CHAT-TOOL-CALLING.md](Docs/AGENTIC-CHAT-TOOL-CALLING.md))
 
 ---
 
@@ -289,7 +291,8 @@ Located in `appsettings.json` or User Secrets:
 
 | Document | Description |
 |----------|-------------|
-| [FILE-AGENT-COMMANDS.md](Docs/FILE-AGENT-COMMANDS.md) | Slash commands for file creation, writing, and prompt loading |
+| [FILE-AGENT-COMMANDS.md](Docs/FILE-AGENT-COMMANDS.md) | Slash commands for file creation, writing, listing, and instruction-driven reading |
+| [AGENTIC-CHAT-TOOL-CALLING.md](Docs/AGENTIC-CHAT-TOOL-CALLING.md) | Lightweight agentic tool-calling pattern used by QuickAsk and the Dashboard chat |
 | [QUICKASK-FILE-AGENT-AND-MAXTOKENS.md](Docs/QUICKASK-FILE-AGENT-AND-MAXTOKENS.md) | File agent in QuickAsk + MaxTokens preset selector |
 | [QUICK-LLM-CHAT-GUIDE.md](Docs/QUICK-LLM-CHAT-GUIDE.md) | Quick chat interface guide |
 | [QUICKASK-SERVICE-EXTRACTION.md](Docs/QUICKASK-SERVICE-EXTRACTION.md) | QuickAsk service layer pattern |

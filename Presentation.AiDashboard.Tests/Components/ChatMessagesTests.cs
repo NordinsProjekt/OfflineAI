@@ -45,17 +45,17 @@ public class ChatMessagesTests : TestContext
             .Add(p => p.IsProcessing, false));
 
         // Assert
-        var userMsg = cut.Find(".oa-msg.user");
+        var userMsg = cut.Find(".oa-message.user");
         Assert.NotNull(userMsg);
-        
-        var avatar = userMsg.QuerySelector(".oa-avatar");
-        Assert.Contains("U", avatar?.TextContent);
-        
-        var bubble = userMsg.QuerySelector(".oa-bubble");
-        Assert.NotNull(bubble);
-        Assert.Contains("Hello, AI!", bubble.TextContent);
-        
-        var meta = userMsg.QuerySelector(".oa-meta");
+
+        var avatar = userMsg.QuerySelector(".oa-msg-avatar");
+        Assert.NotNull(avatar);
+
+        var content = userMsg.QuerySelector(".oa-msg-content");
+        Assert.NotNull(content);
+        Assert.Contains("Hello, AI!", content.TextContent);
+
+        var meta = userMsg.QuerySelector(".oa-msg-meta");
         Assert.Contains("You", meta?.TextContent);
         Assert.Contains("10:30", meta?.TextContent);
     }
@@ -81,17 +81,17 @@ public class ChatMessagesTests : TestContext
             .Add(p => p.IsProcessing, false));
 
         // Assert
-        var aiMsg = cut.Find(".oa-msg.ai");
+        var aiMsg = cut.Find(".oa-message.ai");
         Assert.NotNull(aiMsg);
-        
-        var avatar = aiMsg.QuerySelector(".oa-avatar");
-        Assert.Contains("AI", avatar?.TextContent);
-        
-        var bubble = aiMsg.QuerySelector(".oa-bubble");
-        Assert.NotNull(bubble);
-        Assert.Contains("Hello, human!", bubble.TextContent);
-        
-        var meta = aiMsg.QuerySelector(".oa-meta");
+
+        var avatar = aiMsg.QuerySelector(".oa-msg-avatar");
+        Assert.NotNull(avatar);
+
+        var content = aiMsg.QuerySelector(".oa-msg-content");
+        Assert.NotNull(content);
+        Assert.Contains("Hello, human!", content.TextContent);
+
+        var meta = aiMsg.QuerySelector(".oa-msg-meta");
         Assert.Contains("Assistant", meta?.TextContent);
         Assert.Contains("10:31", meta?.TextContent);
     }
@@ -131,13 +131,13 @@ public class ChatMessagesTests : TestContext
             .Add(p => p.IsProcessing, false));
 
         // Assert
-        var allMessages = cut.FindAll(".oa-msg");
+        var allMessages = cut.FindAll(".oa-message");
         Assert.Equal(3, allMessages.Count);
-        
-        var userMessages = cut.FindAll(".oa-msg.user");
+
+        var userMessages = cut.FindAll(".oa-message.user");
         Assert.Equal(2, userMessages.Count);
-        
-        var aiMessages = cut.FindAll(".oa-msg.ai");
+
+        var aiMessages = cut.FindAll(".oa-message.ai");
         Assert.Single(aiMessages); // Use Assert.Single for single-item collections
     }
 
@@ -150,12 +150,12 @@ public class ChatMessagesTests : TestContext
             .Add(p => p.IsProcessing, true));
 
         // Assert
-        var typingIndicator = cut.Find(".oa-typing");
+        var processingMsg = cut.Find(".oa-message.ai");
+        Assert.NotNull(processingMsg);
+
+        var typingIndicator = processingMsg.QuerySelector(".oa-typing-indicator");
         Assert.NotNull(typingIndicator);
-        Assert.Contains("???", typingIndicator.TextContent);
-        
-        var meta = cut.Find(".oa-meta");
-        Assert.Contains("Thinking...", meta.TextContent);
+        Assert.Equal(3, typingIndicator.QuerySelectorAll("span").Length);
     }
 
     [Fact]
@@ -180,14 +180,14 @@ public class ChatMessagesTests : TestContext
             .Add(p => p.IsProcessing, true));
 
         // Assert
-        var processingMsg = cut.Find(".oa-msg.ai");
+        var processingMsg = cut.Find(".oa-message.ai");
         Assert.NotNull(processingMsg);
-        
-        var avatar = processingMsg.QuerySelector(".oa-avatar");
-        Assert.Contains("AI", avatar?.TextContent);
-        
-        var bubble = processingMsg.QuerySelector(".oa-bubble");
-        Assert.NotNull(bubble);
+
+        var avatar = processingMsg.QuerySelector(".oa-msg-avatar");
+        Assert.NotNull(avatar);
+
+        var content = processingMsg.QuerySelector(".oa-msg-content");
+        Assert.NotNull(content);
     }
 
     [Fact]
@@ -225,7 +225,7 @@ public class ChatMessagesTests : TestContext
             .Add(p => p.IsProcessing, false));
 
         // Assert
-        var bubble = cut.Find(".oa-bubble");
+        var bubble = cut.Find(".oa-msg-text");
         var strong = bubble.QuerySelector("strong");
         Assert.NotNull(strong);
         Assert.Contains("Bold text", strong.TextContent);

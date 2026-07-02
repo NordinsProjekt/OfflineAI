@@ -1,5 +1,6 @@
 using AiDashboard.Services;
 using Application.AI.Management;
+using Application.AI.Gemma4;
 using Services.Configuration;
 using Services.Management;
 using Services.Memory;
@@ -50,6 +51,13 @@ public class DashboardState
             }
         }
     }
+
+    public IGemma4CliService? Gemma4CliService { get; set; }
+
+    public bool IsGemma4Available => Gemma4CliService != null;
+
+    /// <summary>Which backend to use for chat. Defaults to Classic (pooled subprocess).</summary>
+    public LlmBackend SelectedBackend { get; set; } = LlmBackend.Classic;
 
     // UI-specific state
     private bool _collapsed;
@@ -405,6 +413,36 @@ public class DashboardState
         catch (Exception ex)
         {
             return $"[ERROR] Failed to send message: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Sends a message via the currently selected backend.
+    /// Uses Gemma 4 CLI when <see cref="SelectedBackend"/> is <see cref="LlmBackend.Gemma4Cli"/>
+    /// and <see cref="Gemma4CliService"/> is available; falls back to <see cref="SendMessageAsync"/> otherwise.
+    /// </summary>
+    public Task<string> SendActiveAsync(string message)
+        => SelectedBackend == LlmBackend.Gemma4Cli && Gemma4CliService != null
+            ? SendViaGemma4Async(message)
+            : SendMessageAsync(message);
+
+    /// <summary>
+    /// QuickAsk variant: routes through Gemma 4 CLI or <see cref="SendQuickAskAsync(string)"/> depending on selected backend.
+    /// </summary>
+    public Task<string> SendQuickAskActiveAsync(string message)
+        => SelectedBackend == LlmBackend.Gemma4Cli && Gemma4CliService != null
+            ? SendViaGemma4Async(message)
+            : SendQuickAskAsync(message);
+
+    private async Task<string> SendViaGemma4Async(string message)
+    {
+        try
+        {
+            return await Gemma4CliService!.ChatAsync(message);
+        }
+        catch (Exception ex)
+        {
+            return $"[ERROR] Gemma 4 CLI failed: {ex.Message}";
         }
     }
 

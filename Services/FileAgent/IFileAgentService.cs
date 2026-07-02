@@ -1,8 +1,25 @@
 namespace Services.FileAgent;
 
 /// <summary>
-/// Handles file agent slash commands (/skapa, /fyll, /läs) in the chat input.
+/// Handles file agent slash commands (/skapa, /fyll, /läs, /redigera, /lista) in the chat input.
 /// Implement this service in the Services project so it can be reused across the solution.
+/// <para>
+/// These same commands double as the tool set for the lightweight agentic pattern used by
+/// <c>IAgenticChatService</c>: <see cref="GetToolDescriptions"/> and
+/// <see cref="BuildToolsSystemPrompt"/> describe them to the LLM, and
+/// <see cref="TryFindAgentCommand"/> detects when the LLM itself requests one.
+/// Note that <c>/läs</c> requires both a filename and an instruction
+/// (<c>/läs &lt;filnamn&gt; &lt;instruktion&gt;</c>) — the command must always carry an explicit
+/// task for the agent, not just raw file content used as the prompt.
+/// </para>
+/// <para>
+/// <c>/redigera &lt;filnamn&gt; &lt;instruktion&gt;</c> follows the same two-phase pattern as
+/// <c>/fyll</c>: the file is read and presented to the LLM with line numbers, the LLM replies with
+/// one or more <c>&lt;REDIGERA RAD=...&gt;</c> blocks describing which lines to replace and with
+/// what — or <c>&lt;REDIGERA INFOGA_EFTER=...&gt;</c> / <c>&lt;REDIGERA INFOGA_FÖRE=...&gt;</c>
+/// blocks describing brand-new code (e.g. a new method) to insert without removing anything — and
+/// the caller applies them via <see cref="TryExtractLineEdits"/> + <see cref="ApplyLineEditsAsync"/>.
+/// </para>
 /// </summary>
 public interface IFileAgentService
 {
@@ -13,7 +30,7 @@ public interface IFileAgentService
 
     /// <summary>
     /// Returns true if the given input starts with a recognised file agent command
-    /// (/skapa, /fyll, /läs, /las).
+    /// (/skapa, /fyll, /läs, /las, /lista).
     /// </summary>
     bool IsCommand(string input);
 
@@ -21,8 +38,10 @@ public interface IFileAgentService
     /// Executes the file agent command encoded in <paramref name="input"/> and returns
     /// a <see cref="FileAgentResult"/> describing what happened.
     /// <para>
-    /// For <c>/läs</c> — <see cref="FileAgentResult.InjectedContext"/> contains file content
-    /// to forward to the LLM as the prompt.
+    /// For <c>/läs &lt;filnamn&gt; &lt;instruktion&gt;</c> — the instruction is required so the
+    /// command carries an explicit task for the agent instead of forwarding the raw file as the
+    /// entire prompt. <see cref="FileAgentResult.InjectedContext"/> contains the instruction
+    /// combined with the file content, ready to forward to the LLM.
     /// </para>
     /// <para>
     /// For <c>/fyll</c> — <see cref="FileAgentResult.ResultType"/> is
@@ -31,6 +50,15 @@ public interface IFileAgentService
     /// </para>
     /// </summary>
     Task<FileAgentResult> ExecuteAsync(string input);
+
+    /// <summary>
+    /// Reads the raw content of <paramref name="filename"/> without requiring or combining an
+    /// instruction. Intended for programmatic/tool-calling access — e.g. Semantic Kernel function
+    /// calling via <c>BuiltInFileTools</c> — where the calling model already supplies its own
+    /// reasoning about what to do with the content. The chat-facing <c>/läs</c> slash command
+    /// (see <see cref="ExecuteAsync"/>) requires an explicit instruction instead.
+    /// </summary>
+    Task<FileAgentResult> ReadFileRawAsync(string filename);
 
     /// <summary>
     /// Tries to extract the file content block delimited by <c>&lt;&lt;&lt;FIL&gt;&gt;&gt;</c> /
@@ -50,5 +78,58 @@ public interface IFileAgentService
     /// and <c>&lt;&lt;&lt;SLUT&gt;&gt;&gt;</c>) removed so the content displays cleanly in chat.
     /// </summary>
     string StripFileMarkers(string llmResponse);
+
+    /// <summary>
+    /// Tries to extract one or more line-edit blocks from an LLM response produced after a
+    /// <c>/redigera</c> request. Two kinds of blocks are recognised:
+    /// <list type="bullet">
+    ///   <item><c>&lt;REDIGERA RAD=N&gt;...&lt;/REDIGERA&gt;</c> (or <c>RAD=start-slut</c>, e.g.
+    ///     <c>RAD=5-7</c>) replaces the given 1-based inclusive line range with new content.</item>
+    ///   <item><c>&lt;REDIGERA INFOGA_EFTER=N&gt;...&lt;/REDIGERA&gt;</c> or
+    ///     <c>&lt;REDIGERA INFOGA_FÖRE=N&gt;...&lt;/REDIGERA&gt;</c> (ASCII fallback
+    ///     <c>INFOGA_FORE</c>) inserts new content — e.g. a brand-new method — immediately after
+    ///     or before line <c>N</c> without removing any existing lines.</item>
+    /// </list>
+    /// Returns <c>true</c> and sets <paramref name="edits"/> when at least one valid block is
+    /// found; unmatched or malformed text outside the blocks is ignored.
+    /// </summary>
+    bool TryExtractLineEdits(string llmResponse, out IReadOnlyList<LineEdit> edits);
+
+    /// <summary>
+    /// Applies <paramref name="edits"/> (replacements and/or insertions) to <paramref name="filename"/>
+    /// inside <see cref="BaseDirectory"/>. All edits are validated against the file's current line
+    /// count and checked for overlaps before anything is written; if any edit is invalid the
+    /// file is left unchanged and the returned result describes the problem.
+    /// </summary>
+    Task<FileAgentResult> ApplyLineEditsAsync(string filename, IReadOnlyList<LineEdit> edits);
+
+    /// <summary>
+    /// Returns the LLM response with any <c>&lt;REDIGERA&gt;</c> line-edit blocks removed, so
+    /// remaining explanatory text (if any) displays cleanly in chat.
+    /// </summary>
+    string StripEditMarkers(string llmResponse);
+
+    /// <summary>
+    /// Returns a dictionary describing each available slash-command tool: key is the exact
+    /// command signature (e.g. <c>"/läs &lt;filnamn&gt; &lt;instruktion&gt;"</c>), value is a
+    /// natural-language description of what the tool does. Used to tell the LLM which tools it
+    /// may invoke.
+    /// </summary>
+    IReadOnlyDictionary<string, string> GetToolDescriptions();
+
+    /// <summary>
+    /// Builds the instructional preamble ("start message") that tells the LLM about the
+    /// available tools from <see cref="GetToolDescriptions"/> and how to invoke them
+    /// (by writing the exact slash command on its own line in its reply).
+    /// </summary>
+    string BuildToolsSystemPrompt();
+
+    /// <summary>
+    /// Scans <paramref name="llmResponse"/> line by line — using plain string search via
+    /// <see cref="IsCommand"/> — for a known agent slash command the LLM wants to invoke.
+    /// Returns <c>true</c> and sets <paramref name="command"/> to the exact command line
+    /// (ready to pass to <see cref="ExecuteAsync"/>) when one is found.
+    /// </summary>
+    bool TryFindAgentCommand(string llmResponse, out string command);
 }
 

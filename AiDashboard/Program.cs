@@ -4,9 +4,11 @@ using AiDashboard.Services.Interfaces;
 using Application.AI.Pooling;
 using Application.AI.Management;
 using Application.AI.Embeddings;
+using Application.AI.Gemma4;
 using Services.Memory;
 using Services.Interfaces;
 using Services.Repositories;
+using Services.AgentTools;
 using Microsoft.SemanticKernel.Embeddings;
 using Infrastructure.Data.Dapper;
 using Services.Configuration;
@@ -50,6 +52,48 @@ public class Program
                     "OfflineAI", "AgentFiles");
             return new FileAgentService(agentDir);
         });
+
+        // Register agent tool registry (used by Gemma 4 CLI tool-calling)
+        builder.Services.AddSingleton<IAgentToolRegistry, AgentToolRegistry>();
+
+        // Register the lightweight, text-based agentic chat service used by QuickAsk and the
+        // Dashboard chat: tells the LLM about the IFileAgentService slash commands and executes
+        // any it requests, feeding the result back for a final answer.
+        builder.Services.AddSingleton<IAgenticChatService, AgenticChatService>();
+
+        // Register Gemma 4 CLI service (optional — only when ModelPath is configured)
+        var gemma4CliCfg = appConfig.Gemma4Cli;
+        var gemma4CliExe = !string.IsNullOrWhiteSpace(gemma4CliCfg.LlamaCliPath)
+            ? gemma4CliCfg.LlamaCliPath
+            : appConfig.Llm?.ExecutablePath ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(gemma4CliCfg.ModelPath)
+            && !string.IsNullOrWhiteSpace(gemma4CliExe))
+        {
+            builder.Services.AddSingleton<IGemma4CliService>(sp =>
+            {
+                var opts = new Gemma4CliOptions
+                {
+                    LlamaCliPath           = gemma4CliExe,
+                    ModelPath              = gemma4CliCfg.ModelPath,
+                    GpuLayers              = gemma4CliCfg.GpuLayers,
+                    ContextSize            = gemma4CliCfg.ContextSize,
+                    MaxTokens              = gemma4CliCfg.MaxTokens,
+                    Temperature            = gemma4CliCfg.Temperature,
+                    TopP                   = gemma4CliCfg.TopP,
+                    TopK                   = gemma4CliCfg.TopK,
+                    TimeoutMs              = gemma4CliCfg.TimeoutMs,
+                    MaxToolCallIterations  = gemma4CliCfg.MaxToolCallIterations
+                };
+                var registry = sp.GetRequiredService<IAgentToolRegistry>();
+                _ = registry; // available for future tool-call wiring
+                Console.WriteLine($"[+] Gemma 4 CLI service registered (model: {Path.GetFileName(gemma4CliCfg.ModelPath)})");
+                return new Gemma4CliService(opts);
+            });
+        }
+        else
+        {
+            Console.WriteLine("[!] Gemma 4 CLI service not configured (AppConfiguration:Gemma4Cli:ModelPath missing)");
+        }
 
         // Register document analysis services
         builder.Services.AddScoped<IDocumentAnalysisService, DocumentAnalysisService>();
@@ -332,10 +376,18 @@ public class Program
                 // Attach chat service
                 var chatService = sp.GetService<DashboardChatService>();
                 dashboardState.ChatService = chatService;
-                
+
                 if (chatService != null)
                 {
                     Console.WriteLine("[+] Chat service attached to dashboard");
+                }
+
+                // Attach Gemma 4 CLI service (optional)
+                var gemma4Cli = sp.GetService<IGemma4CliService>();
+                dashboardState.Gemma4CliService = gemma4Cli;
+                if (gemma4Cli != null)
+                {
+                    Console.WriteLine("[+] Gemma 4 CLI service attached to dashboard");
                 }
                 
                 // Set model switch handler

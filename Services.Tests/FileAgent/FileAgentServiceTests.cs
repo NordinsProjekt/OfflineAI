@@ -1,0 +1,529 @@
+using FluentAssertions;
+using Services.FileAgent;
+
+namespace Services.Tests.FileAgent;
+
+/// <summary>
+/// Unit tests for the <c>/redigera</c> line-editing workflow in <see cref="FileAgentService"/>:
+/// parsing &lt;REDIGERA RAD=...&gt; blocks from an LLM response and applying the resulting
+/// <see cref="LineEdit"/> replacements to a file.
+/// </summary>
+public class FileAgentServiceTests : IDisposable
+{
+    private readonly string _tempDir;
+    private readonly FileAgentService _sut;
+
+    public FileAgentServiceTests()
+    {
+        _tempDir = Path.Combine(Path.GetTempPath(), "FileAgentServiceTests_" + Guid.NewGuid());
+        _sut = new FileAgentService(_tempDir);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_tempDir))
+            Directory.Delete(_tempDir, recursive: true);
+    }
+
+    private async Task<string> CreateFileAsync(string filename, params string[] lines)
+    {
+        var path = Path.Combine(_tempDir, filename);
+        await File.WriteAllLinesAsync(path, lines);
+        return path;
+    }
+
+    // ── IsCommand ─────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("/redigera notes.txt Rätta stavfelet")]
+    [InlineData("/REDIGERA notes.txt Rätta stavfelet")]
+    public void IsCommand_RecognisesRedigera(string input)
+    {
+        _sut.IsCommand(input).Should().BeTrue();
+    }
+
+    // ── TryExtractLineEdits ───────────────────────────────────────────────
+
+    [Fact]
+    public void TryExtractLineEdits_SingleLineBlock_ReturnsOneEdit()
+    {
+        var response = "<REDIGERA RAD=2>ny rad två</REDIGERA>";
+
+        var success = _sut.TryExtractLineEdits(response, out var edits);
+
+        success.Should().BeTrue();
+        edits.Should().ContainSingle();
+        edits[0].StartLine.Should().Be(2);
+        edits[0].EndLine.Should().Be(2);
+        edits[0].NewContent.Should().Be("ny rad två");
+    }
+
+    [Fact]
+    public void TryExtractLineEdits_RangeBlock_ReturnsStartAndEndLine()
+    {
+        var response = "<REDIGERA RAD=5-7>rad A\nrad B\nrad C</REDIGERA>";
+
+        var success = _sut.TryExtractLineEdits(response, out var edits);
+
+        success.Should().BeTrue();
+        edits.Should().ContainSingle();
+        edits[0].StartLine.Should().Be(5);
+        edits[0].EndLine.Should().Be(7);
+        edits[0].NewContent.Should().Be("rad A\nrad B\nrad C");
+    }
+
+    [Fact]
+    public void TryExtractLineEdits_MultipleBlocks_ReturnsAllEdits()
+    {
+        var response =
+            "Här är ändringarna:\n" +
+            "<REDIGERA RAD=1>första raden</REDIGERA>\n" +
+            "<REDIGERA RAD=3-4>tredje och fjärde</REDIGERA>";
+
+        var success = _sut.TryExtractLineEdits(response, out var edits);
+
+        success.Should().BeTrue();
+        edits.Should().HaveCount(2);
+        edits[0].StartLine.Should().Be(1);
+        edits[1].StartLine.Should().Be(3);
+        edits[1].EndLine.Should().Be(4);
+    }
+
+    [Fact]
+    public void TryExtractLineEdits_NoBlocks_ReturnsFalse()
+    {
+        var response = "Inga ändringar behövs.";
+
+        var success = _sut.TryExtractLineEdits(response, out var edits);
+
+        success.Should().BeFalse();
+        edits.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TryExtractLineEdits_EndBeforeStart_IsIgnored()
+    {
+        var response = "<REDIGERA RAD=9-2>ogiltigt intervall</REDIGERA>";
+
+        var success = _sut.TryExtractLineEdits(response, out var edits);
+
+        success.Should().BeFalse();
+        edits.Should().BeEmpty();
+    }
+
+    // ── TryExtractLineEdits (insertions) ─────────────────────────────────
+
+    [Fact]
+    public void TryExtractLineEdits_InsertAfterBlock_ReturnsInsertAfterEdit()
+    {
+        var response = "<REDIGERA INFOGA_EFTER=2>ny kod</REDIGERA>";
+
+        var success = _sut.TryExtractLineEdits(response, out var edits);
+
+        success.Should().BeTrue();
+        edits.Should().ContainSingle();
+        edits[0].Kind.Should().Be(LineEditKind.InsertAfter);
+        edits[0].StartLine.Should().Be(2);
+        edits[0].NewContent.Should().Be("ny kod");
+    }
+
+    [Fact]
+    public void TryExtractLineEdits_InsertAfterZero_IsAllowed()
+    {
+        var response = "<REDIGERA INFOGA_EFTER=0>allra först</REDIGERA>";
+
+        var success = _sut.TryExtractLineEdits(response, out var edits);
+
+        success.Should().BeTrue();
+        edits[0].Kind.Should().Be(LineEditKind.InsertAfter);
+        edits[0].StartLine.Should().Be(0);
+    }
+
+    [Fact]
+    public void TryExtractLineEdits_InsertBeforeBlock_ReturnsInsertBeforeEdit()
+    {
+        var response = "<REDIGERA INFOGA_FÖRE=3>ny kod</REDIGERA>";
+
+        var success = _sut.TryExtractLineEdits(response, out var edits);
+
+        success.Should().BeTrue();
+        edits.Should().ContainSingle();
+        edits[0].Kind.Should().Be(LineEditKind.InsertBefore);
+        edits[0].StartLine.Should().Be(3);
+        edits[0].NewContent.Should().Be("ny kod");
+    }
+
+    [Fact]
+    public void TryExtractLineEdits_InsertBeforeAsciiFallback_ReturnsInsertBeforeEdit()
+    {
+        var response = "<REDIGERA INFOGA_FORE=3>ny kod</REDIGERA>";
+
+        var success = _sut.TryExtractLineEdits(response, out var edits);
+
+        success.Should().BeTrue();
+        edits[0].Kind.Should().Be(LineEditKind.InsertBefore);
+        edits[0].StartLine.Should().Be(3);
+    }
+
+    [Fact]
+    public void TryExtractLineEdits_InsertBeforeZero_IsIgnored()
+    {
+        var response = "<REDIGERA INFOGA_FÖRE=0>ogiltigt</REDIGERA>";
+
+        var success = _sut.TryExtractLineEdits(response, out var edits);
+
+        success.Should().BeFalse();
+        edits.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TryExtractLineEdits_MixedReplaceAndInsertBlocks_ReturnsBoth()
+    {
+        var response =
+            "<REDIGERA RAD=1>rättad rad</REDIGERA>\n" +
+            "<REDIGERA INFOGA_EFTER=3>public void NyMetod() { }</REDIGERA>";
+
+        var success = _sut.TryExtractLineEdits(response, out var edits);
+
+        success.Should().BeTrue();
+        edits.Should().HaveCount(2);
+        edits[0].Kind.Should().Be(LineEditKind.Replace);
+        edits[1].Kind.Should().Be(LineEditKind.InsertAfter);
+        edits[1].NewContent.Should().Be("public void NyMetod() { }");
+    }
+
+    // ── ApplyLineEditsAsync ───────────────────────────────────────────────
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_SingleLineEdit_ReplacesOnlyThatLine()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2", "rad 3");
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", new[] { new LineEdit(2, 2, "ny rad 2") });
+
+        result.IsSuccess.Should().BeTrue();
+        result.ResultType.Should().Be(FileAgentResultType.FileEdited);
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "ny rad 2", "rad 3");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_RangeEdit_ReplacesAllLinesInRange()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2", "rad 3", "rad 4");
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", new[] { new LineEdit(2, 3, "ersättning") });
+
+        result.IsSuccess.Should().BeTrue();
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "ersättning", "rad 4");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_MultipleNonOverlappingEdits_AppliesAllCorrectly()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2", "rad 3", "rad 4", "rad 5");
+
+        var edits = new[]
+        {
+            new LineEdit(4, 4, "ny rad 4"),
+            new LineEdit(1, 1, "ny rad 1"),
+        };
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", edits);
+
+        result.IsSuccess.Should().BeTrue();
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("ny rad 1", "rad 2", "rad 3", "ny rad 4", "rad 5");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_MultiLineReplacement_ShiftsSubsequentLines()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2", "rad 3");
+
+        var result = await _sut.ApplyLineEditsAsync(
+            "notes.txt",
+            new[] { new LineEdit(2, 2, "ny A\nny B") });
+
+        result.IsSuccess.Should().BeTrue();
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "ny A", "ny B", "rad 3");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_OutOfRangeLine_FailsAndLeavesFileUnchanged()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2");
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", new[] { new LineEdit(5, 5, "för långt") });
+
+        result.IsSuccess.Should().BeFalse();
+        result.ResultType.Should().Be(FileAgentResultType.Error);
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "rad 2");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_OverlappingEdits_FailsAndLeavesFileUnchanged()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2", "rad 3", "rad 4");
+
+        var edits = new[]
+        {
+            new LineEdit(1, 3, "block A"),
+            new LineEdit(2, 4, "block B"),
+        };
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", edits);
+
+        result.IsSuccess.Should().BeFalse();
+        result.ResultType.Should().Be(FileAgentResultType.Error);
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "rad 2", "rad 3", "rad 4");
+    }
+
+    // ── ApplyLineEditsAsync (insertions) ─────────────────────────────────
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_InsertAfter_AddsNewLineWithoutRemovingExisting()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2", "rad 3");
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", new[] { LineEdit.InsertAfterLine(2, "ny rad") });
+
+        result.IsSuccess.Should().BeTrue();
+        result.ResultType.Should().Be(FileAgentResultType.FileEdited);
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "rad 2", "ny rad", "rad 3");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_InsertBefore_AddsNewLineWithoutRemovingExisting()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2", "rad 3");
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", new[] { LineEdit.InsertBeforeLine(2, "ny rad") });
+
+        result.IsSuccess.Should().BeTrue();
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "ny rad", "rad 2", "rad 3");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_InsertAfterZero_InsertsAtTopOfFile()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2");
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", new[] { LineEdit.InsertAfterLine(0, "ny första rad") });
+
+        result.IsSuccess.Should().BeTrue();
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("ny första rad", "rad 1", "rad 2");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_InsertAfterLastLine_AppendsAtEndOfFile()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2");
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", new[] { LineEdit.InsertAfterLine(2, "ny sista rad") });
+
+        result.IsSuccess.Should().BeTrue();
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "rad 2", "ny sista rad");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_InsertMultiLineContent_InsertsAllLines()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2");
+
+        var result = await _sut.ApplyLineEditsAsync(
+            "notes.txt",
+            new[] { LineEdit.InsertAfterLine(1, "public void NyMetod()\n{\n}") });
+
+        result.IsSuccess.Should().BeTrue();
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "public void NyMetod()", "{", "}", "rad 2");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_MultipleInsertionsAtSameAnchor_MergeInOriginalOrder()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2");
+
+        var edits = new[]
+        {
+            LineEdit.InsertAfterLine(1, "första tillägget"),
+            LineEdit.InsertBeforeLine(2, "andra tillägget"),
+        };
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", edits);
+
+        result.IsSuccess.Should().BeTrue();
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "första tillägget", "andra tillägget", "rad 2");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_InsertAfterEndOfReplaceRange_DoesNotOverlap()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2", "rad 3", "rad 4");
+
+        var edits = new[]
+        {
+            new LineEdit(2, 3, "ersatt block"),
+            LineEdit.InsertAfterLine(3, "ny rad direkt efter"),
+        };
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", edits);
+
+        result.IsSuccess.Should().BeTrue();
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "ersatt block", "ny rad direkt efter", "rad 4");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_InsertBeforeStartOfReplaceRange_DoesNotOverlap()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2", "rad 3", "rad 4");
+
+        var edits = new[]
+        {
+            new LineEdit(2, 3, "ersatt block"),
+            LineEdit.InsertBeforeLine(2, "ny rad direkt före"),
+        };
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", edits);
+
+        result.IsSuccess.Should().BeTrue();
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "ny rad direkt före", "ersatt block", "rad 4");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_InsertStrictlyInsideReplaceRange_FailsAsOverlap()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2", "rad 3", "rad 4");
+
+        var edits = new[]
+        {
+            new LineEdit(1, 4, "ersatt allt"),
+            LineEdit.InsertAfterLine(2, "mitt i"),
+        };
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", edits);
+
+        result.IsSuccess.Should().BeFalse();
+        result.ResultType.Should().Be(FileAgentResultType.Error);
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "rad 2", "rad 3", "rad 4");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_InsertAfterLineBeyondEndOfFile_FailsAndLeavesFileUnchanged()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2");
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", new[] { LineEdit.InsertAfterLine(5, "för långt") });
+
+        result.IsSuccess.Should().BeFalse();
+        result.ResultType.Should().Be(FileAgentResultType.Error);
+
+        var content = await File.ReadAllLinesAsync(Path.Combine(_tempDir, "notes.txt"));
+        content.Should().Equal("rad 1", "rad 2");
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_FileDoesNotExist_ReturnsFailure()
+    {
+        var result = await _sut.ApplyLineEditsAsync("missing.txt", new[] { new LineEdit(1, 1, "x") });
+
+        result.IsSuccess.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_NoEdits_ReturnsFailure()
+    {
+        await CreateFileAsync("notes.txt", "rad 1");
+
+        var result = await _sut.ApplyLineEditsAsync("notes.txt", Array.Empty<LineEdit>());
+
+        result.IsSuccess.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ApplyLineEditsAsync_PathTraversalFilename_ReturnsFailure()
+    {
+        var result = await _sut.ApplyLineEditsAsync("../outside.txt", new[] { new LineEdit(1, 1, "x") });
+
+        result.IsSuccess.Should().BeFalse();
+    }
+
+    // ── StripEditMarkers ──────────────────────────────────────────────────
+
+    [Fact]
+    public void StripEditMarkers_RemovesEditBlocks_KeepsSurroundingText()
+    {
+        var response = "Klart!\n<REDIGERA RAD=1>ny text</REDIGERA>\nHoppas det hjälper.";
+
+        var stripped = _sut.StripEditMarkers(response);
+
+        stripped.Should().NotContain("REDIGERA");
+        stripped.Should().Contain("Klart!");
+        stripped.Should().Contain("Hoppas det hjälper.");
+    }
+
+    // ── /redigera via ExecuteAsync ────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_Redigera_ReturnsEditRequestedWithNumberedContent()
+    {
+        await CreateFileAsync("notes.txt", "första", "andra");
+
+        var result = await _sut.ExecuteAsync("/redigera notes.txt Rätta stavfel på rad 2.");
+
+        result.ResultType.Should().Be(FileAgentResultType.EditRequested);
+        result.IsSuccess.Should().BeTrue();
+        result.TargetFilename.Should().Be("notes.txt");
+        result.LlmPrompt.Should().Contain("1: första");
+        result.LlmPrompt.Should().Contain("2: andra");
+        result.LlmPrompt.Should().Contain("REDIGERA");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RedigeraWithoutInstruction_ReturnsFailure()
+    {
+        await CreateFileAsync("notes.txt", "rad 1");
+
+        var result = await _sut.ExecuteAsync("/redigera notes.txt");
+
+        result.ResultType.Should().Be(FileAgentResultType.Error);
+        result.IsSuccess.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RedigeraMissingFile_ReturnsFailure()
+    {
+        var result = await _sut.ExecuteAsync("/redigera saknas.txt Gör något.");
+
+        result.ResultType.Should().Be(FileAgentResultType.Error);
+        result.IsSuccess.Should().BeFalse();
+    }
+}
