@@ -25,6 +25,7 @@ No full-file rewrite is required for either kind of change.
 - `/lista` — lists every file currently stored in the agent folder
 - **Path traversal protection** — only bare filenames are accepted; directory segments are stripped
 - **Configurable base directory** — defaults to `Documents\OfflineAI\AgentFiles`, overridable in `appsettings.json`
+- **Workspace-confined** — the base directory is actually the currently active **workspace**, a user-selectable, runtime-switchable folder; the agent can never read/write outside of it. See [WORKSPACE-CONFINEMENT.md](WORKSPACE-CONFINEMENT.md)
 - **Reusable service** — lives in the `Services` project (`Services.FileAgent` namespace), injectable in any project in the solution
 - **Agentic tool-calling** — the same commands double as a tool dictionary the LLM can invoke itself; see [AGENTIC-CHAT-TOOL-CALLING.md](AGENTIC-CHAT-TOOL-CALLING.md)
 
@@ -56,6 +57,7 @@ Services/
 public interface IFileAgentService
 {
     string BaseDirectory { get; }
+    void SetBaseDirectory(string baseDirectory);
     bool IsCommand(string input);
     Task<FileAgentResult> ExecuteAsync(string input);
     Task<FileAgentResult> ReadFileRawAsync(string filename);
@@ -70,6 +72,11 @@ public interface IFileAgentService
     bool TryFindAgentCommand(string llmResponse, out string command);
 }
 ```
+
+> `SetBaseDirectory(string)` lets the active base directory change at runtime without recreating
+> the service — this is how switching the active **workspace** re-confines every subsequent file
+> operation to the newly-selected directory. See
+> [WORKSPACE-CONFINEMENT.md](WORKSPACE-CONFINEMENT.md) for the full workspace model.
 
 > `TryExtractLineEdits`, `ApplyLineEditsAsync`, and `StripEditMarkers` support the `/redigera`
 > line-editing workflow: the LLM is shown the file with line numbers and replies with one or
@@ -383,6 +390,7 @@ private async Task SendMessage()
 | Path traversal (`../secret.txt`) | `Path.GetFileName()` strips all directory components |
 | Escaping the base directory | `Path.GetFullPath()` result is verified to start with `BaseDirectory` |
 | Arbitrary absolute paths (`C:\Windows\...`) | Only the bare filename is used; absolute paths are reduced to their filename part |
+| Working outside the user's chosen folder | The base directory is the active **workspace** — a user-selectable, persisted, runtime-switchable directory (see [WORKSPACE-CONFINEMENT.md](WORKSPACE-CONFINEMENT.md)); only the user can change it, never the LLM |
 
 ---
 
@@ -506,3 +514,21 @@ design, prompt format, and round-trip flow.
 | `AiDashboard/Components/Pages/QuickAskPage.razor` | `@inject IFileAgentService`; command interception in `SendQuestion()` |
 
 > See [QUICKASK-FILE-AGENT-AND-MAXTOKENS.md](QUICKASK-FILE-AGENT-AND-MAXTOKENS.md) for full QuickAsk details.
+
+### Multi-workspace confinement
+
+| File | Change |
+|------|--------|
+| `Services/Workspace/WorkspaceInfo.cs` | New — workspace model (`Name`, `Path`) |
+| `Services/Workspace/IWorkspaceService.cs` | New — workspace list/add/remove/select contract |
+| `Services/Workspace/WorkspaceService.cs` | New — JSON-persisted implementation, default-workspace seeding |
+| `Services/FileAgent/FileAgentService.cs` | `BaseDirectory` made mutable; added `SetBaseDirectory(string)` to re-confine at runtime |
+| `Services/FileAgent/IFileAgentService.cs` | Declared `SetBaseDirectory(string)` |
+| `AiDashboard/Program.cs` | Singleton registration of `IWorkspaceService`; `IFileAgentService` now rooted at the active workspace and re-confined via `ActiveWorkspaceChanged` |
+| `AiDashboard/State/DashboardState.cs` | Exposes workspace state/actions; shows a status message on every workspace switch |
+| `AiDashboard/Components/Pages/Components/WorkspaceSection.razor` | New — sidebar UI for viewing, switching, adding, and removing workspaces |
+| `AiDashboard/Components/Pages/Components/Sidebar.razor` | Added `<WorkspaceSection />` |
+| `Services.Tests/Workspace/WorkspaceServiceTests.cs` | New — unit tests for workspace persistence and selection |
+| `Presentation.AiDashboard.Tests/Components/WorkspaceSectionTests.cs` | New — bUnit tests for the workspace sidebar UI |
+
+> See **[WORKSPACE-CONFINEMENT.md](WORKSPACE-CONFINEMENT.md)** for the full workspace model, persistence format, and safety guarantees.

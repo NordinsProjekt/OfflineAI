@@ -1,5 +1,4 @@
 @using AiDashboard.Services.Interfaces
-@using System.Text
 @inject ILlmResponseFormatterService Formatter
 
 <div class="llm-output-container">
@@ -62,52 +61,6 @@
     [Parameter] public bool AutoFormatCode { get; set; } = true;
     
     private string? FormattedResponse => AutoFormatCode && !string.IsNullOrEmpty(Response) 
-        ? FormatResponseAsHtml(Formatter.FormatResponse(Response))
+        ? Formatter.FormatResponse(Response)
         : null;
-    
-    private string FormatResponseAsHtml(string formattedText)
-    {
-        if (string.IsNullOrWhiteSpace(formattedText))
-            return string.Empty;
-        
-        var html = new StringBuilder();
-        var lines = formattedText.Split('\n');
-        bool inCodeBlock = false;
-        string currentLanguage = "";
-        
-        foreach (var line in lines)
-        {
-            // Detect code block start
-            if (line.StartsWith("[") && line.Contains(" Code]"))
-            {
-                inCodeBlock = true;
-                currentLanguage = line.Replace("[", "").Replace(" Code]", "").Trim();
-                html.AppendLine($"<div class='code-block'>");
-                html.AppendLine($"<div class='code-header'>{currentLanguage}</div>");
-                html.AppendLine($"<pre class='code-content'><code>");
-                continue;
-            }
-            
-            // Detect code block end
-            if (line.StartsWith("[End ") && line.Contains(" Code]"))
-            {
-                html.AppendLine("</code></pre>");
-                html.AppendLine("</div>");
-                inCodeBlock = false;
-                continue;
-            }
-            
-            // Add line content
-            if (inCodeBlock)
-            {
-                html.AppendLine(System.Web.HttpUtility.HtmlEncode(line));
-            }
-            else
-            {
-                html.AppendLine($"<p>{System.Web.HttpUtility.HtmlEncode(line)}</p>");
-            }
-        }
-        
-        return html.ToString();
-    }
 }

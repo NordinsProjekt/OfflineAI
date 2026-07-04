@@ -46,6 +46,57 @@ public class AppConfiguration
     /// Leave <see cref="Gemma4CliSettings.ModelPath"/> empty to disable.
     /// </summary>
     public Gemma4CliSettings Gemma4Cli { get; set; } = new();
+
+    /// <summary>
+    /// Named HTTP API endpoints the agent may call as a tool (see
+    /// <c>Services.AgentTools.ApiCallTool</c>), plus the agentic tool-calling loop settings.
+    /// </summary>
+    public AgentToolsSettings AgentTools { get; set; } = new();
+}
+
+public class AgentToolsSettings
+{
+    /// <summary>
+    /// Maximum number of internal tool-call round trips the agentic chat loop
+    /// (<c>IAgenticChatService</c>) performs before it must return a final answer to the user.
+    /// Default: 3.
+    /// </summary>
+    public int MaxToolCallRounds { get; set; } = 3;
+
+    /// <summary>
+    /// Named HTTP API endpoints the LLM may call by name via the <c>call_api</c> tool. Only
+    /// endpoints listed here can be invoked — the LLM cannot supply an arbitrary URL.
+    /// </summary>
+    public List<ApiEndpointSettings> Endpoints { get; set; } = new();
+}
+
+/// <summary>
+/// Describes one named, pre-configured HTTP endpoint the agent is allowed to call.
+/// The LLM selects an endpoint by <see cref="Name"/> and can never specify a raw URL —
+/// this keeps outbound calls limited to destinations the user has explicitly configured.
+/// </summary>
+public class ApiEndpointSettings
+{
+    /// <summary>Unique name the LLM uses to select this endpoint, e.g. "weather".</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Short description shown to the LLM to help it decide when to use this endpoint.</summary>
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>Full request URL. May contain <c>{param}</c> placeholders filled in from the LLM's arguments.</summary>
+    public string Url { get; set; } = string.Empty;
+
+    /// <summary>HTTP method to use. Default: "GET".</summary>
+    public string Method { get; set; } = "GET";
+
+    /// <summary>Optional static request headers (e.g. API keys) sent with every call to this endpoint.</summary>
+    public Dictionary<string, string> Headers { get; set; } = new();
+
+    /// <summary>Per-request timeout in milliseconds. Default: 15000 (15 seconds).</summary>
+    public int TimeoutMs { get; set; } = 15_000;
+
+    /// <summary>Maximum characters of the response body returned to the LLM. Default: 4000.</summary>
+    public int MaxResponseLength { get; set; } = 4000;
 }
 
 public class LlmSettings
@@ -275,6 +326,14 @@ public class Gemma4CliSettings
 
     /// <summary>Per-request timeout in milliseconds (default: 120 000 = 2 min).</summary>
     public int TimeoutMs { get; set; } = 120_000;
+
+    /// <summary>
+    /// If no new stdout output is produced for this many milliseconds, treat generation as
+    /// complete (default: 10 000 = 10 s). Increase substantially for large/partially
+    /// CPU-offloaded models, where model loading and prompt processing can pause output for
+    /// longer than the default before the first token appears.
+    /// </summary>
+    public int PauseTimeoutMs { get; set; } = 10_000;
 
     /// <summary>Maximum tool-call iterations per request (default: 3).</summary>
     public int MaxToolCallIterations { get; set; } = 3;

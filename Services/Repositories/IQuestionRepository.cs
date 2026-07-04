@@ -16,12 +16,25 @@ public interface IQuestionRepository
     /// <summary>
     /// Save a question and its answer to the database.
     /// </summary>
-    Task<Guid> SaveQuestionAsync(string question, string answer, Guid llmId);
-    
+    /// <param name="question">The user's question/message.</param>
+    /// <param name="answer">The LLM's answer.</param>
+    /// <param name="llmId">The LLM that generated the answer.</param>
+    /// <param name="conversationId">
+    /// Optional identifier grouping this turn with other turns from the same
+    /// multi-turn conversation/session. Leave null for a standalone turn.
+    /// </param>
+    Task<Guid> SaveQuestionAsync(string question, string answer, Guid llmId, Guid? conversationId = null);
+
     /// <summary>
     /// Get all questions from the database.
     /// </summary>
     Task<List<QuestionEntity>> GetAllQuestionsAsync();
+
+    /// <summary>
+    /// Get all questions belonging to a single conversation/session, ordered chronologically,
+    /// so the full multi-turn conversation can be reconstructed as one unit.
+    /// </summary>
+    Task<List<QuestionEntity>> GetQuestionsByConversationAsync(Guid conversationId);
     
     /// <summary>
     /// Get questions filtered by LLM ID.

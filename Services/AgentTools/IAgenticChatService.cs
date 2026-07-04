@@ -49,8 +49,16 @@ public interface IAgenticChatService
     /// raw text reply (e.g. <c>Dashboard.SendQuickAskActiveAsync</c> or <c>Dashboard.SendActiveAsync</c>).
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="onToolStatus">
+    /// Optional callback invoked with a short, user-facing status line immediately before each
+    /// internal tool call is executed (e.g. "🔧 Kör: /api väder ..."), so the caller can surface
+    /// live progress (e.g. via <c>DashboardState.StatusMessage</c>) without exposing the raw
+    /// tool-loop prompts/replies to the user. The loop itself always stays internal — only these
+    /// short status strings and the final answer are meant to reach the user.
+    /// </param>
     Task<AgenticChatResult> SendWithToolsAsync(
         string userMessage,
         Func<string, Task<string>> sendToLlm,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        Action<string>? onToolStatus = null);
 }

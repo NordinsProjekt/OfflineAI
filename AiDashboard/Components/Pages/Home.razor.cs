@@ -211,7 +211,10 @@ public partial class Home : IDisposable
                 // use a file tool; AgenticChat primes it with the tool dictionary, detects any
                 // slash command in the reply via string search, executes it, and feeds the
                 // result back to the LLM for a final answer.
-                var agentResult = await AgenticChat.SendWithToolsAsync(userMessage, Dashboard.SendActiveAsync);
+                var agentResult = await AgenticChat.SendWithToolsAsync(
+                    userMessage,
+                    Dashboard.SendActiveAsync,
+                    onToolStatus: status => Dashboard.StatusMessage = status);
 
                 foreach (var invocation in agentResult.ToolInvocations)
                 {

@@ -51,7 +51,64 @@ public class AgenticChatServiceTests : IDisposable
         }
     }
 
-    // ── Constructor ───────────────────────────────────────────────────────
+    /// <summary>
+    /// Fake <see cref="IUtilityToolsService"/>: mirrors the real command-detection/execution
+    /// shape (line-scan for a known command prefix, then a caller-supplied executor) without any
+    /// HTTP or configuration dependency, so the loop's utility-tool branch can be tested in
+    /// isolation.
+    /// </summary>
+    private sealed class FakeUtilityToolsService : IUtilityToolsService
+    {
+        private readonly Func<string, UtilityToolResult> _executor;
+        private readonly IReadOnlyDictionary<string, string> _descriptions;
+
+        public FakeUtilityToolsService(
+            Func<string, UtilityToolResult> executor,
+            IReadOnlyDictionary<string, string>? descriptions = null)
+        {
+            _executor = executor;
+            _descriptions = descriptions ?? new Dictionary<string, string> { ["/tid"] = "Returnerar aktuell tid." };
+        }
+
+        public List<string> ExecutedCommands { get; } = new();
+
+        public bool IsCommand(string input) =>
+            !string.IsNullOrWhiteSpace(input)
+            && _descriptions.Keys.Any(k => input.TrimStart().StartsWith(k, StringComparison.OrdinalIgnoreCase));
+
+        public Task<UtilityToolResult> ExecuteAsync(string input)
+        {
+            ExecutedCommands.Add(input);
+            return Task.FromResult(_executor(input));
+        }
+
+        public Task<UtilityToolResult> CallNamedApiAsync(string endpointName, string instruction = "") =>
+            Task.FromResult(UtilityToolResult.Success("not used"));
+
+        public IReadOnlyList<string> GetApiEndpointNames() => Array.Empty<string>();
+
+        public IReadOnlyDictionary<string, string> GetToolDescriptions() => _descriptions;
+
+        public bool TryFindCommand(string llmResponse, out string command)
+        {
+            command = string.Empty;
+            if (string.IsNullOrWhiteSpace(llmResponse)) return false;
+
+            foreach (var rawLine in llmResponse.Split('\n'))
+            {
+                var line = rawLine.Trim().TrimEnd('\r');
+                if (IsCommand(line))
+                {
+                    command = line;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    // ── Constructor ──────────────────────────────────────────────────────
 
     [Fact]
     public void Constructor_NullFileAgent_ThrowsArgumentNullException()
@@ -215,5 +272,150 @@ public class AgenticChatServiceTests : IDisposable
         result.ToolInvocations.Should().HaveCount(3);
         result.FinalResponse.Should().Be("/lista");
         llm.Prompts.Should().HaveCount(4);
+    }
+
+    // ── Utility tool round trip ───────────────────────────────────────────
+
+    [Fact]
+    public async Task SendWithToolsAsync_UtilityToolConfigured_AppendsDescriptionsToStartPrompt()
+    {
+        var utilityTools = new FakeUtilityToolsService(
+            _ => UtilityToolResult.Success("ok"),
+            new Dictionary<string, string> { ["/tid"] = "Returnerar aktuell tid." });
+        var sut = new AgenticChatService(_fileAgent, utilityTools);
+        var llm = new ScriptedLlm("Stockholm är huvudstaden i Sverige.");
+
+        await sut.SendWithToolsAsync("Vad är huvudstaden i Sverige?", llm.SendAsync);
+
+        llm.Prompts[0].Should().Contain("/tid").And.Contain("Returnerar aktuell tid.");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_UtilityCommandRequested_ExecutesViaUtilityServiceAndFeedsResultBackToLlm()
+    {
+        var utilityTools = new FakeUtilityToolsService(
+            _ => UtilityToolResult.Success("Klockan är nu 14:30.", "Klockan är nu 14:30 (Europe/Stockholm)."));
+        var sut = new AgenticChatService(_fileAgent, utilityTools);
+        var llm = new ScriptedLlm("/tid", "Klockan är 14:30.");
+
+        var result = await sut.SendWithToolsAsync("Vad är klockan?", llm.SendAsync);
+
+        result.FinalResponse.Should().Be("Klockan är 14:30.");
+        result.ToolInvocations.Should().ContainSingle();
+        result.ToolInvocations[0].Command.Should().Be("/tid");
+        result.ToolInvocations[0].ResultSummary.Should().Be("Klockan är nu 14:30.");
+        utilityTools.ExecutedCommands.Should().ContainSingle().Which.Should().Be("/tid");
+        llm.Prompts.Should().HaveCount(2);
+        llm.Prompts[1].Should().Contain("Klockan är nu 14:30 (Europe/Stockholm).").And.Contain("Vad är klockan?");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_UtilityCommandFailure_StillFeedsMessageBackToLlm()
+    {
+        var utilityTools = new FakeUtilityToolsService(_ => UtilityToolResult.Failure("Okänt kommando."));
+        var sut = new AgenticChatService(_fileAgent, utilityTools);
+        var llm = new ScriptedLlm("/tid", "Tyvärr kunde jag inte ta reda på tiden.");
+
+        var result = await sut.SendWithToolsAsync("Vad är klockan?", llm.SendAsync);
+
+        result.FinalResponse.Should().Be("Tyvärr kunde jag inte ta reda på tiden.");
+        result.ToolInvocations.Should().ContainSingle();
+        result.ToolInvocations[0].ResultSummary.Should().Be("Okänt kommando.");
+        llm.Prompts[1].Should().Contain("Okänt kommando.");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_NoUtilityToolsConfigured_FileCommandStillTakesPrecedence()
+    {
+        // _sut is built without an IUtilityToolsService: file-agent commands must still work.
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "a.txt"), "x");
+        var llm = new ScriptedLlm("/lista", "Du har en fil: a.txt");
+
+        var result = await _sut.SendWithToolsAsync("Vilka filer finns?", llm.SendAsync);
+
+        result.FinalResponse.Should().Be("Du har en fil: a.txt");
+        result.ToolInvocations.Should().ContainSingle();
+        result.ToolInvocations[0].Command.Should().Be("/lista");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_FileCommandTakesPrecedenceOverUtilityCommand_WhenBothCouldMatch()
+    {
+        // The loop checks file-agent commands first; /lista is a file command, so even with
+        // utility tools configured, a /lista reply must be routed to the file agent.
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "a.txt"), "x");
+        var utilityTools = new FakeUtilityToolsService(_ => UtilityToolResult.Success("should not run"));
+        var sut = new AgenticChatService(_fileAgent, utilityTools);
+        var llm = new ScriptedLlm("/lista", "Du har en fil: a.txt");
+
+        var result = await sut.SendWithToolsAsync("Vilka filer finns?", llm.SendAsync);
+
+        result.ToolInvocations[0].Command.Should().Be("/lista");
+        utilityTools.ExecutedCommands.Should().BeEmpty();
+    }
+
+    // ── onToolStatus callback ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task SendWithToolsAsync_FileCommandRequested_InvokesOnToolStatusBeforeExecution()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "a.txt"), "x");
+        var llm = new ScriptedLlm("/lista", "Du har en fil: a.txt");
+        var statusMessages = new List<string>();
+
+        await _sut.SendWithToolsAsync("Vilka filer finns?", llm.SendAsync, onToolStatus: statusMessages.Add);
+
+        statusMessages.Should().ContainSingle();
+        statusMessages[0].Should().Contain("/lista");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_UtilityCommandRequested_InvokesOnToolStatusBeforeExecution()
+    {
+        var utilityTools = new FakeUtilityToolsService(_ => UtilityToolResult.Success("Klockan är nu 14:30."));
+        var sut = new AgenticChatService(_fileAgent, utilityTools);
+        var llm = new ScriptedLlm("/tid", "Klockan är 14:30.");
+        var statusMessages = new List<string>();
+
+        await sut.SendWithToolsAsync("Vad är klockan?", llm.SendAsync, onToolStatus: statusMessages.Add);
+
+        statusMessages.Should().ContainSingle();
+        statusMessages[0].Should().Contain("/tid");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_NoCommandRequested_NeverInvokesOnToolStatus()
+    {
+        var llm = new ScriptedLlm("Stockholm är huvudstaden i Sverige.");
+        var invoked = false;
+
+        await _sut.SendWithToolsAsync("Vad är huvudstaden i Sverige?", llm.SendAsync, onToolStatus: _ => invoked = true);
+
+        invoked.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_MultipleToolRounds_InvokesOnToolStatusOncePerRound()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "a.txt"), "x");
+        var llm = new ScriptedLlm("/lista", "/lista", "Klart, jag har listat filerna två gånger.");
+        var statusMessages = new List<string>();
+
+        var result = await _sut.SendWithToolsAsync("Vilka filer finns?", llm.SendAsync, onToolStatus: statusMessages.Add);
+
+        result.ToolInvocations.Should().HaveCount(2);
+        statusMessages.Should().HaveCount(2);
+        statusMessages.Should().AllSatisfy(m => m.Should().Contain("/lista"));
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_OnToolStatusNull_DoesNotThrow()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "a.txt"), "x");
+        var llm = new ScriptedLlm("/lista", "Du har en fil: a.txt");
+
+        var act = async () => await _sut.SendWithToolsAsync("Vilka filer finns?", llm.SendAsync, onToolStatus: null);
+
+        await act.Should().NotThrowAsync();
     }
 }

@@ -14,6 +14,13 @@ namespace Application.AI.Gemma4;
 /// </summary>
 public interface IGemma4CliService
 {
+    /// <summary>
+    /// File name of the Gemma 4 GGUF model currently configured for this service
+    /// (derived from <see cref="Gemma4CliOptions.ModelPath"/>). Used to identify
+    /// the LLM when persisting question/answer turns.
+    /// </summary>
+    string ModelName { get; }
+
     /// <summary>Simple text-only chat.</summary>
     Task<string> ChatAsync(string userMessage, CancellationToken cancellationToken = default);
 

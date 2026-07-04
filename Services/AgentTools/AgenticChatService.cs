@@ -6,23 +6,41 @@ namespace Services.AgentTools;
 public sealed class AgenticChatService : IAgenticChatService
 {
     /// <summary>
-    /// Safety cap on tool-call round trips so a confused model can't loop forever
-    /// requesting tools instead of answering.
+    /// Default safety cap on tool-call round trips so a confused model can't loop forever
+    /// requesting tools instead of answering. Overridable via the constructor — typically from
+    /// <c>AppConfiguration.AgentTools.MaxToolCallRounds</c>.
     /// </summary>
-    private const int MaxToolCallRounds = 3;
+    private const int DefaultMaxToolCallRounds = 3;
 
     private readonly IFileAgentService _fileAgent;
+    private readonly IUtilityToolsService? _utilityTools;
+    private readonly int _maxToolCallRounds;
 
-    public AgenticChatService(IFileAgentService fileAgent)
+    /// <param name="fileAgent">Executes file-agent slash commands (/skapa, /fyll, /läs, /redigera, /lista).</param>
+    /// <param name="utilityTools">
+    /// Optional. Executes built-in utility commands (/tid, /datum, /api). When <c>null</c>, only
+    /// file-agent tools are offered to the LLM.
+    /// </param>
+    /// <param name="maxToolCallRounds">
+    /// Safety cap on internal tool-call round trips. Non-positive values fall back to
+    /// <see cref="DefaultMaxToolCallRounds"/>.
+    /// </param>
+    public AgenticChatService(
+        IFileAgentService fileAgent,
+        IUtilityToolsService? utilityTools = null,
+        int maxToolCallRounds = DefaultMaxToolCallRounds)
     {
         _fileAgent = fileAgent ?? throw new ArgumentNullException(nameof(fileAgent));
+        _utilityTools = utilityTools;
+        _maxToolCallRounds = maxToolCallRounds > 0 ? maxToolCallRounds : DefaultMaxToolCallRounds;
     }
 
     /// <inheritdoc/>
     public async Task<AgenticChatResult> SendWithToolsAsync(
         string userMessage,
         Func<string, Task<string>> sendToLlm,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<string>? onToolStatus = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userMessage);
         ArgumentNullException.ThrowIfNull(sendToLlm);
@@ -30,17 +48,43 @@ public sealed class AgenticChatService : IAgenticChatService
         var invocations = new List<ToolInvocation>();
 
         // "Start message": primes the LLM with the tool dictionary (slash command → description)
-        // alongside the user's actual question.
-        var startMessage = $"{_fileAgent.BuildToolsSystemPrompt()}\n\nFråga: {userMessage}";
+        // alongside the user's actual question. Utility tool descriptions (time/date/api), when
+        // available, are appended in the same bullet format so the LLM sees one unified tool list.
+        var toolsPrompt = _fileAgent.BuildToolsSystemPrompt();
+        if (_utilityTools is not null)
+            toolsPrompt = AppendUtilityToolDescriptions(toolsPrompt, _utilityTools);
+
+        var startMessage = $"{toolsPrompt}\n\nFråga: {userMessage}";
         var response = await sendToLlm(startMessage);
 
-        for (var round = 0; round < MaxToolCallRounds; round++)
+        for (var round = 0; round < _maxToolCallRounds; round++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Parse the LLM's reply using plain string search for a known slash command.
-            if (!_fileAgent.TryFindAgentCommand(response, out var command))
+            // Parse the LLM's reply using plain string search for a known slash command — file
+            // agent commands first, then utility commands (time/date/api).
+            var isFileCommand = _fileAgent.TryFindAgentCommand(response, out var command);
+            var isUtilityCommand = !isFileCommand
+                && _utilityTools is not null
+                && _utilityTools.TryFindCommand(response, out command);
+
+            if (!isFileCommand && !isUtilityCommand)
                 break; // No tool requested — treat this reply as the final answer.
+
+            onToolStatus?.Invoke($"🔧 Kör: {command}");
+
+            if (isUtilityCommand)
+            {
+                var utilityResult = await _utilityTools!.ExecuteAsync(command);
+                var utilityText = utilityResult.InjectedContext ?? utilityResult.Message;
+                invocations.Add(new ToolInvocation(command, utilityResult.Message));
+
+                response = await sendToLlm(
+                    $"Verktygsresultat för \"{command}\":\n{utilityText}\n\n" +
+                    $"Använd informationen ovan för att besvara den ursprungliga frågan: {userMessage}\n" +
+                    "Skriv inget nytt kommando om du inte behöver ytterligare information.");
+                continue;
+            }
 
             var result = await _fileAgent.ExecuteAsync(command);
 
@@ -106,5 +150,20 @@ public sealed class AgenticChatService : IAgenticChatService
         }
 
         return new AgenticChatResult(response, invocations);
+    }
+
+    /// <summary>
+    /// Appends the utility tool descriptions (/tid, /datum, /api ...) to the file-agent tools
+    /// system prompt, in the same "- command : description" bullet format, so the LLM sees one
+    /// unified tool list regardless of which service ultimately executes the command.
+    /// </summary>
+    private static string AppendUtilityToolDescriptions(string toolsPrompt, IUtilityToolsService utilityTools)
+    {
+        var descriptions = utilityTools.GetToolDescriptions();
+        if (descriptions.Count == 0)
+            return toolsPrompt;
+
+        var lines = descriptions.Select(kv => $"- {kv.Key} : {kv.Value}");
+        return toolsPrompt + "\n" + string.Join("\n", lines);
     }
 }

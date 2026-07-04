@@ -35,7 +35,10 @@ public sealed class Gemma4CliService : IGemma4CliService
             throw new ArgumentException("ModelPath must not be empty.", nameof(options));
     }
 
-    // ── Public API ───────────────────────────────────────────────────────────
+    /// <inheritdoc/>
+    public string ModelName => Path.GetFileName(_options.ModelPath);
+
+    // ── Public API ─────────────────────────────────────────────────────────
 
     /// <inheritdoc/>
     public Task<string> ChatAsync(string userMessage, CancellationToken cancellationToken = default)

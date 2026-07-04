@@ -1,0 +1,144 @@
+@using global::Services.Workspace
+@inject DashboardState Dashboard
+@implements IDisposable
+
+<CollapsibleSection SectionKey="workspace" Title="Workspace">
+    <div class="oa-info-text">
+        The AI agent can only create, read, and edit files inside the active workspace folder below. It can never access files outside of it.
+    </div>
+
+    @if (workspaces.Count > 0)
+    {
+        <div class="oa-field">
+            <label>Active Workspace</label>
+            <select class="oa-text" @bind="selectedWorkspaceName" @bind:after="OnWorkspaceChanged">
+                @foreach (var workspace in workspaces)
+                {
+                    <option value="@workspace.Name">@workspace.Name</option>
+                }
+            </select>
+        </div>
+    }
+
+    @if (activeWorkspace is not null)
+    {
+        <div class="oa-field">
+            <div class="oa-active-collection">
+                <strong>Folder:</strong> @activeWorkspace.Path
+                <small>All agent file operations are confined to this directory.</small>
+            </div>
+        </div>
+    }
+
+    <div class="oa-field">
+        <label>New Workspace Name</label>
+        <input type="text" class="oa-text" @bind="newWorkspaceName" @bind:event="oninput"
+               placeholder="e.g. Project X">
+    </div>
+    <div class="oa-field">
+        <label>New Workspace Folder Path</label>
+        <input type="text" class="oa-text" @bind="newWorkspacePath" @bind:event="oninput"
+               placeholder="C:\Path\To\Folder">
+    </div>
+    <button class="oa-btn oa-btn-block" @onclick="AddWorkspace"
+            disabled="@(string.IsNullOrWhiteSpace(newWorkspaceName) || string.IsNullOrWhiteSpace(newWorkspacePath))">
+        Add &amp; Select
+    </button>
+
+    @if (workspaces.Count > 1 && activeWorkspace is not null)
+    {
+        @if (!confirmingRemove)
+        {
+            <button class="oa-btn oa-btn-danger oa-btn-block" @onclick="ShowRemoveConfirmation">
+                Remove Active Workspace
+            </button>
+        }
+        else
+        {
+            <div class="delete-confirmation">
+                <div class="confirmation-warning">
+                    <strong>Remove workspace "@activeWorkspace.Name"?</strong>
+                    <small>The folder itself is not deleted, only removed from this list.</small>
+                </div>
+                <div class="oa-grid2">
+                    <button class="oa-btn" @onclick="CancelRemove">Cancel</button>
+                    <button class="oa-btn oa-btn-danger" @onclick="ConfirmRemove">Confirm Remove</button>
+                </div>
+            </div>
+        }
+    }
+</CollapsibleSection>
+
+@code {
+    private IReadOnlyList<WorkspaceInfo> workspaces = Array.Empty<WorkspaceInfo>();
+    private WorkspaceInfo? activeWorkspace;
+    private string? selectedWorkspaceName;
+    private string newWorkspaceName = string.Empty;
+    private string newWorkspacePath = string.Empty;
+    private bool confirmingRemove;
+
+    protected override void OnInitialized()
+    {
+        Dashboard.OnChange += HandleStateChanged;
+        RefreshLocalState();
+    }
+
+    private void HandleStateChanged()
+    {
+        RefreshLocalState();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Dashboard.OnChange -= HandleStateChanged;
+    }
+
+    private void RefreshLocalState()
+    {
+        workspaces = Dashboard.GetWorkspaces();
+        activeWorkspace = Dashboard.GetActiveWorkspace();
+        selectedWorkspaceName = activeWorkspace?.Name;
+    }
+
+    private async Task OnWorkspaceChanged()
+    {
+        confirmingRemove = false;
+
+        if (!string.IsNullOrWhiteSpace(selectedWorkspaceName) &&
+            !string.Equals(selectedWorkspaceName, activeWorkspace?.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            await Dashboard.SetActiveWorkspaceAsync(selectedWorkspaceName);
+        }
+    }
+
+    private async Task AddWorkspace()
+    {
+        if (string.IsNullOrWhiteSpace(newWorkspaceName) || string.IsNullOrWhiteSpace(newWorkspacePath))
+            return;
+
+        var name = newWorkspaceName.Trim();
+        var path = newWorkspacePath.Trim();
+
+        await Dashboard.AddWorkspaceAsync(name, path);
+        await Dashboard.SetActiveWorkspaceAsync(name);
+
+        newWorkspaceName = string.Empty;
+        newWorkspacePath = string.Empty;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void ShowRemoveConfirmation() => confirmingRemove = true;
+
+    private void CancelRemove() => confirmingRemove = false;
+
+    private async Task ConfirmRemove()
+    {
+        if (activeWorkspace is not null)
+        {
+            await Dashboard.RemoveWorkspaceAsync(activeWorkspace.Name);
+        }
+
+        confirmingRemove = false;
+    }
+}

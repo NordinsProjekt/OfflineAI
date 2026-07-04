@@ -5,6 +5,7 @@ using Services.Configuration;
 using Services.Management;
 using Services.Memory;
 using Services.Repositories;
+using Services.Workspace;
 
 namespace AiDashboard.State;
 
@@ -35,6 +36,7 @@ public class DashboardState
     public CollectionManagementService? CollectionService { get; private set; }
     public InboxProcessingService? InboxService { get; private set; }
     public BotPersonalityService? PersonalityService { get; private set; }
+    public IWorkspaceService? WorkspaceService { get; private set; }
 
     private DashboardChatService? _chatService;
     public DashboardChatService? ChatService
@@ -58,6 +60,13 @@ public class DashboardState
 
     /// <summary>Which backend to use for chat. Defaults to Classic (pooled subprocess).</summary>
     public LlmBackend SelectedBackend { get; set; } = LlmBackend.Classic;
+
+    /// <summary>
+    /// Starts a new conversation/session so subsequently saved question/answer turns
+    /// (from either backend) are grouped under a new conversation id instead of being
+    /// appended to the previous one. Call this when the user clears the chat.
+    /// </summary>
+    public void StartNewConversation() => ChatService?.StartNewConversation();
 
     // UI-specific state
     private bool _collapsed;
@@ -83,6 +92,7 @@ public class DashboardState
         { "collection", false },    // Expanded by default (needed for bot selection)
         { "domains", true },        // Collapsed by default
         { "files", true },          // Collapsed by default
+        { "workspace", false },     // Expanded by default (safety-relevant, should be visible)
         { "knowledge", true },      // Collapsed by default
         { "table", true }           // Collapsed by default
     };
@@ -144,7 +154,8 @@ public class DashboardState
         IVectorMemoryRepository? repository,
         VectorMemoryPersistenceService? persistenceService,
         AppConfiguration? appConfig,
-        BotPersonalityService? personalityService = null)
+        BotPersonalityService? personalityService = null,
+        IWorkspaceService? workspaceService = null)
     {
         VectorRepository = repository;
 
@@ -168,6 +179,16 @@ public class DashboardState
         {
             PersonalityService = personalityService;
             PersonalityService.OnChange += NotifyStateChanged;
+        }
+
+        if (workspaceService != null)
+        {
+            WorkspaceService = workspaceService;
+            WorkspaceService.ActiveWorkspaceChanged += workspace =>
+            {
+                StatusMessage = $"[INFO] Arbetsyta bytt till \"{workspace.Name}\" ({workspace.Path})";
+                NotifyStateChanged();
+            };
         }
     }
 
@@ -293,6 +314,64 @@ public class DashboardState
         StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
     }
 
+    // Workspace operations (delegating to WorkspaceService). All agent file operations are
+    // confined to whichever workspace is active — switching here re-confines the file agent.
+    public IReadOnlyList<WorkspaceInfo> GetWorkspaces() =>
+        WorkspaceService?.GetWorkspaces() ?? Array.Empty<WorkspaceInfo>();
+
+    public WorkspaceInfo? GetActiveWorkspace() => WorkspaceService?.GetActiveWorkspace();
+
+    public async Task SetActiveWorkspaceAsync(string name)
+    {
+        if (WorkspaceService == null)
+        {
+            StatusMessage = "[ERROR] Workspace service not available";
+            return;
+        }
+
+        try
+        {
+            await WorkspaceService.SetActiveWorkspaceAsync(name);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"[ERROR] {ex.Message}";
+        }
+    }
+
+    public async Task AddWorkspaceAsync(string name, string path)
+    {
+        if (WorkspaceService == null)
+        {
+            StatusMessage = "[ERROR] Workspace service not available";
+            return;
+        }
+
+        try
+        {
+            var workspace = await WorkspaceService.AddWorkspaceAsync(name, path);
+            StatusMessage = $"[OK] Arbetsyta \"{workspace.Name}\" tillagd ({workspace.Path})";
+            NotifyStateChanged();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"[ERROR] {ex.Message}";
+        }
+    }
+
+    public async Task RemoveWorkspaceAsync(string name)
+    {
+        if (WorkspaceService == null)
+        {
+            StatusMessage = "[ERROR] Workspace service not available";
+            return;
+        }
+
+        await WorkspaceService.RemoveWorkspaceAsync(name);
+        StatusMessage = $"[OK] Arbetsyta \"{name}\" borttagen";
+        NotifyStateChanged();
+    }
+
     // Personality operations
     public async Task RefreshPersonalitiesAsync()
     {
@@ -308,7 +387,6 @@ public class DashboardState
             StatusMessage = $"[ERROR] {message}";
         }
     }
-
     public async Task SelectPersonalityAsync(string personalityId)
     {
         if (PersonalityService == null)
@@ -438,7 +516,16 @@ public class DashboardState
     {
         try
         {
-            return await Gemma4CliService!.ChatAsync(message);
+            var response = await Gemma4CliService!.ChatAsync(message);
+
+            // Persist the turn (grouped under the current conversation/session) so
+            // Gemma 4 responses are saved just like the classic backend's.
+            if (ChatService != null)
+            {
+                await ChatService.SaveExternalQuestionAnswerAsync(message, response, Gemma4CliService.ModelName);
+            }
+
+            return response;
         }
         catch (Exception ex)
         {

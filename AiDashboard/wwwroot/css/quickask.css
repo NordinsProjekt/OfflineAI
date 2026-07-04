@@ -197,6 +197,93 @@
     font-weight: 600;
 }
 
+/***** Human-readable prose elements emitted by LlmResponseFormatterService *****/
+.oa-msg-text .llm-heading {
+    margin: 0.75rem 0 0.5rem 0;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.oa-msg-text .llm-heading:first-child {
+    margin-top: 0;
+}
+
+.oa-msg-text .llm-hr {
+    margin: 0.75rem 0;
+    border: none;
+    border-top: 2px solid rgba(0, 0, 0, 0.1);
+}
+
+.oa-msg-text .llm-quote {
+    display: block;
+    margin: 0.5rem 0;
+    padding: 0.5rem 1rem;
+    border-left: 4px solid #667eea;
+    background: rgba(102, 126, 234, 0.08);
+    font-style: italic;
+}
+
+.oa-msg-text .llm-list {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+    line-height: 1.6;
+}
+
+.oa-msg-text .llm-list li {
+    margin: 0.25rem 0;
+}
+
+.oa-message.user .oa-msg-text .llm-hr {
+    border-top-color: rgba(255, 255, 255, 0.4);
+}
+
+.oa-message.user .oa-msg-text .llm-quote {
+    border-left-color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/***** Code block styling emitted by LlmResponseFormatterService *****/
+.oa-msg-text .code-block-header,
+.oa-msg-text .code-block-footer {
+    font-weight: 600;
+    color: white;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-radius: 6px 6px 0 0;
+}
+
+.oa-msg-text .code-block-footer {
+    border-radius: 0 0 6px 6px;
+}
+
+.oa-msg-text .code-block {
+    display: block;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    margin: 0;
+    padding: 1rem;
+    overflow-x: auto;
+    font-family: 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    border-radius: 0 0 6px 6px;
+}
+
+.oa-msg-text .syntax-keyword { color: #569cd6; font-weight: 500; }
+.oa-msg-text .syntax-string { color: #ce9178; }
+.oa-msg-text .syntax-comment { color: #6a9955; font-style: italic; }
+.oa-msg-text .syntax-number { color: #b5cea8; }
+.oa-msg-text .syntax-type { color: #4ec9b0; }
+.oa-msg-text .syntax-tag { color: #569cd6; }
+.oa-msg-text .syntax-attribute { color: #9cdcfe; }
+.oa-msg-text .syntax-razor { color: #c586c0; font-weight: 500; }
+.oa-msg-text .syntax-selector { color: #d7ba7d; }
+.oa-msg-text .syntax-property { color: #9cdcfe; }
+.oa-msg-text .syntax-value { color: #ce9178; }
+
 .oa-typing-indicator {
     display: flex;
     gap: 0.5rem;

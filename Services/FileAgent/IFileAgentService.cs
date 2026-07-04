@@ -29,6 +29,14 @@ public interface IFileAgentService
     string BaseDirectory { get; }
 
     /// <summary>
+    /// Re-confines all subsequent file operations to <paramref name="baseDirectory"/>
+    /// (created automatically if missing). Used to switch the active
+    /// <c>IWorkspaceService</c> workspace at runtime — the LLM can only ever read, create, or
+    /// edit files inside whichever directory is active at the time of the call.
+    /// </summary>
+    void SetBaseDirectory(string baseDirectory);
+
+    /// <summary>
     /// Returns true if the given input starts with a recognised file agent command
     /// (/skapa, /fyll, /läs, /las, /lista).
     /// </summary>

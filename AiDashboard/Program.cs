@@ -16,6 +16,7 @@ using Services.Management;
 using Services.Language;
 using Services.FileAgent;
 using Services.QuickAsk;
+using Services.Workspace;
 
 namespace AiDashboard;
 
@@ -42,24 +43,49 @@ public class Program
         // Register QuickAsk service for conversation management
         builder.Services.AddSingleton<IQuickAskService, QuickAskService>();
 
-        // Register file agent service for /skapa, /fyll, /läs chat commands
-        builder.Services.AddSingleton<IFileAgentService>(_ =>
+        // Register the workspace service: manages the list of user-selectable workspace
+        // directories (persisted in %AppData%\OfflineAI\workspaces.json) and the active
+        // selection. The file agent is always confined to whichever workspace is active.
+        builder.Services.AddSingleton<IWorkspaceService>(_ =>
         {
-            var agentDir = !string.IsNullOrWhiteSpace(appConfig.Folders.AgentFilesFolder)
+            var defaultAgentDir = !string.IsNullOrWhiteSpace(appConfig.Folders.AgentFilesFolder)
                 ? appConfig.Folders.AgentFilesFolder
                 : Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
                     "OfflineAI", "AgentFiles");
-            return new FileAgentService(agentDir);
+            return new WorkspaceService(defaultAgentDir);
+        });
+
+        // Register file agent service for /skapa, /fyll, /läs chat commands. Rooted at the
+        // active workspace directory; SetBaseDirectory(...) re-confines it whenever the user
+        // switches workspaces, so the LLM can never read/write outside the selected directory.
+        builder.Services.AddSingleton<IFileAgentService>(sp =>
+        {
+            var workspaceService = sp.GetRequiredService<IWorkspaceService>();
+            var fileAgent = new FileAgentService(workspaceService.GetActiveWorkspace().Path);
+            workspaceService.ActiveWorkspaceChanged += workspace => fileAgent.SetBaseDirectory(workspace.Path);
+            return fileAgent;
         });
 
         // Register agent tool registry (used by Gemma 4 CLI tool-calling)
         builder.Services.AddSingleton<IAgentToolRegistry, AgentToolRegistry>();
 
+        // Register the utility tools service for /tid, /datum, and /api <slutpunkt> <instruktion>.
+        // API endpoints are resolved only from AppConfiguration.AgentTools.Endpoints — the LLM can
+        // never supply an arbitrary URL.
+        builder.Services.AddHttpClient("AgentApiTools");
+        builder.Services.AddSingleton<IUtilityToolsService, UtilityToolsService>();
+
         // Register the lightweight, text-based agentic chat service used by QuickAsk and the
-        // Dashboard chat: tells the LLM about the IFileAgentService slash commands and executes
-        // any it requests, feeding the result back for a final answer.
-        builder.Services.AddSingleton<IAgenticChatService, AgenticChatService>();
+        // Dashboard chat: tells the LLM about the IFileAgentService/IUtilityToolsService slash
+        // commands and executes any it requests, feeding the result back for a final answer. The
+        // tool-call loop always stays internal to this service — only status callbacks and the
+        // final answer are meant to reach the user.
+        builder.Services.AddSingleton<IAgenticChatService>(sp =>
+            new AgenticChatService(
+                sp.GetRequiredService<IFileAgentService>(),
+                sp.GetRequiredService<IUtilityToolsService>(),
+                appConfig.AgentTools.MaxToolCallRounds));
 
         // Register Gemma 4 CLI service (optional — only when ModelPath is configured)
         var gemma4CliCfg = appConfig.Gemma4Cli;
@@ -82,6 +108,7 @@ public class Program
                     TopP                   = gemma4CliCfg.TopP,
                     TopK                   = gemma4CliCfg.TopK,
                     TimeoutMs              = gemma4CliCfg.TimeoutMs,
+                    PauseTimeoutMs         = gemma4CliCfg.PauseTimeoutMs,
                     MaxToolCallIterations  = gemma4CliCfg.MaxToolCallIterations
                 };
                 var registry = sp.GetRequiredService<IAgentToolRegistry>();
@@ -371,7 +398,8 @@ public class Program
                 var repository = sp.GetService<IVectorMemoryRepository>();
                 var persistenceService = sp.GetService<VectorMemoryPersistenceService>();
                 var personalityService = sp.GetService<BotPersonalityService>();
-                dashboardState.InitializeServices(repository, persistenceService, config, personalityService);
+                var workspaceService = sp.GetService<IWorkspaceService>();
+                dashboardState.InitializeServices(repository, persistenceService, config, personalityService, workspaceService);
                 
                 // Attach chat service
                 var chatService = sp.GetService<DashboardChatService>();

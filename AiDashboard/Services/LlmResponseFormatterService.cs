@@ -38,6 +38,13 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         if (string.IsNullOrWhiteSpace(response))
             return response;
 
+        // Step 0: strip common LLM wrapper artifacts (instruction tokens, metadata headers, etc.)
+        // so every response is normalized before any structural formatting is applied.
+        response = StripLlmArtifacts(response);
+
+        if (string.IsNullOrWhiteSpace(response))
+            return response;
+
         // Step 1: ensure numbered list items each start on a new line (handles concatenated output)
         response = InsertLineBreaksBeforeNumberedItems(response);
 
@@ -56,10 +63,50 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         // Step 3: convert numbered list runs to <ol> (skips content inside <pre> blocks)
         formattedResponse = FormatNumberedLists(formattedResponse);
 
-        // Step 4: convert remaining newlines to <br> outside <pre> tags
+        // Step 4: apply human-readable prose rules - headers, emphasis, bullet lists, blockquotes,
+        // and horizontal rules (skips content inside <pre> blocks) so every response reads more naturally
+        formattedResponse = FormatHumanReadableProse(formattedResponse);
+
+        // Step 5: convert remaining newlines to <br> outside <pre> tags
         formattedResponse = ConvertNewlinesToBrTagsOutsidePre(formattedResponse);
 
         return formattedResponse;
+    }
+
+    /// <summary>
+    /// Strips common LLM wrapper artifacts before any other formatting is applied, so every
+    /// response is normalized the same way regardless of which model produced it. Removes
+    /// instruction tokens ([INST]/[/INST], &lt;&lt;SYS&gt;&gt;), ChatML-style tokens
+    /// (&lt;|im_start|&gt;, &lt;|im_end|&gt;, etc.), metadata header lines (e.g. "[Detected format: Assistant:]"),
+    /// and generation-complete footers, then collapses excess blank lines left behind.
+    /// </summary>
+    private string StripLlmArtifacts(string response)
+    {
+        // Llama / Mistral / Qwen instruction tokens: [INST], [/INST], <<SYS>> ... <</SYS>>
+        response = Regex.Replace(response, @"\[/?INST\]", string.Empty, RegexOptions.IgnoreCase);
+        response = Regex.Replace(response, @"<<SYS>>.*?<</SYS>>", string.Empty,
+            RegexOptions.Singleline | RegexOptions.IgnoreCase);
+
+        // ChatML-style tokens: <|im_start|>, <|im_end|>, <|endoftext|>, etc.
+        response = Regex.Replace(response, @"<\|[^|]*\|>", string.Empty);
+
+        // Metadata header lines emitted by some wrappers:
+        //   [Detected format: Assistant:]   [System:]   [User:]
+        response = Regex.Replace(response,
+            @"^\[(?:Detected format|System|User|Assistant)[^\]]*\]\s*",
+            string.Empty,
+            RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        // Generation-complete footers: [Generation complete - 10s pause detected]
+        response = Regex.Replace(response,
+            @"\[Generation complete[^\]]*\]\s*$",
+            string.Empty,
+            RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        // Collapse runs of blank lines left after stripping
+        response = Regex.Replace(response, @"\n{3,}", "\n\n");
+
+        return response.Trim();
     }
 
     /// <summary>
@@ -626,6 +673,172 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
                 return sb.ToString();
             },
             RegexOptions.Multiline);
+    }
+
+    /// <summary>
+    /// Applies human-readable prose formatting rules (headings, horizontal rules, blockquotes,
+    /// bullet lists, and bold/italic emphasis) to the non-code parts of the HTML so every LLM
+    /// response reads like natural, well-structured text instead of a wall of plain text.
+    /// Skips content inside &lt;pre&gt; blocks (same strategy as <see cref="FormatNumberedLists"/>)
+    /// so code is never altered by these rules.
+    /// </summary>
+    private string FormatHumanReadableProse(string html)
+    {
+        var result = new StringBuilder();
+        var i = 0;
+
+        while (i < html.Length)
+        {
+            var preStart = html.IndexOf("<pre", i, StringComparison.OrdinalIgnoreCase);
+
+            if (preStart < 0)
+            {
+                // No more <pre> blocks - apply prose rules to the remaining text
+                result.Append(ConvertProseElements(html[i..]));
+                break;
+            }
+
+            // Apply prose rules to the text before the <pre> block
+            result.Append(ConvertProseElements(html[i..preStart]));
+
+            // Find matching </pre>
+            var preEnd = html.IndexOf("</pre>", preStart, StringComparison.OrdinalIgnoreCase);
+            if (preEnd < 0)
+            {
+                result.Append(html[preStart..]);
+                break;
+            }
+
+            // Copy the entire <pre>…</pre> block unchanged
+            result.Append(html[preStart..(preEnd + 6)]);
+            i = preEnd + 6;
+        }
+
+        return result.ToString();
+    }
+
+    /// <summary>
+    /// Runs the individual prose rules in an order that keeps them from interfering with each
+    /// other: whole-line rules (horizontal rules, headings, blockquotes, bullet lists) run first,
+    /// then inline emphasis (bold/italic) runs last so it never disturbs a list/quote marker.
+    /// </summary>
+    private string ConvertProseElements(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return text;
+
+        text = ConvertHorizontalRules(text);
+        text = ConvertHeadings(text);
+        text = ConvertBlockquotes(text);
+        text = ConvertBulletLists(text);
+        text = ConvertBoldItalic(text);
+
+        return text;
+    }
+
+    /// <summary>
+    /// Converts markdown-style horizontal rule lines (---, ***, ___) into &lt;hr&gt; elements.
+    /// A line must consist solely of 3+ of the same rule character (optionally spaced) to match,
+    /// which keeps it from firing on bullet items or emphasis markers.
+    /// </summary>
+    private string ConvertHorizontalRules(string text)
+    {
+        return Regex.Replace(
+            text,
+            @"(?:^|\n)[ \t]*(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})[ \t]*(?=\n|$)",
+            "\n<hr class=\"llm-hr\">\n",
+            RegexOptions.Multiline);
+    }
+
+    /// <summary>
+    /// Converts markdown-style ATX headings (# through ######) into &lt;h1&gt;-&lt;h6&gt; elements.
+    /// Trailing '#' characters (e.g. "## Title ##") are stripped from the heading text.
+    /// </summary>
+    private string ConvertHeadings(string text)
+    {
+        return Regex.Replace(
+            text,
+            @"^[ \t]{0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$",
+            match =>
+            {
+                var level = match.Groups[1].Value.Length;
+                var content = match.Groups[2].Value.Trim();
+                if (content.Length == 0)
+                    return match.Value;
+
+                return $"<h{level} class=\"llm-heading\">{content}</h{level}>";
+            },
+            RegexOptions.Multiline);
+    }
+
+    /// <summary>
+    /// Converts consecutive markdown blockquote lines ("&gt; text") into a single &lt;blockquote&gt;
+    /// element so quoted material stands out from regular prose.
+    /// </summary>
+    private string ConvertBlockquotes(string text)
+    {
+        return Regex.Replace(
+            text,
+            @"(?:^|\n)((?:[ \t]{0,3}>[ \t]?[^\n]*(?:\n|$))+)",
+            match =>
+            {
+                var lines = match.Groups[1].Value
+                    .Split('\n')
+                    .Select(l => Regex.Replace(l, @"^[ \t]{0,3}>[ \t]?", string.Empty).Trim())
+                    .Where(l => l.Length > 0)
+                    .ToList();
+
+                if (lines.Count == 0)
+                    return match.Value;
+
+                return "\n<blockquote class=\"llm-quote\">" + string.Join("<br>", lines) + "</blockquote>\n";
+            },
+            RegexOptions.Multiline);
+    }
+
+    /// <summary>
+    /// Replaces runs of "- item" / "* item" / "+ item" lines (2 or more consecutive) with an
+    /// HTML &lt;ul&gt; list. Requires a space right after the marker so it never matches bullet
+    /// characters that are actually part of bold/italic emphasis (e.g. "**bold**").
+    /// </summary>
+    private string ConvertBulletLists(string text)
+    {
+        return Regex.Replace(
+            text,
+            @"(?:^|\n)((?:[ \t]{0,3}[-*+][ \t]+[^\n]+\n?){2,})",
+            match =>
+            {
+                var listText = match.Groups[1].Value;
+                var items = Regex.Matches(listText, @"[ \t]{0,3}[-*+][ \t]+([^\n]+)");
+                if (items.Count < 2)
+                    return match.Value;
+
+                var sb = new StringBuilder("\n<ul class=\"llm-list\">");
+                foreach (Match item in items)
+                    sb.Append($"<li>{item.Groups[1].Value.Trim()}</li>");
+                sb.Append("</ul>\n");
+                return sb.ToString();
+            },
+            RegexOptions.Multiline);
+    }
+
+    /// <summary>
+    /// Converts markdown-style bold (**text**/__text__) and italic (*text*/_text_) emphasis into
+    /// &lt;strong&gt;/&lt;em&gt; tags. Bold markers are processed before italic markers so a single
+    /// '*' rule never splits a '**' pair, and italic underscores require non-word boundaries so
+    /// identifiers like "my_variable_name" are left untouched.
+    /// </summary>
+    private string ConvertBoldItalic(string text)
+    {
+        // Bold: **text** or __text__
+        text = Regex.Replace(text, @"\*\*(?!\s)([^\n*]+?)(?<!\s)\*\*", "<strong>$1</strong>");
+        text = Regex.Replace(text, @"__(?!\s)([^\n_]+?)(?<!\s)__", "<strong>$1</strong>");
+
+        // Italic: *text* or _text_ (single markers only, not part of a already-consumed ** / __ pair)
+        text = Regex.Replace(text, @"(?<!\*)\*(?!\*)(?!\s)([^\n*]+?)(?<!\s)\*(?!\*)", "<em>$1</em>");
+        text = Regex.Replace(text, @"(?<![\w_])_(?!\s)([^\n_]+?)(?<!\s)_(?![\w_])", "<em>$1</em>");
+
+        return text;
     }
 
     private string FormatCode(string rawCode, string language)

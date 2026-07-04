@@ -339,7 +339,10 @@
                 // use a file tool; AgenticChat primes it with the tool dictionary, detects any
                 // slash command in the reply via string search, executes it, and feeds the
                 // result back to the LLM for a final answer.
-                var agentResult = await AgenticChat.SendWithToolsAsync(input, Dashboard.SendQuickAskActiveAsync);
+                var agentResult = await AgenticChat.SendWithToolsAsync(
+                    input,
+                    Dashboard.SendQuickAskActiveAsync,
+                    onToolStatus: status => Dashboard.StatusMessage = status);
 
                 foreach (var invocation in agentResult.ToolInvocations)
                 {
@@ -373,6 +376,7 @@
     private void ClearConversation()
     {
         messages.Clear();
+        Dashboard.StartNewConversation();
     }
 
     private async Task OnModelChanged()

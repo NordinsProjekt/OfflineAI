@@ -4,17 +4,21 @@
 
 Both the **Dashboard chat** (`Home.razor.cs`) and **QuickAsk** (`QuickAskPage.razor`) send
 regular (non-slash-command) messages through a lightweight, text-based agentic pattern: the LLM
-is told about the available [File Agent](FILE-AGENT-COMMANDS.md) slash commands as a tool
-dictionary, and if its reply requests one, the app executes it and feeds the result back so the
-LLM can produce a final, tool-informed answer — all without the user typing a command
-themselves.
+is told about the available [File Agent](FILE-AGENT-COMMANDS.md) slash commands **and** the
+built-in utility commands (current time/date, config-driven API calls — see below) as a single
+tool dictionary, and if its reply requests one, the app executes it and feeds the result back so
+the LLM can produce a final, tool-informed answer — all without the user typing a command
+themselves. The entire tool-call loop stays internal to the service: only short, human-readable
+status lines (via an `onToolStatus` callback) and the final answer are meant to reach the user, so
+the raw priming prompts and intermediate LLM replies never leak into the chat transcript.
 
-This is implemented by `IAgenticChatService` / `AgenticChatService` in the `Services` project
-(`Services.AgentTools` namespace), and is a **separate, simpler mechanism** than the JSON/
-Semantic-Kernel structured tool calling used by the Gemma 4 CLI backend
-(see [gemma4-cli-feature.md](gemma4-cli-feature.md#tool-calling)). It works with *any* backend
-that can only produce plain text — the pooled "Classic" backend and the Gemma 4 CLI backend
-alike — because it never depends on structured JSON output.
+This is implemented by `IAgenticChatService` / `AgenticChatService` (drives the loop) together with
+`IFileAgentService` (file commands) and `IUtilityToolsService` (time/date/API commands), all in
+the `Services` project (`Services.AgentTools` / `Services.FileAgent` namespaces). It is a
+**separate, simpler mechanism** than the JSON/Semantic-Kernel structured tool calling used by the
+Gemma 4 CLI backend (see [gemma4-cli-feature.md](gemma4-cli-feature.md#tool-calling)). It works
+with *any* backend that can only produce plain text — the pooled "Classic" backend and the
+Gemma 4 CLI backend alike — because it never depends on structured JSON output.
 
 ---
 
@@ -25,11 +29,11 @@ alike — because it never depends on structured JSON output.
 | Service | `IAgenticChatService` | `IGemma4AgentService.ChatWithToolsAsync` + `IAgentToolRegistry` |
 | Tool detection | Plain string search for a known slash command in the plain-text reply | Model returns structured JSON tool-call array |
 | Backend requirement | Any backend that returns text (Classic pooled subprocess, Gemma 4 CLI) | Requires a model capable of Semantic Kernel function calling |
-| Tool set | `IFileAgentService` slash commands (`/skapa`, `/fyll`, `/läs`, `/redigera`, `/lista`) | `BuiltInFileTools` `[KernelFunction]` methods (`create_file`, `read_file`, `write_file`, `edit_file_lines`, `insert_file_lines`, `list_files`) |
+| Tool set | `IFileAgentService` slash commands (`/skapa`, `/fyll`, `/läs`, `/redigera`, `/lista`) + `IUtilityToolsService` commands (`/tid`, `/datum`, `/api <slutpunkt> <instruktion>`) | `BuiltInFileTools` `[KernelFunction]` methods (`create_file`, `read_file`, `write_file`, `edit_file_lines`, `insert_file_lines`, `list_files`) + `BuiltInUtilityTools` (`get_current_time`, `get_current_date`, `call_api`) |
 | Where used | Regular chat messages in Dashboard + QuickAsk | Wherever `ChatWithToolsAsync` is explicitly called with a kernel |
 
-Both mechanisms are backed by the same underlying file operations (`IFileAgentService`), just
-exposed through different calling conventions.
+Both mechanisms are backed by the same underlying file/utility operations (`IFileAgentService`,
+`IUtilityToolsService`), just exposed through different calling conventions.
 
 ---
 
@@ -37,9 +41,15 @@ exposed through different calling conventions.
 
 ```
 Services/
-└── AgentTools/
-    ├── IAgenticChatService.cs   — ToolInvocation, AgenticChatResult, SendWithToolsAsync contract
-    └── AgenticChatService.cs    — Implementation: prime → detect → execute → feed back loop
+├── AgentTools/
+│   ├── IAgenticChatService.cs   — ToolInvocation, AgenticChatResult, SendWithToolsAsync contract
+│   ├── AgenticChatService.cs    — Implementation: prime → detect → execute → feed back loop
+│   ├── IUtilityToolsService.cs  — UtilityToolResult, /tid, /datum, /api contract
+│   ├── UtilityToolsService.cs   — Implementation: current time/date + named HTTP API calls
+│   └── BuiltInUtilityTools.cs   — Semantic Kernel [KernelFunction] wrapper around IUtilityToolsService
+└── FileAgent/
+    ├── IFileAgentService.cs     — File-agent slash command contract (see FILE-AGENT-COMMANDS.md)
+    └── FileAgentService.cs     — File-agent implementation, workspace-confined via SetBaseDirectory
 ```
 
 ### Interface
@@ -54,7 +64,8 @@ public interface IAgenticChatService
     Task<AgenticChatResult> SendWithToolsAsync(
         string userMessage,
         Func<string, Task<string>> sendToLlm,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        Action<string>? onToolStatus = null);
 }
 ```
 
@@ -63,6 +74,11 @@ public interface IAgenticChatService
   currently active and returns its raw text reply. Callers pass `Dashboard.SendActiveAsync` (Home)
   or `Dashboard.SendQuickAskActiveAsync` (QuickAsk), so the same service works regardless of the
   selected `LlmBackend` (`Classic` or `Gemma4Cli`).
+- **`onToolStatus`** — optional callback invoked with a short status line (e.g.
+  `"🔧 Kör: /api väder ..."`) immediately *before* each internal tool call executes, so the caller
+  can surface live progress (both pages wire this to `DashboardState.StatusMessage`) without
+  exposing the raw tool-loop prompts/replies to the user. The loop itself always stays internal —
+  only these short status strings and the final answer are meant to reach the user.
 - **`AgenticChatResult.FinalResponse`** — the answer to display to the user.
 - **`AgenticChatResult.ToolInvocations`** — an ordered log of every tool call made along the way,
   each with the exact command used and a short result summary, so the UI can show
@@ -93,6 +109,26 @@ IReadOnlyDictionary<string, string> GetToolDescriptions() => new Dictionary<stri
 - and to write nothing else on that line so it can be reliably detected,
 - otherwise, to just answer directly in plain text.
 
+### Utility tool descriptions are appended to the same prompt
+
+When an `IUtilityToolsService` is configured (it is, in `AiDashboard`), `AgenticChatService`
+appends its tool descriptions to the same prompt in the identical `"- {command} : {description}"`
+bullet format, so the LLM sees **one unified tool list** regardless of which service ultimately
+executes the command:
+
+```csharp
+IReadOnlyDictionary<string, string> GetToolDescriptions() => new Dictionary<string, string>
+{
+    ["/tid"] = "Returnerar aktuellt klockslag.",
+    ["/datum"] = "Returnerar dagens datum.",
+    ["/api <slutpunkt> <instruktion>"] = "Anropar ett förkonfigurerat API-slutpunkt (t.ex. \"väder\") och kombinerar svaret med din instruktion."
+};
+```
+
+`/api` only ever accepts a **named endpoint** (e.g. `väder`) that must already exist in
+`AppConfiguration.AgentTools.Endpoints` — the LLM can never supply an arbitrary URL. See
+[Utility tools: /tid, /datum, /api](#utility-tools-tid-datum-api) below for the full contract.
+
 ---
 
 ## The round-trip loop (`AgenticChatService.SendWithToolsAsync`)
@@ -100,24 +136,28 @@ IReadOnlyDictionary<string, string> GetToolDescriptions() => new Dictionary<stri
 ```
 userMessage
     ↓
-BuildToolsSystemPrompt() + "Fråga: {userMessage}"   ── "start message" ──▶ sendToLlm
+BuildToolsSystemPrompt() + utility tool descriptions + "Fråga: {userMessage}"
+    ── "start message" ──▶ sendToLlm
     ↓
 response = LLM reply
     ↓
-┌─────────────────────────────── loop (max 3 rounds) ───────────────────────────────┐
-│ TryFindAgentCommand(response, out command)?                                       │
-│   no  → break, response is the final answer                                       │
-│   yes → ExecuteAsync(command)                                                     │
-│           ├─ FillRequested (/fyll) → sendToLlm(LlmPrompt) to generate content,     │
-│           │    TryExtractFileContent + WriteExtractedContentAsync, then           │
-│           │    sendToLlm("Tool result: ...") for confirmation + original answer   │
-│           ├─ EditRequested (/redigera) → sendToLlm(LlmPrompt) to get line edits,  │
-│           │    TryExtractLineEdits + ApplyLineEditsAsync, then                    │
-│           │    sendToLlm("Tool result: ...") for confirmation + original answer   │
-│           └─ otherwise (/skapa, /läs, /lista, errors)                             │
-│                → sendToLlm("Verktygsresultat för \"{command}\": {result}\n\n" +   │
-│                             "Använd informationen ovan för att besvara: {userMessage}") │
-│         response = new LLM reply; ToolInvocations.Add(...); loop again           │
+┌──────────────────────────── loop (max MaxToolCallRounds rounds, default 3) ───────────────────┐
+│ TryFindAgentCommand(response, out command)?             (file-agent commands checked FIRST) │
+│   yes → ExecuteAsync(command)                                                              │
+│           ├─ FillRequested (/fyll) → sendToLlm(LlmPrompt) to generate content,             │
+│           │    TryExtractFileContent + WriteExtractedContentAsync, then                   │
+│           │    sendToLlm("Tool result: ...") for confirmation + original answer           │
+│           ├─ EditRequested (/redigera) → sendToLlm(LlmPrompt) to get line edits,          │
+│           │    TryExtractLineEdits + ApplyLineEditsAsync, then                            │
+│           │    sendToLlm("Tool result: ...") for confirmation + original answer           │
+│           └─ otherwise (/skapa, /läs, /lista, errors)                                     │
+│                → sendToLlm("Verktygsresultat för \"{command}\": {result}\n\n" +           │
+│                             "Använd informationen ovan för att besvara: {userMessage}")     │
+│   no  → else check TryFindCommand on IUtilityToolsService (/tid, /datum, /api)              │
+│           yes → onToolStatus?.Invoke("🔧 Kör: {command}"); ExecuteAsync(command)             │
+│                 → sendToLlm("Verktygsresultat för \"{command}\": {result}\n\n" + ...)      │
+│   no (neither matched) → break, response is the final answer                                │
+│         response = new LLM reply; ToolInvocations.Add(...); loop again                      │
 └─────────────────────────────────────────────────────────────────────────────────┘
     ↓
 return AgenticChatResult(response, invocations)
@@ -127,6 +167,14 @@ Key details:
 - **Detection is plain string search**, not JSON parsing: `TryFindAgentCommand` splits the LLM
   reply into lines and returns the first line that `IsCommand` recognises as a known slash
   command. This keeps the mechanism trivial to reason about and backend-agnostic.
+- **File-agent commands are checked before utility commands** on every round: if a line matches
+  both (which shouldn't normally happen since command prefixes don't overlap), the file agent
+  wins. `IUtilityToolsService` is optional — when `null` (no utility service configured), only
+  file-agent commands are detected/executed at all.
+- **`onToolStatus` fires immediately before *every* tool execution**, file-agent or utility alike,
+  with the exact command string (e.g. `"🔧 Kör: /api väder Hur är vädret idag?"`). Both `Home` and
+  `QuickAskPage` wire this straight to `Dashboard.StatusMessage` so the sidebar/status area shows
+  live progress while the loop runs, without exposing internal prompts.
 - **`/läs` inside the loop still requires an instruction** (`/läs <filnamn> <instruktion>`) — the
   LLM is taught the exact signature via the tool dictionary, so it naturally includes one when
   it requests the tool itself. See the `/läs` command reference in
@@ -141,10 +189,83 @@ Key details:
   [FILE-AGENT-COMMANDS.md](FILE-AGENT-COMMANDS.md)) before `ApplyLineEditsAsync` validates and
   applies the edits — same two-phase shape as `/fyll`, just producing targeted line
   replacements/insertions instead of a full file rewrite.
-- **`MaxToolCallRounds = 3`** caps the loop so a confused model can't request tools indefinitely
-  instead of answering; after the cap, whatever the LLM last returned is used as the final answer.
+- **`/api` (utility) does not need a second round-trip**: the endpoint is called synchronously
+  inside `ExecuteAsync`/`CallNamedApiAsync`, and its (possibly truncated) response text is fed
+  straight back to the LLM as tool result context, same shape as the "otherwise" file-agent branch.
+- **`MaxToolCallRounds` (default 3, configurable via `AppConfiguration.AgentTools.MaxToolCallRounds`)**
+  caps the loop so a confused model can't request tools indefinitely instead of answering; after
+  the cap, whatever the LLM last returned is used as the final answer.
 - Every tool call — successful or not — is appended to `ToolInvocations` so the UI can show what
-  happened, even for `/fyll` failures (e.g. missing `<FILE>` markers).
+  happened, even for `/fyll` failures (e.g. missing `<FILE>` markers) or `/api` failures (e.g.
+  unknown endpoint name, timeout).
+
+---
+
+## Utility tools: `/tid`, `/datum`, `/api`
+
+`IUtilityToolsService` / `UtilityToolsService` (`Services/AgentTools/`) implement three built-in
+commands that mirror the shape of `IFileAgentService` (command detection + execution + tool
+descriptions) so `AgenticChatService` can drive both services through the same
+prime → detect → execute → feed-back loop:
+
+| Command | Description |
+|---|---|
+| `/tid` | Returns the current local time. |
+| `/datum` | Returns today's date. |
+| `/api <slutpunkt> <instruktion>` | Calls a **named, pre-configured** HTTP endpoint and combines its response with the given instruction, ready to forward to the LLM. |
+
+```csharp
+public sealed record UtilityToolResult(bool IsSuccess, string Message, string? InjectedContext = null);
+
+public interface IUtilityToolsService
+{
+    bool IsCommand(string input);
+    Task<UtilityToolResult> ExecuteAsync(string input);
+    Task<UtilityToolResult> CallNamedApiAsync(string endpointName, string instruction = "");
+    IReadOnlyList<string> GetApiEndpointNames();
+    IReadOnlyDictionary<string, string> GetToolDescriptions();
+    bool TryFindCommand(string llmResponse, out string command);
+}
+```
+
+### `/api` is endpoint-name-only — never an arbitrary URL
+
+The LLM can only ever select an endpoint **by name** (e.g. `väder`); it can never supply a raw
+URL. Each endpoint is fully defined ahead of time in configuration
+(`AppConfiguration.AgentTools.Endpoints`), including its actual URL, HTTP method, headers,
+timeout, and max response length:
+
+```json
+"AgentTools": {
+  "MaxToolCallRounds": 3,
+  "Endpoints": [
+    {
+      "Name": "väder",
+      "Description": "Hämtar aktuellt väder.",
+      "Url": "https://api.example.com/weather?q={input}",
+      "Method": "GET",
+      "Headers": { "X-Api-Key": "..." },
+      "TimeoutMs": 10000,
+      "MaxResponseLength": 4000
+    }
+  ]
+}
+```
+
+- `{input}` in `Url` is substituted with the instruction text supplied after the endpoint name.
+- Requests are made through a named `HttpClient` (`"AgentApiTools"`, registered via
+  `AddHttpClient("AgentApiTools")`), never a client the LLM controls.
+- Responses longer than `MaxResponseLength` are truncated before being handed back to the LLM.
+- Calling an endpoint name that isn't configured, or a request that times out, returns
+  `UtilityToolResult.Failure(...)` with a user-facing message — the loop still feeds that failure
+  message back to the LLM so it can respond gracefully instead of the tool call silently vanishing.
+
+### Semantic Kernel exposure
+
+For Gemma 4 CLI's structured tool calling, `BuiltInUtilityTools` wraps the same
+`IUtilityToolsService` as `[KernelFunction]` methods (`get_current_time`, `get_current_date`,
+`call_api`), so both tool-calling mechanisms share one implementation and one safety boundary
+for outbound HTTP calls.
 
 ---
 
@@ -156,7 +277,10 @@ message is *not* a direct command does it fall through to the agentic pattern:
 
 ```csharp
 // Home.razor.cs / QuickAskPage.razor — regular question branch
-var agentResult = await AgenticChat.SendWithToolsAsync(userMessage, Dashboard.SendActiveAsync);
+var agentResult = await AgenticChat.SendWithToolsAsync(
+    userMessage,
+    Dashboard.SendActiveAsync,
+    onToolStatus: status => Dashboard.StatusMessage = status);
 
 foreach (var invocation in agentResult.ToolInvocations)
 {
@@ -165,6 +289,11 @@ foreach (var invocation in agentResult.ToolInvocations)
 
 // Show agentResult.FinalResponse as the AI's answer
 ```
+
+The `onToolStatus` callback fires once per tool call, right before it runs, letting
+`DashboardState.StatusMessage` reflect live progress (e.g. `"🔧 Kör: /tid"`) in the UI while the
+internal loop is still executing — the user never sees the priming prompt or intermediate replies,
+only these short status lines followed by the final answer.
 
 | Page | Delegate passed to `SendWithToolsAsync` |
 |------|------------------------------------------|
@@ -201,14 +330,37 @@ UI shows:
 
 ## Registration (Dependency Injection)
 
-Registered as a **Singleton** in `AiDashboard/Program.cs`, depending only on `IFileAgentService`:
+All wired up as **Singletons** in `AiDashboard/Program.cs`:
 
 ```csharp
-// Register the lightweight, text-based agentic chat service used by QuickAsk and the
-// Dashboard chat: tells the LLM about the IFileAgentService slash commands and executes
-// any it requests, feeding the result back for a final answer.
-builder.Services.AddSingleton<IAgenticChatService, AgenticChatService>();
+// The file agent is rooted at the active workspace directory; SetBaseDirectory(...)
+// re-confines it whenever the user switches workspaces, so the LLM can never read/write
+// outside the selected directory (see WORKSPACE-CONFINEMENT.md).
+builder.Services.AddSingleton<IFileAgentService>(sp =>
+{
+    var workspaceService = sp.GetRequiredService<IWorkspaceService>();
+    var fileAgent = new FileAgentService(workspaceService.GetActiveWorkspace().Path);
+    workspaceService.ActiveWorkspaceChanged += workspace => fileAgent.SetBaseDirectory(workspace.Path);
+    return fileAgent;
+});
+
+// Utility tools (/tid, /datum, /api) resolve API endpoints only from
+// AppConfiguration.AgentTools.Endpoints — the LLM can never supply an arbitrary URL.
+builder.Services.AddHttpClient("AgentApiTools");
+builder.Services.AddSingleton<IUtilityToolsService, UtilityToolsService>();
+
+// The agentic chat loop combines both tool sources and caps round trips via
+// AppConfiguration.AgentTools.MaxToolCallRounds.
+builder.Services.AddSingleton<IAgenticChatService>(sp =>
+    new AgenticChatService(
+        sp.GetRequiredService<IFileAgentService>(),
+        sp.GetRequiredService<IUtilityToolsService>(),
+        appConfig.AgentTools.MaxToolCallRounds));
 ```
+
+`IUtilityToolsService` is an **optional** constructor argument on `AgenticChatService` — passing
+`null` (or omitting it) falls back to file-agent-only behavior, which is exactly what the existing
+unit tests exercise for the original, simpler flow.
 
 ---
 
@@ -216,16 +368,23 @@ builder.Services.AddSingleton<IAgenticChatService, AgenticChatService>();
 
 | File | Role |
 |------|------|
-| `Services/AgentTools/IAgenticChatService.cs` | `ToolInvocation`, `AgenticChatResult`, `SendWithToolsAsync` contract |
-| `Services/AgentTools/AgenticChatService.cs` | Prime/detect/execute/feed-back loop implementation |
-| `Services/FileAgent/IFileAgentService.cs` | `GetToolDescriptions`, `BuildToolsSystemPrompt`, `TryFindAgentCommand` — the tool dictionary and detection helpers |
-| `Services/FileAgent/FileAgentService.cs` | Tool dictionary contents and command execution |
-| `AiDashboard/Program.cs` | DI registration |
-| `AiDashboard/Components/Pages/Home.razor.cs` | Wires regular dashboard chat messages to `AgenticChat.SendWithToolsAsync` |
-| `AiDashboard/Components/Pages/QuickAskPage.razor` | Wires regular QuickAsk questions to `AgenticChat.SendWithToolsAsync` |
+| `Services/AgentTools/IAgenticChatService.cs` | `ToolInvocation`, `AgenticChatResult`, `SendWithToolsAsync` contract (incl. `onToolStatus`) |
+| `Services/AgentTools/AgenticChatService.cs` | Prime/detect/execute/feed-back loop implementation, file + utility command dispatch |
+| `Services/AgentTools/IUtilityToolsService.cs` | `UtilityToolResult`, `/tid`/`/datum`/`/api` contract |
+| `Services/AgentTools/UtilityToolsService.cs` | Time/date + named-endpoint HTTP API implementation |
+| `Services/AgentTools/BuiltInUtilityTools.cs` | Semantic Kernel `[KernelFunction]` wrapper around `IUtilityToolsService` |
+| `Services/FileAgent/IFileAgentService.cs` | `GetToolDescriptions`, `BuildToolsSystemPrompt`, `TryFindAgentCommand`, `SetBaseDirectory` — the tool dictionary, detection, and workspace-confinement helpers |
+| `Services/FileAgent/FileAgentService.cs` | Tool dictionary contents, command execution, and runtime base-directory switching |
+| `Services/Workspace/IWorkspaceService.cs` / `WorkspaceService.cs` | Persisted, user-selectable workspaces that confine the file agent (see [WORKSPACE-CONFINEMENT.md](WORKSPACE-CONFINEMENT.md)) |
+| `Services/Configuration/AppConfiguration.cs` | `AgentToolsSettings` (`MaxToolCallRounds`, `Endpoints`) consumed by both services |
+| `AiDashboard/Program.cs` | DI registration for workspace, file-agent, utility-tools, and agentic-chat services |
+| `AiDashboard/State/DashboardState.cs` | Exposes workspace actions and receives `StatusMessage` updates from `onToolStatus` |
+| `AiDashboard/Components/Pages/Home.razor.cs` | Wires regular dashboard chat messages to `AgenticChat.SendWithToolsAsync` with `onToolStatus` |
+| `AiDashboard/Components/Pages/QuickAskPage.razor` | Wires regular QuickAsk questions to `AgenticChat.SendWithToolsAsync` with `onToolStatus` |
 
 ## Related Docs
 
 - [FILE-AGENT-COMMANDS.md](FILE-AGENT-COMMANDS.md) — the underlying slash commands and their direct (non-agentic) usage
+- [WORKSPACE-CONFINEMENT.md](WORKSPACE-CONFINEMENT.md) — how workspaces confine file-agent access and how to add/switch them
 - [QUICKASK-FILE-AGENT-AND-MAXTOKENS.md](QUICKASK-FILE-AGENT-AND-MAXTOKENS.md) — QuickAsk-specific file agent details
 - [gemma4-cli-feature.md](gemma4-cli-feature.md#tool-calling) — the separate JSON/Semantic-Kernel tool-calling mechanism for Gemma 4 CLI

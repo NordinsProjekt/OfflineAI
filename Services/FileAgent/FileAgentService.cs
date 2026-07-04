@@ -43,7 +43,7 @@ public class FileAgentService : IFileAgentService
         RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <inheritdoc/>
-    public string BaseDirectory { get; }
+    public string BaseDirectory { get; private set; }
 
     /// <param name="baseDirectory">
     /// Directory in which agent files are created and read.
@@ -56,6 +56,17 @@ public class FileAgentService : IFileAgentService
 
         BaseDirectory = Path.GetFullPath(baseDirectory);
         Directory.CreateDirectory(BaseDirectory);
+    }
+
+    /// <inheritdoc/>
+    public void SetBaseDirectory(string baseDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(baseDirectory))
+            throw new ArgumentNullException(nameof(baseDirectory));
+
+        var fullPath = Path.GetFullPath(baseDirectory);
+        Directory.CreateDirectory(fullPath);
+        BaseDirectory = fullPath;
     }
 
     /// <inheritdoc/>
