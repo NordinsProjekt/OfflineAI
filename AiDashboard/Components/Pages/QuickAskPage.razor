@@ -91,7 +91,8 @@
                 <AgentFileUpload DarkMode="false"
                                   Disabled="@isProcessing"
                                   OnUploaded="@OnFileUploaded"
-                                  OnError="@OnFileUploadError" />
+                                  OnError="@OnFileUploadError"
+                                  DropZoneSelector=".oa-quick-card" />
                 <textarea class="oa-quick-input"
                           placeholder="Type your question here..."
                           @bind="currentQuestion"

@@ -113,4 +113,65 @@ public class AgentFileUploadTests : TestContext, IDisposable
         Assert.Contains("för stor", errorMessage);
         Assert.False(File.Exists(Path.Combine(_tempDir, "toobig.pdf")));
     }
+
+    [Theory]
+    [InlineData("photo.png")]
+    [InlineData("photo.jpg")]
+    [InlineData("photo.jpeg")]
+    [InlineData("photo.gif")]
+    [InlineData("photo.webp")]
+    [InlineData("photo.bmp")]
+    public void UploadImageFile_DefaultAcceptedTypes_SavesToWorkspace(string filename)
+    {
+        string? uploadedName = null;
+        var cut = RenderComponent<AgentFileUpload>(parameters => parameters
+            .Add(p => p.OnUploaded, name => uploadedName = name));
+
+        var inputFile = cut.FindComponent<InputFile>();
+        var file = InputFileContent.CreateFromBinary(new byte[] { 1, 2, 3, 4 }, filename);
+        inputFile.UploadFiles(file);
+
+        Assert.Equal(filename, uploadedName);
+        Assert.True(File.Exists(Path.Combine(_tempDir, filename)));
+    }
+
+    [Fact]
+    public void UploadDisallowedFileType_InvokesOnErrorAndDoesNotSave()
+    {
+        // Browsers only enforce the `accept` attribute for the file-picker dialog, not for a
+        // drag-and-drop — so a dropped file of an unsupported type must still be rejected here.
+        string? errorMessage = null;
+        var cut = RenderComponent<AgentFileUpload>(parameters => parameters
+            .Add(p => p.OnError, msg => errorMessage = msg));
+
+        var inputFile = cut.FindComponent<InputFile>();
+        var file = InputFileContent.CreateFromBinary(new byte[] { 1, 2, 3 }, "not-supported.exe");
+        inputFile.UploadFiles(file);
+
+        Assert.NotNull(errorMessage);
+        Assert.Contains("stöds inte", errorMessage);
+        Assert.False(File.Exists(Path.Combine(_tempDir, "not-supported.exe")));
+    }
+
+    [Fact]
+    public void DropZoneSelector_NotSet_NoJsInteropAttempted()
+    {
+        // No JSInterop configured in this TestContext at all — if OnAfterRenderAsync tried to
+        // invoke JS with the default null DropZoneSelector, this would throw/fail the render.
+        var cut = RenderComponent<AgentFileUpload>();
+
+        Assert.NotNull(cut.Find(".agent-upload"));
+    }
+
+    [Fact]
+    public void DropZoneSelector_Set_JsInteropFailureIsSwallowed()
+    {
+        // No JSInterop configured for "fileDropZone.initializePersistent" — bUnit's strict mode
+        // would throw for an unconfigured call, but AgentFileUpload wraps it in try/catch (same
+        // pattern as FileDropZone.razor) so the component still renders successfully.
+        var cut = RenderComponent<AgentFileUpload>(parameters => parameters
+            .Add(p => p.DropZoneSelector, ".oa-chat"));
+
+        Assert.NotNull(cut.Find(".agent-upload"));
+    }
 }

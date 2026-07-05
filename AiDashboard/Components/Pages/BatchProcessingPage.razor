@@ -1,0 +1,142 @@
+@page "/batch-processing"
+@namespace AiDashboard.Components.Pages
+@using global::Services.BatchJobs
+@using AiDashboard.State
+
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@inject DashboardState Dashboard
+@inject IBatchJobService BatchJobs
+@inject AiDashboard.Services.Interfaces.ILlmResponseFormatterService Formatter
+@implements IDisposable
+
+<PageTitle>Batch Processing - OfflineAI</PageTitle>
+
+<div class="oa-quick-ask-page">
+    <div class="oa-quick-header">
+        <button class="oa-back-button" @onclick="@(() => Navigation.NavigateTo("/"))">Back to Home</button>
+        <div class="oa-quick-header-center">
+            <h1>Batch Processing</h1>
+            <p class="oa-quick-subtitle">Queue up tasks and let the AI work through them one by one</p>
+        </div>
+    </div>
+
+    <div class="oa-quick-container">
+        <div class="oa-quick-card oa-batch-card">
+            <div class="oa-batch-add-row">
+                <textarea class="oa-batch-input"
+                          placeholder="e.g. Read rules.txt and write 10 questions to QA.txt"
+                          @bind="_newJobDescription" @bind:event="oninput"
+                          @onkeydown="HandleKeyDown"
+                          rows="2"></textarea>
+                <button class="oa-batch-add-btn" @onclick="AddJob" disabled="@string.IsNullOrWhiteSpace(_newJobDescription)">
+                    Add Job
+                </button>
+            </div>
+
+            <div class="oa-batch-controls">
+                <button class="oa-batch-start-btn" @onclick="StartProcessing" disabled="@(BatchJobs.IsProcessing || !HasPendingJobs)">
+                    @(BatchJobs.IsProcessing ? "Processing..." : "Start")
+                </button>
+                @if (BatchJobs.IsProcessing)
+                {
+                    <button class="oa-batch-stop-btn" @onclick="@(() => BatchJobs.RequestStop())">
+                        Stop after current job
+                    </button>
+                }
+                <button class="oa-batch-clear-btn" @onclick="@(() => BatchJobs.ClearCompleted())" disabled="@(!HasCompletedJobs)">
+                    Clear Completed
+                </button>
+            </div>
+
+            @if (BatchJobs.IsProcessing && !string.IsNullOrWhiteSpace(Dashboard.StatusMessage))
+            {
+                <p class="oa-batch-status">@Dashboard.StatusMessage</p>
+            }
+
+            <div class="oa-batch-job-list">
+                @{
+                    var jobs = BatchJobs.Jobs;
+                }
+                @if (jobs.Count == 0)
+                {
+                    <p class="oa-batch-empty">No jobs yet. Add one above to get started.</p>
+                }
+                else
+                {
+                    @for (var i = 0; i < jobs.Count; i++)
+                    {
+                        var job = jobs[i];
+                        var index = i;
+                        <div class="oa-batch-job-row">
+                            <div class="oa-batch-job-main">
+                                <span class="oa-batch-job-index">#@(index + 1)</span>
+                                <span class="oa-batch-job-desc">@job.Description</span>
+                                <span class="oa-batch-badge @StatusClass(job.Status)">@job.Status</span>
+                                @if (job.Status == BatchJobStatus.Pending)
+                                {
+                                    <button class="oa-batch-remove-btn" @onclick="@(() => BatchJobs.RemoveJob(job.Id))" title="Remove">✕</button>
+                                }
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(job.Result))
+                            {
+                                <div class="oa-batch-job-result">@((MarkupString)Formatter.FormatResponse(job.Result))</div>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _newJobDescription = string.Empty;
+
+    private bool HasPendingJobs => BatchJobs.Jobs.Any(j => j.Status == BatchJobStatus.Pending);
+    private bool HasCompletedJobs => BatchJobs.Jobs.Any(j => j.Status is BatchJobStatus.Done or BatchJobStatus.Failed);
+
+    protected override void OnInitialized()
+    {
+        BatchJobs.OnChange += Refresh;
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private void AddJob()
+    {
+        if (string.IsNullOrWhiteSpace(_newJobDescription))
+            return;
+
+        BatchJobs.AddJob(_newJobDescription.Trim());
+        _newJobDescription = string.Empty;
+    }
+
+    private void HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e is { Key: "Enter", ShiftKey: false })
+            AddJob();
+    }
+
+    private void StartProcessing()
+    {
+        // Fire-and-forget: the button click returns immediately and the UI updates live via
+        // BatchJobs.OnChange as each job's status changes, mirroring InboxProcessingService's
+        // existing background-progress pattern.
+        _ = BatchJobs.StartProcessingAsync(Dashboard.SendQuickAskActiveAsync, status => Dashboard.StatusMessage = status);
+    }
+
+    private static string StatusClass(BatchJobStatus status) => status switch
+    {
+        BatchJobStatus.Pending => "gray",
+        BatchJobStatus.Running => "blue",
+        BatchJobStatus.Done => "green",
+        BatchJobStatus.Failed => "red",
+        _ => "gray"
+    };
+
+    public void Dispose()
+    {
+        BatchJobs.OnChange -= Refresh;
+    }
+}

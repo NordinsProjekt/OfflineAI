@@ -1,6 +1,7 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using global::Services.FileAgent
 @inject IFileAgentService FileAgent
+@inject IJSRuntime JSRuntime
 
 <div class="agent-upload @(DarkMode ? "theme-dark" : "theme-light")">
     <InputFile id="@_inputId"
@@ -12,7 +13,7 @@
 
     <label for="@_inputId"
            class="agent-upload-btn @((Disabled || _isUploading) ? "disabled" : "")"
-           title="Attach a file (e.g. PDF) to the workspace so the AI can read it">
+           title="Attach a file (PDF, text, or image) to the workspace so the AI can read it — or drag and drop one anywhere in the chat">
         @if (_isUploading)
         {
             <span class="agent-upload-spinner"></span>
@@ -26,16 +27,28 @@
 
 @code {
     /// <summary>Comma-separated accepted file extensions passed to the underlying &lt;input type="file"&gt;.</summary>
-    [Parameter] public string AcceptedTypes { get; set; } = ".pdf,.txt";
+    [Parameter] public string AcceptedTypes { get; set; } = ".pdf,.txt,.png,.jpg,.jpeg,.gif,.webp,.bmp";
 
-    /// <summary>Maximum upload size in bytes. Default: 20 MB.</summary>
-    [Parameter] public long MaxFileSizeBytes { get; set; } = 20 * 1024 * 1024;
+    /// <summary>
+    /// Maximum upload size in bytes. Default: 100 MB. Also requires the SignalR circuit's
+    /// <c>MaximumReceiveMessageSize</c> to be raised at least this high (see Program.cs) —
+    /// otherwise Blazor Server rejects the transfer before this limit is even checked.
+    /// </summary>
+    [Parameter] public long MaxFileSizeBytes { get; set; } = 100 * 1024 * 1024;
 
     /// <summary>Disables the button, e.g. while the chat is already processing a message.</summary>
     [Parameter] public bool Disabled { get; set; }
 
     /// <summary>Matches <c>FileDropZone</c>'s dark/light theme convention.</summary>
     [Parameter] public bool DarkMode { get; set; } = true;
+
+    /// <summary>
+    /// Optional CSS selector (e.g. <c>".oa-chat"</c> or <c>".oa-quick-card"</c>) for a larger
+    /// container that should also accept drag-and-dropped files, in addition to this component's
+    /// own attach button — dropped files are fed through the exact same upload path. Null (the
+    /// default) disables drag-and-drop; only the button remains clickable.
+    /// </summary>
+    [Parameter] public string? DropZoneSelector { get; set; }
 
     /// <summary>Raised with the saved bare filename after a successful upload.</summary>
     [Parameter] public EventCallback<string> OnUploaded { get; set; }
@@ -46,10 +59,39 @@
     private string _inputId = $"agent-upload-{Guid.NewGuid():N}";
     private bool _isUploading;
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (string.IsNullOrWhiteSpace(DropZoneSelector))
+            return;
+
+        try
+        {
+            // Idempotent on the JS side (safe to call every render): (re)points the drop zone at
+            // this render's _inputId, since ResetInput() gives the <InputFile> a new id after
+            // every upload, but only attaches the actual drag/drop listeners once per element.
+            await JSRuntime.InvokeVoidAsync("fileDropZone.initializePersistent", DropZoneSelector, _inputId, Disabled || _isUploading);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"AgentFileUpload: Failed to initialize drop zone JavaScript: {ex.Message}");
+        }
+    }
+
     private async Task HandleFileSelectedAsync(InputFileChangeEventArgs e)
     {
         var file = e.File;
         if (file is null) return;
+
+        var extension = System.IO.Path.GetExtension(file.Name).ToLowerInvariant();
+        var acceptedExtensions = AcceptedTypes.Split(',').Select(t => t.Trim().ToLowerInvariant()).ToList();
+        if (!acceptedExtensions.Contains(extension))
+        {
+            // The browser only enforces the `accept` attribute for the file-picker dialog, not
+            // for drag-and-drop — so a dropped file needs this check too.
+            await OnError.InvokeAsync($"Filtypen \"{extension}\" stöds inte. Tillåtna typer: {AcceptedTypes}");
+            ResetInput();
+            return;
+        }
 
         if (file.Size > MaxFileSizeBytes)
         {

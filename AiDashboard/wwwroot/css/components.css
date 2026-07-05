@@ -465,6 +465,16 @@ select:hover,
     }
 }
 
+/* AgentFileUpload drag-and-drop: applied by file-dropzone.js's initializePersistent() to an
+   external container (e.g. .oa-chat / .oa-quick-card), so it's a global rule rather than
+   AgentFileUpload.razor.css — Blazor's CSS isolation only reaches a component's own markup. */
+.agent-upload-drag-over {
+    outline: 3px dashed rgba(59, 130, 246, 0.6);
+    outline-offset: -3px;
+    background-color: rgba(59, 130, 246, 0.06);
+    transition: background-color 0.15s ease;
+}
+
 /* Badge/Tag styles */
 .oa-tag {
     display: inline-block;

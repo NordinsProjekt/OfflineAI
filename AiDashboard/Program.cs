@@ -17,6 +17,7 @@ using Services.Language;
 using Services.FileAgent;
 using Services.QuickAsk;
 using Services.Workspace;
+using Services.BatchJobs;
 
 namespace AiDashboard;
 
@@ -29,6 +30,15 @@ public class Program
         // Add services to the container.
         builder.Services.AddRazorComponents()
             .AddInteractiveServerComponents();
+
+        // Raise the Blazor Server circuit's SignalR message size above the default (~32 KB) so
+        // large file uploads (e.g. 100 MB PDFs via AgentFileUpload) don't get rejected before
+        // AgentFileUpload's own MaxFileSizeBytes check even runs. Set a bit higher than the
+        // largest AgentFileUpload.MaxFileSizeBytes in use (100 MB) to leave transport overhead.
+        builder.Services.Configure<Microsoft.AspNetCore.SignalR.HubOptions>(options =>
+        {
+            options.MaximumReceiveMessageSize = 110 * 1024 * 1024;
+        });
 
         // Register AppConfiguration
         var appConfig = builder.Configuration.GetSection("AppConfiguration").Get<AppConfiguration>() ?? new AppConfiguration();
@@ -86,6 +96,12 @@ public class Program
                 sp.GetRequiredService<IFileAgentService>(),
                 sp.GetRequiredService<IUtilityToolsService>(),
                 appConfig.AgentTools.MaxToolCallRounds));
+
+        // Register the batch job queue (Batch Processing page): feeds each queued task's
+        // free-text description into IAgenticChatService.SendWithToolsAsync one at a time, so
+        // jobs can freely use the same file-agent tools as regular chat. Singleton so the queue
+        // survives page navigation (not persisted across an app restart).
+        builder.Services.AddSingleton<IBatchJobService, BatchJobService>();
 
         // Register Gemma 4 CLI service (optional — only when ModelPath is configured)
         var gemma4CliCfg = appConfig.Gemma4Cli;
