@@ -29,7 +29,7 @@ Gemma 4 CLI backend alike — because it never depends on structured JSON output
 | Service | `IAgenticChatService` | `IGemma4AgentService.ChatWithToolsAsync` + `IAgentToolRegistry` |
 | Tool detection | Plain string search for a known slash command in the plain-text reply | Model returns structured JSON tool-call array |
 | Backend requirement | Any backend that returns text (Classic pooled subprocess, Gemma 4 CLI) | Requires a model capable of Semantic Kernel function calling |
-| Tool set | `IFileAgentService` slash commands (`/skapa`, `/fyll`, `/läs`, `/redigera`, `/lista`) + `IUtilityToolsService` commands (`/tid`, `/datum`, `/api <slutpunkt> <instruktion>`) | `BuiltInFileTools` `[KernelFunction]` methods (`create_file`, `read_file`, `write_file`, `edit_file_lines`, `insert_file_lines`, `list_files`) + `BuiltInUtilityTools` (`get_current_time`, `get_current_date`, `call_api`) |
+| Tool set | `IFileAgentService` slash commands (`/skapa`, `/fyll`, `/läs`, `/redigera`, `/lista`) + `IUtilityToolsService` commands (`/tid`, `/datum`, `/api <slutpunkt> <instruktion>`) | `BuiltInFileTools` `[KernelFunction]` methods (`create_file`, `read_file`, `read_pdf`, `write_file`, `edit_file_lines`, `insert_file_lines`, `list_files`) + `BuiltInUtilityTools` (`get_current_time`, `get_current_date`, `call_api`) |
 | Where used | Regular chat messages in Dashboard + QuickAsk | Wherever `ChatWithToolsAsync` is explicitly called with a kernel |
 
 Both mechanisms are backed by the same underlying file/utility operations (`IFileAgentService`,

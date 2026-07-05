@@ -105,6 +105,23 @@ public class GenerationSettingsService
         }
     }
 
+    // How long (seconds) to wait after the last output chunk before treating generation as
+    // complete/stalled. Independent of TimeoutSeconds, which bounds the whole call. A larger
+    // or slower local model can have multi-second gaps between chunks, so this is user-tunable
+    // instead of the previously hardcoded 10s (see Docs/LLM-PAUSE-TIMEOUT-10-SECONDS.md).
+    private int _pauseTimeoutSeconds = 10;
+    public int PauseTimeoutSeconds
+    {
+        get => _pauseTimeoutSeconds;
+        set
+        {
+            var clampedValue = Math.Clamp(value, 1, 120);
+            if (_pauseTimeoutSeconds == clampedValue) return;
+            _pauseTimeoutSeconds = clampedValue;
+            NotifyStateChanged();
+        }
+    }
+
     private bool _ragMode = true;
     public bool RagMode
     {
@@ -234,6 +251,7 @@ public class GenerationSettingsService
         PresencePenalty = 0.0;
         FrequencyPenalty = 0.0;
         TimeoutSeconds = 300; // 5 minutes (changed from 30 seconds)
+        PauseTimeoutSeconds = 10;
         RagMode = true;
         PerformanceMetrics = false;
         DebugMode = false;

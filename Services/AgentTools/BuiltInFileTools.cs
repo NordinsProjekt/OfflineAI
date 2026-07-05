@@ -47,6 +47,17 @@ public sealed class BuiltInFileTools(IFileAgentService fileAgent)
         return result.InjectedContext ?? result.Message;
     }
 
+    /// <summary>Extracts the text content of a PDF file from the agent directory.</summary>
+    [KernelFunction("read_pdf")]
+    [Description("Extracts the text content of a PDF file in the agent directory, so it can be summarized or used to decide on a next action.")]
+    public async Task<string> ReadPdfAsync(
+        [Description("Bare PDF filename to read, e.g. report.pdf")]
+        string filename)
+    {
+        var result = await _fileAgent.ReadPdfFileAsync(filename);
+        return result.InjectedContext ?? result.Message;
+    }
+
     /// <summary>
     /// Writes text content to a file in the agent directory,
     /// replacing any existing content.

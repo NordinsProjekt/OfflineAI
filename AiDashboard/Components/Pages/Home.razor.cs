@@ -19,6 +19,11 @@ public partial class Home : IDisposable
     private bool isProcessing = false;
     private ElementReference messagesContainer;
 
+    // Bare filename of the most recently uploaded file (via AgentFileUpload), so a terse
+    // follow-up like "Summarize" can still be resolved to the right /läs-pdf or /läs command —
+    // see IAgenticChatService.SendWithToolsAsync's recentlyUploadedFilename parameter.
+    private string? lastUploadedFilename;
+
     private List<ChatMessageModel> messages = new()
     {
         new ChatMessageModel
@@ -76,6 +81,28 @@ public partial class Home : IDisposable
     private void OnComposerTextChanged(string value)
     {
         composerText = value;
+    }
+
+    private void OnFileUploaded(string filename)
+    {
+        lastUploadedFilename = filename;
+
+        var msg = new ChatMessageModel
+        {
+            IsUser = false,
+            Text = $"✓ Fil uppladdad: {filename} — fråga mig t.ex. \"sammanfatta {filename}\" så läser jag den."
+        };
+        msg.FormattedText = FormatMessage(msg.Text, isUser: false);
+        messages.Add(msg);
+        StateHasChanged();
+    }
+
+    private void OnFileUploadError(string errorMessage)
+    {
+        var msg = new ChatMessageModel { IsUser = false, Text = $"⚠ {errorMessage}" };
+        msg.FormattedText = FormatMessage(msg.Text, isUser: false);
+        messages.Add(msg);
+        StateHasChanged();
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
@@ -214,7 +241,8 @@ public partial class Home : IDisposable
                 var agentResult = await AgenticChat.SendWithToolsAsync(
                     userMessage,
                     Dashboard.SendActiveAsync,
-                    onToolStatus: status => Dashboard.StatusMessage = status);
+                    onToolStatus: status => Dashboard.StatusMessage = status,
+                    recentlyUploadedFilename: lastUploadedFilename);
 
                 foreach (var invocation in agentResult.ToolInvocations)
                 {

@@ -188,6 +188,81 @@ public class ModelInstancePoolTests : IDisposable
 
     #endregion
 
+    #region PauseTimeoutMs Property Tests
+
+    [Fact]
+    public void PauseTimeoutMs_Default_Is10Seconds()
+    {
+        // Arrange & Act
+        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
+
+        // Assert
+        Assert.Equal(10000, pool.PauseTimeoutMs);
+    }
+
+    [Fact]
+    public void PauseTimeoutMs_SetValidValue_UpdatesPauseTimeout()
+    {
+        // Arrange
+        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
+
+        // Act
+        pool.PauseTimeoutMs = 30000;
+
+        // Assert
+        Assert.Equal(30000, pool.PauseTimeoutMs);
+    }
+
+    [Fact]
+    public void PauseTimeoutMs_SetTooLow_ThrowsArgumentOutOfRangeException()
+    {
+        // Arrange
+        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => pool.PauseTimeoutMs = 999);
+        Assert.Contains("Pause timeout must be between 1 and 120 seconds", exception.Message);
+    }
+
+    [Fact]
+    public void PauseTimeoutMs_SetTooHigh_ThrowsArgumentOutOfRangeException()
+    {
+        // Arrange
+        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => pool.PauseTimeoutMs = 120001);
+        Assert.Contains("Pause timeout must be between 1 and 120 seconds", exception.Message);
+    }
+
+    [Fact]
+    public void PauseTimeoutMs_SetMinimumValidValue_Succeeds()
+    {
+        // Arrange
+        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
+
+        // Act
+        pool.PauseTimeoutMs = 1000;
+
+        // Assert
+        Assert.Equal(1000, pool.PauseTimeoutMs);
+    }
+
+    [Fact]
+    public void PauseTimeoutMs_SetMaximumValidValue_Succeeds()
+    {
+        // Arrange
+        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
+
+        // Act
+        pool.PauseTimeoutMs = 120000;
+
+        // Assert
+        Assert.Equal(120000, pool.PauseTimeoutMs);
+    }
+
+    #endregion
+
     #region AvailableCount Property Tests
 
     [Fact]

@@ -1,7 +1,7 @@
 namespace Services.FileAgent;
 
 /// <summary>
-/// Handles file agent slash commands (/skapa, /fyll, /läs, /redigera, /lista) in the chat input.
+/// Handles file agent slash commands (/skapa, /fyll, /läs, /läs-pdf, /redigera, /lista) in the chat input.
 /// Implement this service in the Services project so it can be reused across the solution.
 /// <para>
 /// These same commands double as the tool set for the lightweight agentic pattern used by
@@ -37,8 +37,19 @@ public interface IFileAgentService
     void SetBaseDirectory(string baseDirectory);
 
     /// <summary>
+    /// Saves an uploaded file's raw bytes as <paramref name="filename"/> in
+    /// <see cref="BaseDirectory"/>, overwriting any existing file with the same name. Unlike
+    /// <see cref="WriteExtractedContentAsync"/> (which writes LLM-generated text), this copies
+    /// <paramref name="content"/> byte-for-byte, so it is safe for binary formats such as PDF.
+    /// Intended for UI file-upload controls that let the user attach a document (e.g. a PDF) to
+    /// the active workspace so the LLM can subsequently read it via <c>/läs-pdf</c> or
+    /// <see cref="ReadPdfFileAsync"/>.
+    /// </summary>
+    Task<FileAgentResult> SaveUploadedFileAsync(string filename, Stream content);
+
+    /// <summary>
     /// Returns true if the given input starts with a recognised file agent command
-    /// (/skapa, /fyll, /läs, /las, /lista).
+    /// (/skapa, /fyll, /läs, /las, /läs-pdf, /las-pdf, /redigera, /lista).
     /// </summary>
     bool IsCommand(string input);
 
@@ -67,6 +78,15 @@ public interface IFileAgentService
     /// (see <see cref="ExecuteAsync"/>) requires an explicit instruction instead.
     /// </summary>
     Task<FileAgentResult> ReadFileRawAsync(string filename);
+
+    /// <summary>
+    /// Extracts the text content of a PDF file in <see cref="BaseDirectory"/> so the LLM can
+    /// reason over it, e.g. to summarize it or decide on a next action. Pages are joined in
+    /// order, each preceded by a <c>--- Page N ---</c> marker. Intended for programmatic/tool-calling
+    /// access — e.g. Semantic Kernel function calling via <c>BuiltInFileTools</c> — mirroring
+    /// <see cref="ReadFileRawAsync"/> for plain text files.
+    /// </summary>
+    Task<FileAgentResult> ReadPdfFileAsync(string filename);
 
     /// <summary>
     /// Tries to extract the file content block delimited by <c>&lt;&lt;&lt;FIL&gt;&gt;&gt;</c> /
@@ -137,6 +157,11 @@ public interface IFileAgentService
     /// <see cref="IsCommand"/> — for a known agent slash command the LLM wants to invoke.
     /// Returns <c>true</c> and sets <paramref name="command"/> to the exact command line
     /// (ready to pass to <see cref="ExecuteAsync"/>) when one is found.
+    /// <para>
+    /// Falls back to recognising a command quoted inline (straight or curly quotes) anywhere in
+    /// the response for models that narrate their intent instead of writing the command alone on
+    /// its own line, e.g. <c>I will use the "/läs-pdf report.pdf Sammanfatta innehållet" command.</c>
+    /// </para>
     /// </summary>
     bool TryFindAgentCommand(string llmResponse, out string command);
 }

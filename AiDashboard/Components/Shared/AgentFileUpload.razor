@@ -1,0 +1,106 @@
+@using Microsoft.AspNetCore.Components.Forms
+@using global::Services.FileAgent
+@inject IFileAgentService FileAgent
+
+<div class="agent-upload @(DarkMode ? "theme-dark" : "theme-light")">
+    <InputFile id="@_inputId"
+               @key="_inputId"
+               class="agent-upload-input"
+               OnChange="HandleFileSelectedAsync"
+               accept="@AcceptedTypes"
+               disabled="@(Disabled || _isUploading)" />
+
+    <label for="@_inputId"
+           class="agent-upload-btn @((Disabled || _isUploading) ? "disabled" : "")"
+           title="Attach a file (e.g. PDF) to the workspace so the AI can read it">
+        @if (_isUploading)
+        {
+            <span class="agent-upload-spinner"></span>
+        }
+        else
+        {
+            <span class="agent-upload-icon">📎</span>
+        }
+    </label>
+</div>
+
+@code {
+    /// <summary>Comma-separated accepted file extensions passed to the underlying &lt;input type="file"&gt;.</summary>
+    [Parameter] public string AcceptedTypes { get; set; } = ".pdf,.txt";
+
+    /// <summary>Maximum upload size in bytes. Default: 20 MB.</summary>
+    [Parameter] public long MaxFileSizeBytes { get; set; } = 20 * 1024 * 1024;
+
+    /// <summary>Disables the button, e.g. while the chat is already processing a message.</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Matches <c>FileDropZone</c>'s dark/light theme convention.</summary>
+    [Parameter] public bool DarkMode { get; set; } = true;
+
+    /// <summary>Raised with the saved bare filename after a successful upload.</summary>
+    [Parameter] public EventCallback<string> OnUploaded { get; set; }
+
+    /// <summary>Raised with a human-readable message when validation or saving fails.</summary>
+    [Parameter] public EventCallback<string> OnError { get; set; }
+
+    private string _inputId = $"agent-upload-{Guid.NewGuid():N}";
+    private bool _isUploading;
+
+    private async Task HandleFileSelectedAsync(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        if (file.Size > MaxFileSizeBytes)
+        {
+            await OnError.InvokeAsync(
+                $"Filen \"{file.Name}\" ({FormatSize(file.Size)}) är för stor. Max: {FormatSize(MaxFileSizeBytes)}.");
+            ResetInput();
+            return;
+        }
+
+        _isUploading = true;
+        StateHasChanged();
+
+        try
+        {
+            await using var stream = file.OpenReadStream(MaxFileSizeBytes);
+            var result = await FileAgent.SaveUploadedFileAsync(file.Name, stream);
+
+            if (result.IsSuccess)
+                await OnUploaded.InvokeAsync(file.Name);
+            else
+                await OnError.InvokeAsync(result.Message);
+        }
+        catch (Exception ex)
+        {
+            await OnError.InvokeAsync($"Kunde inte ladda upp \"{file.Name}\": {ex.Message}");
+        }
+        finally
+        {
+            _isUploading = false;
+            ResetInput();
+            StateHasChanged();
+        }
+    }
+
+    private void ResetInput()
+    {
+        // Recreate the <InputFile> element (via @key) so selecting the same file again still
+        // triggers OnChange — Blazor otherwise treats an unchanged <input> value as a no-op.
+        _inputId = $"agent-upload-{Guid.NewGuid():N}";
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        string[] sizes = ["B", "KB", "MB", "GB"];
+        double len = bytes;
+        var order = 0;
+        while (len >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            len /= 1024;
+        }
+        return $"{len:0.##} {sizes[order]}";
+    }
+}

@@ -17,20 +17,37 @@ public class PersistentLlmProcess : IPersistentLlmProcess
     private readonly string _llmPath;
     private readonly string _modelPath;
     private int _timeoutMs;
+    private int _pauseTimeoutMs = 10000;
     private readonly SemaphoreSlim _requestLock = new(1, 1);
     private bool _disposed;
 
     public bool IsHealthy { get; private set; } = true;
     public DateTime LastUsed { get; private set; } = DateTime.UtcNow;
-    
-    public int TimeoutMs 
-    { 
+
+    public int TimeoutMs
+    {
         get => _timeoutMs;
         set
         {
             if (value < 1000 || value > 300000)
                 throw new ArgumentOutOfRangeException(nameof(value), "Timeout must be between 1 and 300 seconds (1000-300000ms)");
             _timeoutMs = value;
+        }
+    }
+
+    /// <summary>
+    /// Maximum pause between output chunks (ms) after generation has started before it's
+    /// considered complete/stalled. Independent of <see cref="TimeoutMs"/>, which bounds the
+    /// overall call. Default: 10 000 ms (10 seconds).
+    /// </summary>
+    public int PauseTimeoutMs
+    {
+        get => _pauseTimeoutMs;
+        set
+        {
+            if (value < 1000 || value > 120000)
+                throw new ArgumentOutOfRangeException(nameof(value), "Pause timeout must be between 1 and 120 seconds (1000-120000ms)");
+            _pauseTimeoutMs = value;
         }
     }
 
@@ -167,9 +184,10 @@ public class PersistentLlmProcess : IPersistentLlmProcess
         var outputLock = new object();
         var fullOutput = new StringBuilder(); // Keep track of all output for debugging
 
-        // Use fixed 10-second pause timeout
-        // This detects when the LLM has stopped generating (paused for more than 10 seconds)
-        const int pauseTimeoutMs = 10000;  // 10 seconds
+        // Configurable pause timeout (see PauseTimeoutMs): detects when the LLM has stopped
+        // generating (paused for longer than this) so a partial/complete response can be
+        // returned instead of waiting for the full overall timeout.
+        var pauseTimeoutMs = _pauseTimeoutMs;
 
         process.OutputDataReceived += (sender, e) =>
         {

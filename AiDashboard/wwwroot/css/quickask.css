@@ -494,6 +494,34 @@
     max-width: 150px;
 }
 
+/* Pause timeout number input — matches the model/tokens dropdown look without the arrow */
+.oa-pause-timeout-input {
+    background: rgba(255, 255, 255, 0.95);
+    color: #2d3748;
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    border-radius: 12px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    width: 60px;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+}
+
+.oa-pause-timeout-input:hover {
+    background: white;
+    border-color: #667eea;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.oa-pause-timeout-input:focus {
+    outline: none;
+    background: white;
+    border-color: #667eea;
+    box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.3);
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .oa-model-selector {

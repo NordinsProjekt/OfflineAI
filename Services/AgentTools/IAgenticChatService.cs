@@ -56,9 +56,18 @@ public interface IAgenticChatService
     /// tool-loop prompts/replies to the user. The loop itself always stays internal — only these
     /// short status strings and the final answer are meant to reach the user.
     /// </param>
+    /// <param name="recentlyUploadedFilename">
+    /// Optional bare filename of a file the user recently uploaded to the workspace (via a file
+    /// picker, not a slash command). When set, it is added to the priming prompt as a hint so the
+    /// LLM can still pick the right filename for <c>/läs</c> or <c>/läs-pdf</c> even when
+    /// <paramref name="userMessage"/> is terse and doesn't name the file itself (e.g. just
+    /// "Sammanfatta" right after an upload) — without this hint a small model has no way to fill
+    /// in <c>&lt;filnamn&gt;</c> and tends to decline the tool entirely.
+    /// </param>
     Task<AgenticChatResult> SendWithToolsAsync(
         string userMessage,
         Func<string, Task<string>> sendToLlm,
         CancellationToken cancellationToken = default,
-        Action<string>? onToolStatus = null);
+        Action<string>? onToolStatus = null,
+        string? recentlyUploadedFilename = null);
 }

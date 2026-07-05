@@ -10,11 +10,13 @@
     <ChatTopBar />
     <ActiveContextBar />
     <ChatMessages Messages="@Messages" IsProcessing="@IsProcessing" MessagesContainerRef="@MessagesContainerRef" />
-    <ChatComposer ComposerText="@ComposerText" 
+    <ChatComposer ComposerText="@ComposerText"
                   IsProcessing="@IsProcessing"
                   OnComposerTextChanged="@OnComposerTextChanged"
                   OnKeyDown="@OnKeyDown"
-                  OnSendMessage="@OnSendMessage" />
+                  OnSendMessage="@OnSendMessage"
+                  OnFileUploaded="@OnFileUploaded"
+                  OnFileUploadError="@OnFileUploadError" />
 </main>
 
 @code {
@@ -38,4 +40,10 @@
 
     [Parameter]
     public EventCallback OnSendMessage { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnFileUploaded { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnFileUploadError { get; set; }
 }

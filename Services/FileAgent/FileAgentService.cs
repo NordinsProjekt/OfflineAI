@@ -1,4 +1,6 @@
+using System.Text;
 using System.Text.RegularExpressions;
+using UglyToad.PdfPig;
 
 namespace Services.FileAgent;
 
@@ -42,6 +44,14 @@ public class FileAgentService : IFileAgentService
         $@"<{EditTagName}\s+(RAD|INFOGA_EFTER|INFOGA_F(?:Ö|O)RE)=(\d+)(?:-(\d+))?\s*>(.*?)</{EditTagName}>",
         RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // Fallback for TryFindAgentCommand: some models narrate their intent to use a tool instead of
+    // writing the command alone on its own line as instructed, e.g.
+    // `I will use the "/läs-pdf report.pdf Sammanfatta innehållet" command.` — this recognises a
+    // command quoted inline (straight or curly quotes) so a well-formed request isn't dropped.
+    private static readonly Regex QuotedCommandRegex = new(
+        "[\"“]\\s*(/\\S[^\"“”\r\n]*)\\s*[\"”]",
+        RegexOptions.Compiled);
+
     /// <inheritdoc/>
     public string BaseDirectory { get; private set; }
 
@@ -70,15 +80,37 @@ public class FileAgentService : IFileAgentService
     }
 
     /// <inheritdoc/>
+    public async Task<FileAgentResult> SaveUploadedFileAsync(string filename, Stream content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+
+        if (string.IsNullOrWhiteSpace(filename))
+            return FileAgentResult.Failure("Ange ett filnamn.");
+
+        var path = GetSafePath(filename);
+        if (path is null)
+            return FileAgentResult.Failure($"Ogiltigt filnamn: \"{filename}\".");
+
+        await using (var fileStream = File.Create(path))
+        {
+            await content.CopyToAsync(fileStream);
+        }
+
+        return FileAgentResult.Success(FileAgentResultType.FileCreated, $"✓ Fil uppladdad: {Path.GetFileName(path)}");
+    }
+
+    /// <inheritdoc/>
     public bool IsCommand(string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return false;
         var t = input.TrimStart();
-        return t.StartsWith("/skapa ", Cmp)
-            || t.StartsWith("/fyll ", Cmp)
-            || t.StartsWith("/läs ", Cmp)
-            || t.StartsWith("/las ", Cmp)
-            || t.StartsWith("/redigera ", Cmp)
+        return t.StartsWith("/skapa ", Cmp) || t.Equals("/skapa", Cmp)
+            || t.StartsWith("/fyll ", Cmp) || t.Equals("/fyll", Cmp)
+            || t.StartsWith("/läs ", Cmp) || t.Equals("/läs", Cmp)
+            || t.StartsWith("/las ", Cmp) || t.Equals("/las", Cmp)
+            || t.StartsWith("/läs-pdf ", Cmp) || t.Equals("/läs-pdf", Cmp)
+            || t.StartsWith("/las-pdf ", Cmp) || t.Equals("/las-pdf", Cmp)
+            || t.StartsWith("/redigera ", Cmp) || t.Equals("/redigera", Cmp)
             || t.Equals("/lista", Cmp)
             || t.StartsWith("/lista ", Cmp);
     }
@@ -93,20 +125,40 @@ public class FileAgentService : IFileAgentService
 
         if (trimmed.StartsWith("/skapa ", Cmp))
             return await CreateFileAsync(trimmed["/skapa ".Length..].Trim());
+        if (trimmed.Equals("/skapa", Cmp))
+            return await CreateFileAsync(string.Empty);
 
         if (trimmed.StartsWith("/fyll ", Cmp))
             return await FillFileAsync(trimmed["/fyll ".Length..].Trim());
+        if (trimmed.Equals("/fyll", Cmp))
+            return await FillFileAsync(string.Empty);
 
         if (trimmed.StartsWith("/läs ", Cmp))
             return await ReadFileAsync(trimmed["/läs ".Length..].Trim());
+        if (trimmed.Equals("/läs", Cmp))
+            return await ReadFileAsync(string.Empty);
 
         if (trimmed.StartsWith("/las ", Cmp))
             return await ReadFileAsync(trimmed["/las ".Length..].Trim());
+        if (trimmed.Equals("/las", Cmp))
+            return await ReadFileAsync(string.Empty);
+
+        if (trimmed.StartsWith("/läs-pdf ", Cmp))
+            return await ReadPdfCommandAsync(trimmed["/läs-pdf ".Length..].Trim());
+        if (trimmed.Equals("/läs-pdf", Cmp))
+            return await ReadPdfCommandAsync(string.Empty);
+
+        if (trimmed.StartsWith("/las-pdf ", Cmp))
+            return await ReadPdfCommandAsync(trimmed["/las-pdf ".Length..].Trim());
+        if (trimmed.Equals("/las-pdf", Cmp))
+            return await ReadPdfCommandAsync(string.Empty);
 
         if (trimmed.StartsWith("/redigera ", Cmp))
             return await EditFileAsync(trimmed["/redigera ".Length..].Trim());
+        if (trimmed.Equals("/redigera", Cmp))
+            return await EditFileAsync(string.Empty);
 
-        if (trimmed.Equals("/lista", Cmp) || trimmed.StartsWith("/lista", Cmp))
+        if (trimmed.Equals("/lista", Cmp) || trimmed.StartsWith("/lista ", Cmp))
             return await ListFilesAsync();
 
         return FileAgentResult.NotACommand();
@@ -219,6 +271,112 @@ public class FileAgentService : IFileAgentService
         return FileAgentResult.ReadSuccess(
             $"✓ Fil läst: {Path.GetFileName(path)}",
             content);
+    }
+
+    /// <inheritdoc/>
+    public Task<FileAgentResult> ReadPdfFileAsync(string filename)
+    {
+        var (path, error) = ResolvePdfPath(filename);
+        if (error is not null)
+            return Task.FromResult(error);
+
+        var (content, extractError) = ExtractPdfText(path!);
+        if (extractError is not null)
+            return Task.FromResult(extractError);
+
+        return Task.FromResult(FileAgentResult.ReadSuccess(
+            $"✓ PDF läst: {Path.GetFileName(path)}",
+            content!));
+    }
+
+    // ── /läs-pdf ──────────────────────────────────────────────────────────
+
+    private Task<FileAgentResult> ReadPdfCommandAsync(string args)
+    {
+        // Format: <filename> <instruktion> — same shape as /läs, but the file content is
+        // extracted from a PDF via UglyToad.PdfPig instead of read as plain text.
+        var spaceIdx = args.IndexOf(' ');
+        if (spaceIdx < 0)
+            return Task.FromResult(FileAgentResult.Failure(
+                "Ange filnamn och en instruktion. Exempel: /läs-pdf rapport.pdf Sammanfatta innehållet."));
+
+        var filename = args[..spaceIdx].Trim();
+        var instruction = args[(spaceIdx + 1)..].Trim();
+
+        if (string.IsNullOrWhiteSpace(instruction))
+            return Task.FromResult(FileAgentResult.Failure(
+                "Ange en instruktion efter filnamnet. Exempel: /läs-pdf rapport.pdf Sammanfatta innehållet."));
+
+        var (path, error) = ResolvePdfPath(filename);
+        if (error is not null)
+            return Task.FromResult(error);
+
+        var (content, extractError) = ExtractPdfText(path!);
+        if (extractError is not null)
+            return Task.FromResult(extractError);
+
+        var promptForLlm =
+            $"Instruktion: {instruction}\n\n" +
+            $"PDF-filens innehåll ({Path.GetFileName(path)}):\n{content}";
+
+        return Task.FromResult(FileAgentResult.ReadSuccess(
+            $"✓ PDF läst: {Path.GetFileName(path)}",
+            promptForLlm));
+    }
+
+    /// <summary>
+    /// Validates <paramref name="filename"/> as a bare, existing <c>.pdf</c> file inside
+    /// <see cref="BaseDirectory"/>. Returns the resolved path on success, or a
+    /// <see cref="FileAgentResult"/> describing the validation failure.
+    /// </summary>
+    private (string? Path, FileAgentResult? Error) ResolvePdfPath(string filename)
+    {
+        if (string.IsNullOrWhiteSpace(filename))
+            return (null, FileAgentResult.Failure("Ange ett filnamn. Exempel: /läs-pdf rapport.pdf Sammanfatta innehållet."));
+
+        var path = GetSafePath(filename);
+        if (path is null)
+            return (null, FileAgentResult.Failure($"Ogiltigt filnamn: \"{filename}\"."));
+
+        if (!Path.GetExtension(path).Equals(".pdf", Cmp))
+            return (null, FileAgentResult.Failure($"Filen är inte en PDF: {Path.GetFileName(path)}"));
+
+        if (!File.Exists(path))
+            return (null, FileAgentResult.Failure($"Filen hittades inte: {Path.GetFileName(path)}"));
+
+        return (path, null);
+    }
+
+    /// <summary>
+    /// Extracts all page text from the PDF at <paramref name="path"/> via UglyToad.PdfPig, joining
+    /// pages with a <c>--- Page N ---</c> marker. Returns the extracted content on success, or a
+    /// <see cref="FileAgentResult"/> describing why extraction failed (corrupt file, no text, etc.).
+    /// </summary>
+    private (string? Content, FileAgentResult? Error) ExtractPdfText(string path)
+    {
+        try
+        {
+            using var document = PdfDocument.Open(path);
+            var text = new StringBuilder();
+
+            foreach (var page in document.GetPages())
+            {
+                text.AppendLine($"--- Page {page.Number} ---");
+                text.AppendLine(page.Text);
+                text.AppendLine();
+            }
+
+            var content = text.ToString().Trim();
+            if (string.IsNullOrWhiteSpace(content))
+                return (null, FileAgentResult.Failure($"Ingen text kunde extraheras ur PDF:en: {Path.GetFileName(path)}"));
+
+            return (content, null);
+        }
+        catch (Exception ex)
+        {
+            return (null, FileAgentResult.Failure(
+                $"Kunde inte läsa PDF:en {Path.GetFileName(path)}: {ex.Message}"));
+        }
     }
 
     // ── /redigera ─────────────────────────────────────────────────────────
@@ -550,6 +708,7 @@ public class FileAgentService : IFileAgentService
     public IReadOnlyDictionary<string, string> GetToolDescriptions() => new Dictionary<string, string>
     {
         ["/läs <filnamn> <instruktion>"] = "Läser innehållet i en fil i agentkatalogen och skickar det tillsammans med instruktionen till dig, t.ex. \"/läs text.txt Sammanfatta innehållet.\"",
+        ["/läs-pdf <filnamn> <instruktion>"] = "Extraherar texten ur en PDF-fil i agentkatalogen och skickar den tillsammans med instruktionen till dig, t.ex. \"/läs-pdf rapport.pdf Sammanfatta innehållet och föreslå en åtgärd.\"",
         ["/skapa <filnamn>"] = "Skapar en ny, tom fil med angivet namn i agentkatalogen.",
         ["/fyll <filnamn> <beskrivning>"] = "Genererar innehåll utifrån beskrivningen och sparar det i filen.",
         ["/redigera <filnamn> <instruktion>"] = "Läser en fil med radnummer, ber dig ange exakt vilka rader som ska ersättas och med vad (eller var ny kod, t.ex. en ny funktion, ska infogas utan att skriva över något), och uppdaterar sedan filen automatiskt utifrån ditt svar.",
@@ -582,6 +741,19 @@ public class FileAgentService : IFileAgentService
             if (IsCommand(line))
             {
                 command = line;
+                return true;
+            }
+        }
+
+        // Fallback: the model explained its intent to use a tool in prose instead of writing the
+        // command alone on its own line (e.g. `I will use the "/läs-pdf report.pdf Sammanfatta
+        // innehållet" command.`) — recognise a quoted command so the request still executes.
+        foreach (Match match in QuotedCommandRegex.Matches(llmResponse))
+        {
+            var candidate = match.Groups[1].Value.Trim();
+            if (IsCommand(candidate))
+            {
+                command = candidate;
                 return true;
             }
         }

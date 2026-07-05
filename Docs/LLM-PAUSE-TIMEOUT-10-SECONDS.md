@@ -223,14 +223,20 @@ Quantum computing is a
 
 ## Configuration
 
-The 10-second pause timeout is **hardcoded** and cannot be changed by users. This is intentional to:
+**Update:** The pause timeout is no longer hardcoded. Larger/slower local models (e.g. a 12B model
+running on CPU) can have legitimate multi-second gaps between output chunks, especially with the
+longer tool-priming prompts used by the agentic chat/tool-calling loop — a fixed 10s was cutting
+those responses off mid-generation. It's now a user-configurable setting, alongside the existing
+overall timeout:
 
-1. Keep behavior consistent and predictable
-2. Avoid confusion with overall timeout setting
-3. Provide optimal user experience
-4. Prevent accidental misconfiguration
+- `GenerationSettingsService.PauseTimeoutSeconds` (default 10, range 1–120 seconds)
+- Exposed in the Dashboard sidebar under **Generation → Pause Timeout (seconds)**
+- Flows through `DashboardChatService.SendMessageAsync(..., pauseTimeoutSeconds)` →
+  `ModelInstancePool.PauseTimeoutMs` → `PersistentLlmProcess.PauseTimeoutMs`, mirroring exactly how
+  the overall `TimeoutSeconds` setting already flowed through `TimeoutMs` at each layer.
 
-The overall timeout remains user-configurable via settings.
+If responses are getting cut off short on a slower/bigger model, raise this setting instead of
+the overall timeout — they are independent (see "Understanding the Two Timeouts" above).
 
 ## Testing
 

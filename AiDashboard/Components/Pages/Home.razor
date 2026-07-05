@@ -13,7 +13,9 @@
               MessagesContainerRef="@messagesContainer"
               OnComposerTextChanged="@OnComposerTextChanged"
               OnKeyDown="@HandleKeyDown"
-              OnSendMessage="@SendMessage" />
+              OnSendMessage="@SendMessage"
+              OnFileUploaded="@OnFileUploaded"
+              OnFileUploadError="@OnFileUploadError" />
 </div>
 
 @* Loading overlay for inbox reload *@

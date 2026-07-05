@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Services.AgentTools;
 using Services.FileAgent;
+using Services.Tests.TestHelpers;
 
 namespace Services.Tests.AgentTools;
 
@@ -66,6 +67,28 @@ public class BuiltInFileToolsTests : IDisposable
     public async Task ReadFileAsync_MissingFile_ReturnsErrorMessage()
     {
         var content = await _sut.ReadFileAsync("saknas.txt");
+
+        content.Should().Contain("hittades inte");
+    }
+
+    // ── read_pdf ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ReadPdfAsync_ExistingPdf_ReturnsExtractedText()
+    {
+        await File.WriteAllBytesAsync(
+            Path.Combine(_tempDir, "report.pdf"),
+            MinimalPdfBuilder.CreateWithText("Quarterly results"));
+
+        var content = await _sut.ReadPdfAsync("report.pdf");
+
+        content.Should().Contain("Quarterly results");
+    }
+
+    [Fact]
+    public async Task ReadPdfAsync_MissingFile_ReturnsErrorMessage()
+    {
+        var content = await _sut.ReadPdfAsync("saknas.pdf");
 
         content.Should().Contain("hittades inte");
     }

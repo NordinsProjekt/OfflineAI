@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Services.AgentTools;
 using Services.FileAgent;
+using Services.Tests.TestHelpers;
 
 namespace Services.Tests.AgentTools;
 
@@ -166,6 +167,80 @@ public class AgenticChatServiceTests : IDisposable
         result.ToolInvocations.Should().BeEmpty();
         llm.Prompts.Should().ContainSingle();
         llm.Prompts[0].Should().Contain("Fråga: Vad är huvudstaden i Sverige?");
+    }
+
+    // ── recentlyUploadedFilename hint ─────────────────────────────────────
+
+    [Fact]
+    public async Task SendWithToolsAsync_RecentlyUploadedFilename_AddsHintNamingTheFileToThePrompt()
+    {
+        var llm = new ScriptedLlm("Svar utan verktyg.");
+
+        await _sut.SendWithToolsAsync(
+            "Sammanfatta",
+            llm.SendAsync,
+            recentlyUploadedFilename: "rapport.pdf");
+
+        llm.Prompts.Should().ContainSingle();
+        llm.Prompts[0].Should().Contain("rapport.pdf");
+        llm.Prompts[0].Should().Contain("Fråga: Sammanfatta");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_NoRecentlyUploadedFilename_PromptHasNoUploadHint()
+    {
+        var llm = new ScriptedLlm("Svar utan verktyg.");
+
+        await _sut.SendWithToolsAsync("Sammanfatta", llm.SendAsync);
+
+        llm.Prompts[0].Should().NotContain("laddat upp");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_RecentlyUploadedFilename_LlmCanUseItToBuildLasPdfCommand()
+    {
+        var pdfPath = Path.Combine(_tempDir, "rapport.pdf");
+        await File.WriteAllBytesAsync(pdfPath, MinimalPdfBuilder.CreateWithText("Kvartalsresultat upp"));
+
+        var llm = new ScriptedLlm(
+            "/läs-pdf rapport.pdf Sammanfatta innehållet",
+            "Kvartalsresultatet har ökat.");
+
+        var result = await _sut.SendWithToolsAsync(
+            "Sammanfatta",
+            llm.SendAsync,
+            recentlyUploadedFilename: "rapport.pdf");
+
+        result.FinalResponse.Should().Be("Kvartalsresultatet har ökat.");
+        result.ToolInvocations.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_LlmNarratesCommandInQuotesInsteadOfOwnLine_StillExecutesIt()
+    {
+        // Regression test: a real local model (gemma-4-12b), given the recentlyUploadedFilename
+        // hint for a terse "Sammanfatta" prompt, replied by narrating its intent instead of
+        // writing the command alone on its own line as instructed:
+        //   Based on the context provided, I will use the "/läs-pdf quarterly-report.pdf
+        //   Sammanfatta innehållet" command to fulfill your request.
+        // TryFindAgentCommand's quoted-command fallback must still pick this up so the tool
+        // actually runs instead of silently returning the narration as the final answer.
+        var pdfPath = Path.Combine(_tempDir, "quarterly-report.pdf");
+        await File.WriteAllBytesAsync(pdfPath, MinimalPdfBuilder.CreateWithText("Quarterly revenue is up"));
+
+        var llm = new ScriptedLlm(
+            "Based on the context provided, I will use the \"/läs-pdf quarterly-report.pdf " +
+            "Sammanfatta innehållet\" command to fulfill your request.",
+            "Quarterly revenue has increased.");
+
+        var result = await _sut.SendWithToolsAsync(
+            "Sammanfatta",
+            llm.SendAsync,
+            recentlyUploadedFilename: "quarterly-report.pdf");
+
+        result.FinalResponse.Should().Be("Quarterly revenue has increased.");
+        result.ToolInvocations.Should().ContainSingle();
+        result.ToolInvocations[0].Command.Should().Be("/läs-pdf quarterly-report.pdf Sammanfatta innehållet");
     }
 
     // ── Generic tool round trip (/lista) ─────────────────────────────────

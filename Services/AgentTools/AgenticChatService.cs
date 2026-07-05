@@ -40,7 +40,8 @@ public sealed class AgenticChatService : IAgenticChatService
         string userMessage,
         Func<string, Task<string>> sendToLlm,
         CancellationToken cancellationToken = default,
-        Action<string>? onToolStatus = null)
+        Action<string>? onToolStatus = null,
+        string? recentlyUploadedFilename = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userMessage);
         ArgumentNullException.ThrowIfNull(sendToLlm);
@@ -53,6 +54,14 @@ public sealed class AgenticChatService : IAgenticChatService
         var toolsPrompt = _fileAgent.BuildToolsSystemPrompt();
         if (_utilityTools is not null)
             toolsPrompt = AppendUtilityToolDescriptions(toolsPrompt, _utilityTools);
+
+        if (!string.IsNullOrWhiteSpace(recentlyUploadedFilename))
+            toolsPrompt +=
+                $"\n\nObs: Användaren har nyss laddat upp filen \"{recentlyUploadedFilename}\" till agentkatalogen. " +
+                $"Om frågan nedan handlar om ett uppladdat dokument utan att själv ange ett filnamn, anta att det " +
+                $"gäller \"{recentlyUploadedFilename}\" och använd rätt verktyg med exakt det filnamnet (t.ex. " +
+                $"/läs-pdf {recentlyUploadedFilename} <instruktion> om filen är en PDF, annars " +
+                $"/läs {recentlyUploadedFilename} <instruktion>).";
 
         var startMessage = $"{toolsPrompt}\n\nFråga: {userMessage}";
         var response = await sendToLlm(startMessage);

@@ -157,7 +157,8 @@ namespace AiDashboard.Services
             BotPersonalityEntity? personality = null,
             bool useGpu = false,
             int gpuLayers = 0,
-            int timeoutSeconds = 300) // Changed from 30 to 300 (5 minutes)
+            int timeoutSeconds = 300, // Changed from 30 to 300 (5 minutes)
+            int pauseTimeoutSeconds = 10)
         {
             if (string.IsNullOrWhiteSpace(message))
                 throw new ArgumentNullException(nameof(message));
@@ -167,6 +168,10 @@ namespace AiDashboard.Services
 
             // Update timeout in the model pool (5 minutes = 300,000 ms)
             _modelPool.TimeoutMs = timeoutSeconds * 1000;
+
+            // Update pause-detection timeout (how long to wait after the last output chunk
+            // before treating generation as complete) — see GenerationSettingsService.PauseTimeoutSeconds.
+            _modelPool.PauseTimeoutMs = pauseTimeoutSeconds * 1000;
 
             // Check pool health
             if (_modelPool.AvailableCount == 0)

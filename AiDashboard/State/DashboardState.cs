@@ -278,10 +278,10 @@ public class DashboardState
         }
 
         // Hook up domain auto-registration callback BEFORE processing files
-        // This ensures "Webhallen" gets registered when importing "Webhallen - Köpvillkor" fragments
+        // This ensures "Webhallen" gets registered when importing "Webhallen - Kï¿½pvillkor" fragments
         InboxService.OnDomainDiscovered = async (category, categoryType) =>
         {
-            // Extract domain name from category (e.g., "Webhallen" from "##Webhallen - Köpvillkor")
+            // Extract domain name from category (e.g., "Webhallen" from "##Webhallen - Kï¿½pvillkor")
             // The DomainDetector will strip the "##" prefix
             var domainDetector = _chatService?.DomainDetector;
             if (domainDetector != null)
@@ -315,7 +315,7 @@ public class DashboardState
     }
 
     // Workspace operations (delegating to WorkspaceService). All agent file operations are
-    // confined to whichever workspace is active — switching here re-confines the file agent.
+    // confined to whichever workspace is active ï¿½ switching here re-confines the file agent.
     public IReadOnlyList<WorkspaceInfo> GetWorkspaces() =>
         WorkspaceService?.GetWorkspaces() ?? Array.Empty<WorkspaceInfo>();
 
@@ -429,7 +429,8 @@ public class DashboardState
                 PersonalityService?.CurrentPersonality,
                 SettingsService.UseGpu,
                 SettingsService.GpuLayers,
-                SettingsService.TimeoutSeconds);
+                SettingsService.TimeoutSeconds,
+                SettingsService.PauseTimeoutSeconds);
         }
         catch (Exception ex)
         {
@@ -458,7 +459,8 @@ public class DashboardState
                 PersonalityService?.CurrentPersonality,
                 SettingsService.UseGpu,
                 SettingsService.GpuLayers,
-                SettingsService.TimeoutSeconds);  // Use global timeout setting
+                SettingsService.TimeoutSeconds,
+                SettingsService.PauseTimeoutSeconds);  // Use global timeout setting
         }
         catch (Exception ex)
         {
@@ -486,7 +488,8 @@ public class DashboardState
                 PersonalityService?.CurrentPersonality,
                 SettingsService.UseGpu,
                 SettingsService.GpuLayers,
-                SettingsService.TimeoutSeconds);  // Use global timeout setting
+                SettingsService.TimeoutSeconds,
+                SettingsService.PauseTimeoutSeconds);  // Use global timeout setting
         }
         catch (Exception ex)
         {

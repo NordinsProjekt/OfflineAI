@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Services.FileAgent;
+using Services.Tests.TestHelpers;
 
 namespace Services.Tests.FileAgent;
 
@@ -525,5 +526,388 @@ public class FileAgentServiceTests : IDisposable
 
         result.ResultType.Should().Be(FileAgentResultType.Error);
         result.IsSuccess.Should().BeFalse();
+    }
+
+    // ── /skapa via ExecuteAsync ───────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_Skapa_CreatesEmptyFileAndReturnsSuccess()
+    {
+        var result = await _sut.ExecuteAsync("/skapa notes.txt");
+
+        result.IsSuccess.Should().BeTrue();
+        result.ResultType.Should().Be(FileAgentResultType.FileCreated);
+        result.Message.Should().Contain("notes.txt");
+        File.Exists(Path.Combine(_tempDir, "notes.txt")).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SkapaExistingFile_OverwritesWithEmptyContent()
+    {
+        await CreateFileAsync("notes.txt", "gammalt innehåll");
+
+        var result = await _sut.ExecuteAsync("/skapa notes.txt");
+
+        result.IsSuccess.Should().BeTrue();
+        (await File.ReadAllTextAsync(Path.Combine(_tempDir, "notes.txt"))).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_SkapaMissingFilename_ReturnsFailureAskingForFilename()
+    {
+        var result = await _sut.ExecuteAsync("/skapa");
+
+        result.IsSuccess.Should().BeFalse();
+        result.ResultType.Should().Be(FileAgentResultType.Error);
+        result.Message.Should().Contain("filnamn");
+    }
+
+    // ── /fyll via ExecuteAsync ────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_Fyll_ReturnsFillRequestedWithPromptAndTargetFilename()
+    {
+        var result = await _sut.ExecuteAsync("/fyll config.txt Skriv en enkel konfiguration");
+
+        result.ResultType.Should().Be(FileAgentResultType.FillRequested);
+        result.IsSuccess.Should().BeTrue();
+        result.TargetFilename.Should().Be("config.txt");
+        result.LlmPrompt.Should().Contain("config.txt");
+        result.LlmPrompt.Should().Contain("Skriv en enkel konfiguration");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_FyllMissingDescription_ReturnsFailure()
+    {
+        var result = await _sut.ExecuteAsync("/fyll config.txt");
+
+        result.IsSuccess.Should().BeFalse();
+        result.ResultType.Should().Be(FileAgentResultType.Error);
+    }
+
+    // ── /läs via ExecuteAsync ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_Las_ReturnsFileReadWithInstructionAndContent()
+    {
+        await CreateFileAsync("notes.txt", "Hej världen");
+
+        var result = await _sut.ExecuteAsync("/läs notes.txt Sammanfatta innehållet.");
+
+        result.ResultType.Should().Be(FileAgentResultType.FileRead);
+        result.IsSuccess.Should().BeTrue();
+        result.InjectedContext.Should().Contain("Sammanfatta innehållet.");
+        result.InjectedContext.Should().Contain("Hej världen");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LasAsciiFallback_BehavesSameAsLäs()
+    {
+        await CreateFileAsync("notes.txt", "Hej världen");
+
+        var result = await _sut.ExecuteAsync("/las notes.txt Sammanfatta innehållet.");
+
+        result.ResultType.Should().Be(FileAgentResultType.FileRead);
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LasWithoutInstruction_ReturnsFailure()
+    {
+        await CreateFileAsync("notes.txt", "Hej världen");
+
+        var result = await _sut.ExecuteAsync("/läs notes.txt");
+
+        result.IsSuccess.Should().BeFalse();
+        result.ResultType.Should().Be(FileAgentResultType.Error);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LasMissingFile_ReturnsFailureSuggestingSkapa()
+    {
+        var result = await _sut.ExecuteAsync("/läs saknas.txt Sammanfatta innehållet.");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("/skapa");
+    }
+
+    // ── /lista via ExecuteAsync ───────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_ListaEmptyDirectory_ReturnsNoFilesMessage()
+    {
+        var result = await _sut.ExecuteAsync("/lista");
+
+        result.IsSuccess.Should().BeTrue();
+        result.ResultType.Should().Be(FileAgentResultType.FilesListed);
+        result.InjectedContext.Should().Be("Inga filer finns i agentkatalogen.");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ListaWithFiles_ReturnsCommaSeparatedListing()
+    {
+        await CreateFileAsync("a.txt", "x");
+        await CreateFileAsync("b.txt", "y");
+
+        var result = await _sut.ExecuteAsync("/lista");
+
+        result.InjectedContext.Should().Contain("a.txt").And.Contain("b.txt");
+    }
+
+    // ── Regression: "/lista" vs. "/listaXXX" (ExecuteAsync must agree with IsCommand) ────
+
+    [Fact]
+    public void IsCommand_UnknownWordStartingWithListaPrefix_ReturnsFalse()
+    {
+        _sut.IsCommand("/listafoo").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UnknownWordStartingWithListaPrefix_IsNotTreatedAsListCommand()
+    {
+        // Regression test: ExecuteAsync's "/lista" match used to be StartsWith("/lista") with no
+        // trailing space, looser than IsCommand's StartsWith("/lista "). That meant "/listafoo"
+        // would silently run the file listing instead of being rejected as an unrecognised command.
+        var result = await _sut.ExecuteAsync("/listafoo");
+
+        result.ResultType.Should().Be(FileAgentResultType.NotACommand);
+    }
+
+    // ── Regression: bare command name with no argument must still be recognised ──────────
+
+    [Theory]
+    [InlineData("/skapa")]
+    [InlineData("/fyll")]
+    [InlineData("/läs")]
+    [InlineData("/las")]
+    [InlineData("/redigera")]
+    public void IsCommand_RecognisesBareCommandNameWithoutArguments(string input)
+    {
+        // These commands all require an argument, but the bare command name on its own (e.g.
+        // just "/skapa", no filename) must still be recognised as an attempted command so the
+        // user gets a helpful validation message instead of it silently falling through to the
+        // LLM as an ordinary chat message.
+        _sut.IsCommand(input).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("/skapa")]
+    [InlineData("/fyll")]
+    [InlineData("/läs")]
+    [InlineData("/las")]
+    [InlineData("/redigera")]
+    public async Task ExecuteAsync_BareCommandNameWithoutArguments_ReturnsHelpfulErrorInsteadOfNotACommand(string input)
+    {
+        var result = await _sut.ExecuteAsync(input);
+
+        result.ResultType.Should().Be(FileAgentResultType.Error);
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().NotBeNullOrEmpty();
+    }
+
+    // ── ReadPdfFileAsync ──────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ReadPdfFileAsync_ExistingPdf_ExtractsTextWithPageMarker()
+    {
+        var path = Path.Combine(_tempDir, "rapport.pdf");
+        await File.WriteAllBytesAsync(path, MinimalPdfBuilder.CreateWithText("Hello PDF world"));
+
+        var result = await _sut.ReadPdfFileAsync("rapport.pdf");
+
+        result.IsSuccess.Should().BeTrue();
+        result.ResultType.Should().Be(FileAgentResultType.FileRead);
+        result.InjectedContext.Should().Contain("Hello PDF world");
+        result.InjectedContext.Should().Contain("Page 1");
+    }
+
+    [Fact]
+    public async Task ReadPdfFileAsync_MissingFile_ReturnsFailure()
+    {
+        var result = await _sut.ReadPdfFileAsync("saknas.pdf");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("hittades inte");
+    }
+
+    [Fact]
+    public async Task ReadPdfFileAsync_NonPdfExtension_ReturnsFailure()
+    {
+        await CreateFileAsync("notes.txt", "hej");
+
+        var result = await _sut.ReadPdfFileAsync("notes.txt");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("inte en PDF");
+    }
+
+    [Fact]
+    public async Task ReadPdfFileAsync_CorruptPdf_ReturnsFailureInsteadOfThrowing()
+    {
+        var path = Path.Combine(_tempDir, "trasig.pdf");
+        await File.WriteAllTextAsync(path, "det här är inte en giltig PDF");
+
+        var result = await _sut.ReadPdfFileAsync("trasig.pdf");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("trasig.pdf");
+    }
+
+    [Fact]
+    public async Task ReadPdfFileAsync_EmptyFilename_ReturnsFailure()
+    {
+        var result = await _sut.ReadPdfFileAsync("");
+
+        result.IsSuccess.Should().BeFalse();
+    }
+
+    // ── /läs-pdf command ──────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("/läs-pdf rapport.pdf Sammanfatta innehållet")]
+    [InlineData("/las-pdf rapport.pdf Sammanfatta innehållet")]
+    public void IsCommand_RecognisesLasPdf(string input)
+    {
+        _sut.IsCommand(input).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LasPdf_ReturnsInstructionCombinedWithExtractedText()
+    {
+        var path = Path.Combine(_tempDir, "rapport.pdf");
+        await File.WriteAllBytesAsync(path, MinimalPdfBuilder.CreateWithText("Kvartalsresultat"));
+
+        var result = await _sut.ExecuteAsync("/läs-pdf rapport.pdf Sammanfatta innehållet");
+
+        result.IsSuccess.Should().BeTrue();
+        result.ResultType.Should().Be(FileAgentResultType.FileRead);
+        result.InjectedContext.Should().Contain("Sammanfatta innehållet");
+        result.InjectedContext.Should().Contain("Kvartalsresultat");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LasPdfWithoutInstruction_ReturnsFailure()
+    {
+        var result = await _sut.ExecuteAsync("/läs-pdf rapport.pdf");
+
+        result.IsSuccess.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LasPdfMissingFile_ReturnsFailure()
+    {
+        var result = await _sut.ExecuteAsync("/läs-pdf saknas.pdf Sammanfatta innehållet");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("hittades inte");
+    }
+
+    // ── SaveUploadedFileAsync ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task SaveUploadedFileAsync_ValidStream_WritesFileByteForByte()
+    {
+        var bytes = MinimalPdfBuilder.CreateWithText("Uploaded content");
+        using var stream = new MemoryStream(bytes);
+
+        var result = await _sut.SaveUploadedFileAsync("uploaded.pdf", stream);
+
+        result.IsSuccess.Should().BeTrue();
+        var written = await File.ReadAllBytesAsync(Path.Combine(_tempDir, "uploaded.pdf"));
+        written.Should().Equal(bytes);
+    }
+
+    [Fact]
+    public async Task SaveUploadedFileAsync_ExistingFile_Overwrites()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "notes.txt"), "gammalt innehåll");
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("nytt innehåll"));
+
+        await _sut.SaveUploadedFileAsync("notes.txt", stream);
+
+        var written = await File.ReadAllTextAsync(Path.Combine(_tempDir, "notes.txt"));
+        written.Should().Be("nytt innehåll");
+    }
+
+    [Fact]
+    public async Task SaveUploadedFileAsync_EmptyFilename_ReturnsFailure()
+    {
+        using var stream = new MemoryStream();
+
+        var result = await _sut.SaveUploadedFileAsync("", stream);
+
+        result.IsSuccess.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SaveUploadedFileAsync_PathTraversalFilename_IsConfinedToBaseDirectory()
+    {
+        // The directory component is stripped to a bare filename, so the upload lands safely
+        // inside the workspace instead of escaping it (path-traversal safety).
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes("payload"));
+
+        var result = await _sut.SaveUploadedFileAsync("../../evil.txt", stream);
+
+        result.IsSuccess.Should().BeTrue();
+        File.Exists(Path.Combine(_tempDir, "evil.txt")).Should().BeTrue();
+        File.Exists(Path.Combine(Path.GetDirectoryName(_tempDir)!, "evil.txt")).Should().BeFalse();
+    }
+
+    // ── TryFindAgentCommand ───────────────────────────────────────────────
+
+    [Fact]
+    public void TryFindAgentCommand_CommandAloneOnItsOwnLine_IsFound()
+    {
+        var response = "Här är svaret.\n/läs-pdf rapport.pdf Sammanfatta innehållet\n";
+
+        var found = _sut.TryFindAgentCommand(response, out var command);
+
+        found.Should().BeTrue();
+        command.Should().Be("/läs-pdf rapport.pdf Sammanfatta innehållet");
+    }
+
+    [Fact]
+    public void TryFindAgentCommand_CommandNarratedInStraightQuotes_IsFoundAsFallback()
+    {
+        // Some models explain their intent instead of writing the command alone on its own line.
+        var response = "Based on the context provided, I will use the " +
+            "\"/läs-pdf quarterly-report.pdf Sammanfatta innehållet\" command to fulfill your request.";
+
+        var found = _sut.TryFindAgentCommand(response, out var command);
+
+        found.Should().BeTrue();
+        command.Should().Be("/läs-pdf quarterly-report.pdf Sammanfatta innehållet");
+    }
+
+    [Fact]
+    public void TryFindAgentCommand_CommandNarratedInCurlyQuotes_IsFoundAsFallback()
+    {
+        var response = "Jag använder verktyget “/läs rapport.txt Sammanfatta innehållet” nu.";
+
+        var found = _sut.TryFindAgentCommand(response, out var command);
+
+        found.Should().BeTrue();
+        command.Should().Be("/läs rapport.txt Sammanfatta innehållet");
+    }
+
+    [Fact]
+    public void TryFindAgentCommand_NoCommandAnywhere_ReturnsFalse()
+    {
+        var response = "Stockholm är huvudstaden i Sverige.";
+
+        var found = _sut.TryFindAgentCommand(response, out var command);
+
+        found.Should().BeFalse();
+        command.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TryFindAgentCommand_QuotedTextThatIsNotACommand_ReturnsFalse()
+    {
+        var response = "Filen innehåller texten \"hej och välkommen\" på första raden.";
+
+        var found = _sut.TryFindAgentCommand(response, out var command);
+
+        found.Should().BeFalse();
     }
 }

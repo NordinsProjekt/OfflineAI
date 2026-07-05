@@ -3,6 +3,7 @@ using AiDashboard.State;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
+using Services.FileAgent;
 using ChatArea = AiDashboard.Components.Pages.Components.ChatArea;
 using ChatTopBar = AiDashboard.Components.Pages.Components.ChatTopBar;
 using ChatMessages = AiDashboard.Components.Pages.Components.ChatMessages;
@@ -12,9 +13,28 @@ namespace Presentation.AiDashboard.Tests.Components;
 
 /// <summary>
 /// Tests for ChatArea component to ensure UI remains consistent across features.
+/// ChatArea renders ChatComposer, which embeds <c>AgentFileUpload</c> — that component injects
+/// <see cref="IFileAgentService"/>, so a real instance rooted at a per-test temp directory is
+/// registered for every test.
 /// </summary>
-public class ChatAreaTests : TestContext
+public class ChatAreaTests : TestContext, IDisposable
 {
+    private readonly string _tempDir;
+
+    public ChatAreaTests()
+    {
+        _tempDir = Path.Combine(Path.GetTempPath(), "ChatAreaTests_" + Guid.NewGuid());
+        Services.AddSingleton<IFileAgentService>(new FileAgentService(_tempDir));
+    }
+
+    public new void Dispose()
+    {
+        if (Directory.Exists(_tempDir))
+            Directory.Delete(_tempDir, recursive: true);
+        base.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
     private DashboardState CreateMockDashboardState()
     {
         var state = new DashboardState();

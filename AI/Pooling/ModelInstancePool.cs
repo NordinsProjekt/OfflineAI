@@ -22,6 +22,7 @@ public class ModelInstancePool : IModelInstancePool
     private string _modelPath;
     private readonly int _maxInstances;
     private int _timeoutMs;
+    private int _pauseTimeoutMs = 10000;
     private bool _disposed;
     private int _totalInstancesCreated = 0;
     private readonly object _lock = new object();
@@ -38,7 +39,7 @@ public class ModelInstancePool : IModelInstancePool
                 throw new ArgumentOutOfRangeException(nameof(value), "Timeout must be between 1 and 300 seconds (1000-300000ms)");
             
             _timeoutMs = value;
-            
+
             // Update timeout on all existing instances in the pool
             lock (_lock)
             {
@@ -47,8 +48,31 @@ public class ModelInstancePool : IModelInstancePool
                     instance.TimeoutMs = value;
                 }
             }
-            
+
             Console.WriteLine($"[*] Pool timeout updated to {value}ms ({value/1000}s)");
+        }
+    }
+
+    public int PauseTimeoutMs
+    {
+        get => _pauseTimeoutMs;
+        set
+        {
+            if (value < 1000 || value > 120000)
+                throw new ArgumentOutOfRangeException(nameof(value), "Pause timeout must be between 1 and 120 seconds (1000-120000ms)");
+
+            _pauseTimeoutMs = value;
+
+            // Update pause timeout on all existing instances in the pool
+            lock (_lock)
+            {
+                foreach (var instance in _availableInstances)
+                {
+                    instance.PauseTimeoutMs = value;
+                }
+            }
+
+            Console.WriteLine($"[*] Pool pause timeout updated to {value}ms ({value/1000}s)");
         }
     }
 
@@ -86,10 +110,11 @@ public class ModelInstancePool : IModelInstancePool
                     progressCallback?.Invoke(instanceNumber, _maxInstances);
                     
                     var instance = await PersistentLlmProcess.CreateAsync(
-                        _llmPath, 
-                        _modelPath, 
+                        _llmPath,
+                        _modelPath,
                         _timeoutMs);
-                    
+                    instance.PauseTimeoutMs = _pauseTimeoutMs;
+
                     lock (_lock)
                     {
                         _availableInstances.Add(instance);
@@ -208,7 +233,8 @@ public class ModelInstancePool : IModelInstancePool
                 {
                     Console.WriteLine($"[*] Creating replacement instance...");
                     instance = await PersistentLlmProcess.CreateAsync(_llmPath, _modelPath, _timeoutMs);
-                    
+                    instance.PauseTimeoutMs = _pauseTimeoutMs;
+
                     lock (_lock)
                     {
                         _totalInstancesCreated++;
@@ -271,7 +297,8 @@ public class ModelInstancePool : IModelInstancePool
                 try
                 {
                     var replacement = await PersistentLlmProcess.CreateAsync(_llmPath, _modelPath, _timeoutMs);
-                    
+                    replacement.PauseTimeoutMs = _pauseTimeoutMs;
+
                     bool added = false;
                     lock (_lock)
                     {
