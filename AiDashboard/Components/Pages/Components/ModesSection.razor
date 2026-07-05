@@ -19,6 +19,17 @@
     <label class="oa-switch-row">
         <input type="checkbox" @bind="Dashboard.SettingsService.UseGpu">
         <span class="oa-switch"></span>
-        <span>Use GPU (34 layers)</span>
+        <span>Use GPU</span>
     </label>
+    @if (Dashboard.SettingsService.UseGpu)
+    {
+        <div class="oa-field oa-gpu-layers-field">
+            <label title="Number of model layers to offload to the GPU (llama.cpp -ngl). Max offloads all layers and auto-adapts to whichever model is selected, since llama.cpp clamps it to the model's actual layer count. Lower it only to intentionally keep some layers on CPU.">
+                GPU Layers: @(Dashboard.SettingsService.GpuLayers >= 99 ? "Max (auto)" : Dashboard.SettingsService.GpuLayers.ToString())
+            </label>
+            <input type="range" min="0" max="99" class="oa-gpu-layers-slider"
+                   @bind="Dashboard.SettingsService.GpuLayers" @bind:event="oninput">
+            <small class="oa-hint">Max auto-adjusts to any model's actual layer count. Lower it to keep some layers on CPU.</small>
+        </div>
+    }
 </CollapsibleSection>

@@ -199,9 +199,24 @@ public class GenerationSettingsService
     }
 
     /// <summary>
-    /// Get GPU layers based on UseGpu toggle (34 layers when ON, 0 when OFF)
+    /// Number of model layers to offload to the GPU via llama.cpp's <c>-ngl</c> flag, used when
+    /// <see cref="UseGpu"/> is on. Default: 99 — llama.cpp's well-known "offload all layers"
+    /// sentinel, which it automatically clamps to however many layers the selected model
+    /// actually has, so switching models never requires re-tuning this by hand. Lower it only to
+    /// intentionally keep some layers on CPU (e.g. to fit a specific VRAM budget).
     /// </summary>
-    public int GpuLayers => UseGpu ? 34 : 0;
+    private int _gpuLayers = 99;
+    public int GpuLayers
+    {
+        get => _gpuLayers;
+        set
+        {
+            var clampedValue = Math.Clamp(value, 0, 99);
+            if (_gpuLayers == clampedValue) return;
+            _gpuLayers = clampedValue;
+            NotifyStateChanged();
+        }
+    }
 
     /// <summary>
     /// Create a GenerationSettings object from current settings
@@ -257,7 +272,8 @@ public class GenerationSettingsService
         DebugMode = false;
         RagTopK = 3;
         RagMinRelevanceScore = 0.5;
-        UseGpu = true; // Default to GPU enabled with 34 layers
+        UseGpu = true; // Default to GPU enabled
+        GpuLayers = 99; // Offload all layers — auto-adapts to whichever model is loaded
     }
 
     private void NotifyStateChanged() => OnChange?.Invoke();

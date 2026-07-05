@@ -169,6 +169,33 @@ select:hover,
     transform: scale(1.1);
 }
 
+.oa-gpu-layers-field {
+    margin-top: 4px;
+}
+
+.oa-gpu-layers-slider {
+    width: 100%;
+    accent-color: var(--accent-primary);
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(59, 130, 246, 0.1);
+    cursor: pointer;
+}
+
+.oa-gpu-layers-slider::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    cursor: pointer;
+    box-shadow: var(--shadow-md);
+    transition: transform 0.2s ease;
+}
+
+.oa-gpu-layers-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+}
+
 /* Switch */
 .oa-switch-row {
     display: flex;

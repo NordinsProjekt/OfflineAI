@@ -39,7 +39,9 @@
             Temperature: @Dashboard.SettingsService.Temperature.ToString("0.0")
         </span>
         <span class="oa-badge @(Dashboard.SettingsService.UseGpu ? "orange" : "gray")">
-            GPU: @(Dashboard.SettingsService.UseGpu ? "ON (34)" : "OFF (0)")
+            GPU: @(Dashboard.SettingsService.UseGpu
+                ? $"ON ({(Dashboard.SettingsService.GpuLayers >= 99 ? "Max" : Dashboard.SettingsService.GpuLayers.ToString())})"
+                : "OFF (0)")
         </span>
     </div>
 </div>

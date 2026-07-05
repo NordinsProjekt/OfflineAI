@@ -127,8 +127,28 @@ public class ChatTopBarTests : TestContext
         var badges = cut.FindAll(".oa-badge");
         var gpuBadge = badges.FirstOrDefault(b => b.TextContent.Contains("GPU:"));
         Assert.NotNull(gpuBadge);
-        Assert.Contains("GPU: ON (34)", gpuBadge.TextContent);
+        // Default GpuLayers is 99 — llama.cpp's "offload all layers" sentinel — shown as "Max"
+        Assert.Contains("GPU: ON (Max)", gpuBadge.TextContent);
         Assert.True(gpuBadge.ClassList.Contains("orange"));
+    }
+
+    [Fact]
+    public void ChatTopBar_Displays_GpuLayersCount_WhenBelowMax()
+    {
+        // Arrange
+        var dashboardState = CreateMockDashboardState();
+        dashboardState.SettingsService.UseGpu = true;
+        dashboardState.SettingsService.GpuLayers = 40;
+        Services.AddSingleton(dashboardState);
+
+        // Act
+        var cut = RenderComponent<ChatTopBar>();
+
+        // Assert
+        var badges = cut.FindAll(".oa-badge");
+        var gpuBadge = badges.FirstOrDefault(b => b.TextContent.Contains("GPU:"));
+        Assert.NotNull(gpuBadge);
+        Assert.Contains("GPU: ON (40)", gpuBadge.TextContent);
     }
 
     [Fact]
