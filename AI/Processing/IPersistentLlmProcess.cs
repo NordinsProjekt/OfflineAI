@@ -27,5 +27,6 @@ public interface IPersistentLlmProcess : IDisposable
         float presencePenalty = 0.2f,
         float frequencyPenalty = 0.2f,
         bool useGpu = false,
-        int gpuLayers = 0);
+        int gpuLayers = 0,
+        int contextSize = 2048);
 }

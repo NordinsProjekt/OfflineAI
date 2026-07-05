@@ -39,9 +39,9 @@ public sealed class Gemma4CliOptions
     /// <summary>
     /// KV-cache context size in tokens (<c>-c</c>).
     /// Gemma 4 26B A4B supports up to 256 K tokens.
-    /// Default: 4096
+    /// Default: 256 000
     /// </summary>
-    public int ContextSize { get; init; } = 4096;
+    public int ContextSize { get; init; } = 256_000;
 
     /// <summary>
     /// Maximum new tokens to generate per call (<c>-n</c>).

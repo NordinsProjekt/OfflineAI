@@ -38,6 +38,16 @@ public class FileAgentService : IFileAgentService
     private const string EditTagName = "REDIGERA";
     private const string ReplaceKeyword = "RAD";
     private const string InsertAfterKeyword = "INFOGA_EFTER";
+
+    /// <summary>
+    /// Maximum characters of file/PDF content injected into a single LLM prompt. Without a cap,
+    /// a large document (e.g. a full PDF book) gets embedded whole into the tool-result prompt;
+    /// once that prompt exceeds the model's context window, llama-cli silently truncates or
+    /// returns an empty completion instead of an answer. 200 000 chars (~50k tokens) leaves
+    /// generous headroom for the tools system prompt and the model's own answer within the
+    /// Gemma 4 model's 256K-token context window (see Gemma4CliOptions.ContextSize).
+    /// </summary>
+    private const int MaxInjectedContentChars = 200_000;
     private const string InsertBeforeKeyword = "INFOGA_FÖRE";
     private const string InsertBeforeKeywordAscii = "INFOGA_FORE";
     private static readonly Regex EditBlockRegex = new(
@@ -242,7 +252,7 @@ public class FileAgentService : IFileAgentService
 
         var promptForLlm =
             $"Instruktion: {instruction}\n\n" +
-            $"Filens innehåll ({Path.GetFileName(path)}):\n{content}";
+            $"Filens innehåll ({Path.GetFileName(path)}):\n{TruncateForLlm(content)}";
 
         return FileAgentResult.ReadSuccess(
             $"✓ Fil läst: {Path.GetFileName(path)}",
@@ -270,7 +280,7 @@ public class FileAgentService : IFileAgentService
 
         return FileAgentResult.ReadSuccess(
             $"✓ Fil läst: {Path.GetFileName(path)}",
-            content);
+            TruncateForLlm(content));
     }
 
     /// <inheritdoc/>
@@ -348,6 +358,25 @@ public class FileAgentService : IFileAgentService
     }
 
     /// <summary>
+    /// Truncates <paramref name="content"/> to <see cref="MaxInjectedContentChars"/> at a word
+    /// boundary, appending a note so the model (and user) knows the document was cut short
+    /// instead of silently answering from a partial view of it.
+    /// </summary>
+    private static string TruncateForLlm(string content)
+    {
+        if (content.Length <= MaxInjectedContentChars)
+            return content;
+
+        var truncated = content[..MaxInjectedContentChars];
+        var lastSpace = truncated.LastIndexOf(' ');
+        if (lastSpace > MaxInjectedContentChars - 200)
+            truncated = truncated[..lastSpace];
+
+        return truncated +
+            $"\n\n[OBS: Innehållet har trunkerats — visar de första {truncated.Length} av {content.Length} tecken.]";
+    }
+
+    /// <summary>
     /// Extracts all page text from the PDF at <paramref name="path"/> via UglyToad.PdfPig, joining
     /// pages with a <c>--- Page N ---</c> marker. Returns the extracted content on success, or a
     /// <see cref="FileAgentResult"/> describing why extraction failed (corrupt file, no text, etc.).
@@ -370,7 +399,7 @@ public class FileAgentService : IFileAgentService
             if (string.IsNullOrWhiteSpace(content))
                 return (null, FileAgentResult.Failure($"Ingen text kunde extraheras ur PDF:en: {Path.GetFileName(path)}"));
 
-            return (content, null);
+            return (TruncateForLlm(content), null);
         }
         catch (Exception ex)
         {

@@ -2,11 +2,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Configuration;
 using Services.UI;
+using OfflineAI.Configuration;
 using OfflineAI.Modes;
 using Application.AI.Embeddings;
 using Services.Memory;
 using Application.AI.Pooling;
 using Services.Configuration;
+using Services.Language;
 using Infrastructure.Data.Dapper;
 using Microsoft.SemanticKernel.Embeddings;
 using System.Diagnostics;
@@ -83,6 +85,9 @@ namespace OfflineAI
                     
                     // Register persistence service
                     services.AddSingleton<VectorMemoryPersistenceService>();
+
+                    // Register stop words service (needed by DatabaseVectorMemory for keyword extraction)
+                    services.AddSingleton<ILanguageStopWordsService, LanguageStopWordsService>();
                     
                     // Register LLM sync service
                     services.AddSingleton(provider =>

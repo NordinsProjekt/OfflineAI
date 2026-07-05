@@ -631,6 +631,31 @@ public class FileAgentServiceTests : IDisposable
         result.Message.Should().Contain("/skapa");
     }
 
+    [Fact]
+    public async Task ExecuteAsync_LasWithHugeFile_TruncatesContentWithNotice()
+    {
+        var hugeContent = new string('a', 250_000);
+        var path = Path.Combine(_tempDir, "stor.txt");
+        await File.WriteAllTextAsync(path, hugeContent);
+
+        var result = await _sut.ExecuteAsync("/läs stor.txt Sammanfatta innehållet.");
+
+        result.IsSuccess.Should().BeTrue();
+        result.InjectedContext.Should().NotContain(new string('a', 250_000));
+        result.InjectedContext.Should().Contain("OBS: Innehållet har trunkerats");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LasWithSmallFile_DoesNotTruncate()
+    {
+        await CreateFileAsync("liten.txt", "Ett kort textinnehåll som inte ska trunkeras.");
+
+        var result = await _sut.ExecuteAsync("/läs liten.txt Sammanfatta innehållet.");
+
+        result.IsSuccess.Should().BeTrue();
+        result.InjectedContext.Should().NotContain("OBS: Innehållet har trunkerats");
+    }
+
     // ── /lista via ExecuteAsync ───────────────────────────────────────────
 
     [Fact]

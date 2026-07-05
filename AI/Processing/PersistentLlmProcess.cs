@@ -94,7 +94,8 @@ public class PersistentLlmProcess : IPersistentLlmProcess
         float presencePenalty = 0.2f,
         float frequencyPenalty = 0.2f,
         bool useGpu = false,
-        int gpuLayers = 0)
+        int gpuLayers = 0,
+        int contextSize = 2048)
     {
         if (_disposed)
             throw new ObjectDisposedException(nameof(PersistentLlmProcess));
@@ -125,8 +126,11 @@ public class PersistentLlmProcess : IPersistentLlmProcess
             // Use -f (prompt file) instead of -p (inline prompt) to safely pass any content
             processInfo.Arguments += $" -f \"{tempPromptFile}\"";
 
-            // Set context size to prevent memory issues (2048 tokens = ~1500 chars of context)
-            processInfo.Arguments += $" -c 2048";
+            // Context window size (tokens) — must be large enough to hold the system prompt,
+            // any injected tool/document content, and the user question, or llama-cli will
+            // silently truncate the prompt and can return an empty completion. Configurable via
+            // AppConfiguration.Llm.ContextSize (see AiChatServicePooled.QueryLlmAsync).
+            processInfo.Arguments += $" -c {contextSize}";
             
             // Configure GPU offloading
             // -ngl 0 = CPU only (no GPU layers)

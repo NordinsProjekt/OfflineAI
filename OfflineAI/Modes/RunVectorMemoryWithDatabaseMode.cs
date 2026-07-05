@@ -4,8 +4,10 @@ using Application.AI.Models;
 using Application.AI.Pooling;
 using Entities;
 using Microsoft.Extensions.DependencyInjection;
+using OfflineAI.Configuration;
 using Services.Configuration;
 using Services.Interfaces;
+using Services.Language;
 using Services.Memory;
 using Services.Repositories;
 using Services.UI;
@@ -19,6 +21,20 @@ namespace OfflineAI.Modes;
 
 internal static class RunVectorMemoryWithDatabaseMode
 {
+    /// <summary>
+    /// Services shared across this mode's helper methods. Replaces DatabaseVectorMemory's
+    /// predecessor (an in-memory VectorMemory class) with the current database-backed
+    /// architecture: VectorMemoryPersistenceService (writes) + DatabaseVectorMemory (on-demand
+    /// search, constructed from Repository/StopWordsService — no upfront "loading" required).
+    /// </summary>
+    private readonly record struct RequiredServices(
+        DatabaseConfig DbConfig,
+        SemanticEmbeddingService EmbeddingService,
+        VectorMemoryPersistenceService PersistenceService,
+        ModelInstancePool ModelPool,
+        IVectorMemoryRepository Repository,
+        ILanguageStopWordsService StopWordsService);
+
     internal static async Task RunAsync(IServiceProvider serviceProvider)
     {
         DisplayService.ShowVectorMemoryDatabaseHeader();
@@ -53,18 +69,15 @@ internal static class RunVectorMemoryWithDatabaseMode
         return serviceProvider.GetRequiredService<AppConfiguration>();
     }
 
-    private static (
-        DatabaseConfig DbConfig,
-        SemanticEmbeddingService EmbeddingService,
-        VectorMemoryPersistenceService PersistenceService,
-        ModelInstancePool ModelPool
-    ) GetRequiredServices(IServiceProvider serviceProvider)
+    private static RequiredServices GetRequiredServices(IServiceProvider serviceProvider)
     {
-        return (
+        return new RequiredServices(
             DbConfig: serviceProvider.GetRequiredService<DatabaseConfig>(),
             EmbeddingService: serviceProvider.GetRequiredService<SemanticEmbeddingService>(),
             PersistenceService: serviceProvider.GetRequiredService<VectorMemoryPersistenceService>(),
-            ModelPool: serviceProvider.GetRequiredService<ModelInstancePool>()
+            ModelPool: serviceProvider.GetRequiredService<ModelInstancePool>(),
+            Repository: serviceProvider.GetRequiredService<IVectorMemoryRepository>(),
+            StopWordsService: serviceProvider.GetRequiredService<ILanguageStopWordsService>()
         );
     }
 
@@ -72,11 +85,7 @@ internal static class RunVectorMemoryWithDatabaseMode
 
     #region System Initialization
 
-    private static async Task InitializeSystemAsync(
-        (DatabaseConfig DbConfig,
-         SemanticEmbeddingService EmbeddingService,
-         VectorMemoryPersistenceService PersistenceService,
-         ModelInstancePool ModelPool) services)
+    private static async Task InitializeSystemAsync(RequiredServices services)
     {
         // Display embedding service info
         DisplayService.ShowInitializingEmbeddingService();
@@ -120,14 +129,11 @@ internal static class RunVectorMemoryWithDatabaseMode
 
     private static async Task ProcessInboxFilesAsync(
         AppConfiguration config,
-        (DatabaseConfig DbConfig,
-         SemanticEmbeddingService EmbeddingService,
-         VectorMemoryPersistenceService PersistenceService,
-         ModelInstancePool ModelPool) services)
+        RequiredServices services)
     {
         DisplayService.ShowSmartFileProcessing();
         
-        var fileWatcher = new KnowledgeFileWatcher(config.Folders.InboxFolder, config.Folders.ArchiveFolder);
+        var fileWatcher = new MultiFormatFileWatcher(config.Folders.InboxFolder, config.Folders.ArchiveFolder);
         var newFiles = await fileWatcher.DiscoverNewFilesAsync();
         
         if (newFiles.Any())
@@ -161,33 +167,32 @@ internal static class RunVectorMemoryWithDatabaseMode
 
     #region Memory Loading
 
-    private static async Task<VectorMemory> LoadOrCreateVectorMemoryAsync(
-        (DatabaseConfig DbConfig,
-         SemanticEmbeddingService EmbeddingService,
-         VectorMemoryPersistenceService PersistenceService,
-         ModelInstancePool ModelPool) services,
+    private static async Task<ISearchableMemory> LoadOrCreateVectorMemoryAsync(
+        RequiredServices services,
         AppConfiguration config)
     {
         // Show existing collections
         await DisplayExistingCollectionsAsync(services.PersistenceService);
 
-        // Load or create vector memory
-        VectorMemory vectorMemory;
         var collectionName = config.Debug.CollectionName;
-        
+
         if (await services.PersistenceService.CollectionExistsAsync(collectionName))
         {
             DisplayService.WriteLine($"\n[+] Loading existing collection: {collectionName}");
-            vectorMemory = await services.PersistenceService.LoadVectorMemoryAsync(collectionName);
         }
         else
         {
             DisplayService.ShowCollectionNotFound(collectionName);
             DisplayService.WriteLine("Creating empty collection. Add files to inbox folder to populate.");
-            vectorMemory = new VectorMemory(services.EmbeddingService, collectionName);
         }
 
-        return vectorMemory;
+        // DatabaseVectorMemory queries the database on demand instead of loading fragments
+        // upfront, so "loading" and "creating" both just point it at the collection name.
+        return new DatabaseVectorMemory(
+            services.EmbeddingService,
+            services.Repository,
+            services.StopWordsService,
+            collectionName);
     }
 
     private static async Task DisplayExistingCollectionsAsync(VectorMemoryPersistenceService persistenceService)
@@ -225,16 +230,13 @@ internal static class RunVectorMemoryWithDatabaseMode
 
     private static async Task RunChatLoopAsync(
         AppConfiguration config,
-        (DatabaseConfig DbConfig,
-         SemanticEmbeddingService EmbeddingService,
-         VectorMemoryPersistenceService PersistenceService,
-         ModelInstancePool ModelPool) services,
-        VectorMemory vectorMemory)
+        RequiredServices services,
+        ISearchableMemory vectorMemory)
     {
         var conversationMemory = new SimpleMemory();
-        
+
         // Create chat service with current RAG mode and generation settings
-        AiChatServicePooled CreateChatService(VectorMemory memory) => new AiChatServicePooled(
+        AiChatServicePooled CreateChatService(ISearchableMemory memory) => new AiChatServicePooled(
             memory,
             conversationMemory,
             services.ModelPool,
@@ -242,12 +244,12 @@ internal static class RunVectorMemoryWithDatabaseMode
             debugMode: config.Debug.EnableDebugMode,
             enableRag: config.Debug.EnableRagMode,
             showPerformanceMetrics: config.Debug.ShowPerformanceMetrics);
-        
+
         var service = CreateChatService(vectorMemory);
 
-        DisplaySystemReady(vectorMemory, config, services.DbConfig);
+        await DisplaySystemReadyAsync(config, services.DbConfig, services.PersistenceService);
 
-        var fileWatcher = new KnowledgeFileWatcher(config.Folders.InboxFolder, config.Folders.ArchiveFolder);
+        var fileWatcher = new MultiFormatFileWatcher(config.Folders.InboxFolder, config.Folders.ArchiveFolder);
         bool serviceNeedsRecreation = false;
         bool vectorMemoryNeedsReload = false;
 
@@ -259,7 +261,7 @@ internal static class RunVectorMemoryWithDatabaseMode
                 DisplayService.WriteLine("\n[*] Reloading vector memory from new table...");
                 vectorMemory = await LoadOrCreateVectorMemoryAsync(services, config);
                 service = CreateChatService(vectorMemory);
-                DisplaySystemReady(vectorMemory, config, services.DbConfig);
+                await DisplaySystemReadyAsync(config, services.DbConfig, services.PersistenceService);
                 vectorMemoryNeedsReload = false;
                 serviceNeedsRecreation = false;
                 continue;
@@ -342,9 +344,10 @@ internal static class RunVectorMemoryWithDatabaseMode
 
             // Handle other debug commands
             if (config.Debug.EnableDebugMode && await HandleDebugCommandsAsync(
-                input, 
-                vectorMemory, 
-                services.PersistenceService, 
+                input,
+                vectorMemory,
+                services.PersistenceService,
+                services.Repository,
                 fileWatcher,
                 services.ModelPool,
                 config))
@@ -357,15 +360,17 @@ internal static class RunVectorMemoryWithDatabaseMode
         }
     }
 
-    private static void DisplaySystemReady(
-        VectorMemory vectorMemory,
+    private static async Task DisplaySystemReadyAsync(
         AppConfiguration config,
-        DatabaseConfig dbConfig)
+        DatabaseConfig dbConfig,
+        VectorMemoryPersistenceService persistenceService)
     {
+        var stats = await persistenceService.GetCollectionStatsAsync(config.Debug.CollectionName);
+
         // Display prominent table banner
-        DisplayService.ShowActiveTableBanner(dbConfig.ActiveTableName, vectorMemory.Count);
-        
-        DisplayService.ShowVectorMemoryInitialized(vectorMemory.Count);
+        DisplayService.ShowActiveTableBanner(dbConfig.ActiveTableName, stats.FragmentCount);
+
+        DisplayService.ShowVectorMemoryInitialized(stats.FragmentCount);
         
         // Show RAG mode status
         if (config.Debug.EnableRagMode)
@@ -409,9 +414,10 @@ internal static class RunVectorMemoryWithDatabaseMode
     /// </summary>
     private static async Task<bool> HandleDebugCommandsAsync(
         string input,
-        VectorMemory vectorMemory,
+        ISearchableMemory vectorMemory,
         VectorMemoryPersistenceService persistenceService,
-        KnowledgeFileWatcher fileWatcher,
+        IVectorMemoryRepository repository,
+        MultiFormatFileWatcher fileWatcher,
         ModelInstancePool modelPool,
         AppConfiguration config)
     {
@@ -423,13 +429,13 @@ internal static class RunVectorMemoryWithDatabaseMode
 
         if (input.StartsWith("/stats", StringComparison.OrdinalIgnoreCase))
         {
-            await HandleStatsCommandAsync(persistenceService, vectorMemory, config);
+            await HandleStatsCommandAsync(persistenceService, config);
             return true;
         }
 
         if (input.StartsWith("/lengths", StringComparison.OrdinalIgnoreCase))
         {
-            HandleLengthsCommandAsync(vectorMemory);
+            await HandleLengthsCommandAsync(repository, config.Debug.CollectionName);
             return true;
         }
 
@@ -460,7 +466,7 @@ internal static class RunVectorMemoryWithDatabaseMode
         return false;
     }
 
-    private static async Task HandleDebugQueryCommandAsync(string input, VectorMemory vectorMemory)
+    private static async Task HandleDebugQueryCommandAsync(string input, ISearchableMemory vectorMemory)
     {
         var query = input.Substring(6).Trim();
         if (!string.IsNullOrWhiteSpace(query))
@@ -486,7 +492,6 @@ internal static class RunVectorMemoryWithDatabaseMode
 
     private static async Task HandleStatsCommandAsync(
         VectorMemoryPersistenceService persistenceService,
-        VectorMemory vectorMemory,
         AppConfiguration config)
     {
         var stats = await persistenceService.GetCollectionStatsAsync(config.Debug.CollectionName);
@@ -494,18 +499,20 @@ internal static class RunVectorMemoryWithDatabaseMode
             stats.CollectionName,
             stats.FragmentCount,
             stats.HasEmbeddings,
-            vectorMemory.Count);
+            stats.FragmentCount);
     }
 
-    private static void HandleLengthsCommandAsync(VectorMemory vectorMemory)
+    private static async Task HandleLengthsCommandAsync(IVectorMemoryRepository repository, string collectionName)
     {
         DisplayService.WriteLine("\n+------------------------------------------------------------+");
         DisplayService.WriteLine("¦  Fragment Length Analysis                                  ¦");
         DisplayService.WriteLine("+------------------------------------------------------------+\n");
 
-        var fragments = vectorMemory.GetAllFragments();
+        // DatabaseVectorMemory doesn't hold fragments in memory (it queries on demand), so this
+        // debug view fetches the collection's raw entities straight from the repository instead.
+        var fragments = await repository.LoadByCollectionAsync(collectionName);
         var sortedFragments = fragments
-            .Select(f => new FragmentWithLength(f, (f as MemoryFragment)?.ContentLength ?? f.Content.Length))
+            .Select(f => new FragmentWithLength(f.Category, f.ContentLength))
             .OrderByDescending(x => x.Length)
             .ToList();
 
@@ -538,7 +545,7 @@ internal static class RunVectorMemoryWithDatabaseMode
         
         foreach (var item in sortedFragments.Take(10))
         {
-            var category = item.Fragment.Category;
+            var category = item.Category;
             var truncatedCategory = category.Length > 50 ? category.Substring(0, 47) + "..." : category;
             DisplayService.WriteLine($"{item.Length,5} chars - {truncatedCategory}");
         }
@@ -571,7 +578,7 @@ internal static class RunVectorMemoryWithDatabaseMode
         DisplayService.WriteLine();
     }
 
-    private record FragmentWithLength(IMemoryFragment Fragment, int Length);
+    private record FragmentWithLength(string Category, int Length);
     
     private static async Task HandleCollectionsCommandAsync(VectorMemoryPersistenceService persistenceService)
     {
@@ -595,7 +602,7 @@ internal static class RunVectorMemoryWithDatabaseMode
     }
 
     private static async Task HandleReloadCommandAsync(
-        KnowledgeFileWatcher fileWatcher,
+        MultiFormatFileWatcher fileWatcher,
         VectorMemoryPersistenceService persistenceService,
         AppConfiguration config)
     {
@@ -1258,7 +1265,7 @@ internal static class RunVectorMemoryWithDatabaseMode
     private static async Task ProcessNewFilesAsync(
         Dictionary<string, string> newFiles,
         VectorMemoryPersistenceService persistenceService,
-        KnowledgeFileWatcher fileWatcher,
+        MultiFormatFileWatcher fileWatcher,
         AppConfiguration config)
     {
         var allFragments = await CollectFragmentsFromFilesAsync(newFiles, fileWatcher);
@@ -1272,7 +1279,7 @@ internal static class RunVectorMemoryWithDatabaseMode
 
     private static async Task<List<MemoryFragment>> CollectFragmentsFromFilesAsync(
         Dictionary<string, string> newFiles,
-        KnowledgeFileWatcher fileWatcher)
+        MultiFormatFileWatcher fileWatcher)
     {
         var allFragments = new List<MemoryFragment>();
         foreach (var (gameName, filePath) in newFiles)
@@ -1299,7 +1306,7 @@ internal static class RunVectorMemoryWithDatabaseMode
 
     private static async Task ArchiveProcessedFilesAsync(
         Dictionary<string, string> newFiles,
-        KnowledgeFileWatcher fileWatcher)
+        MultiFormatFileWatcher fileWatcher)
     {
         DisplayService.WriteLine("\n[*] Archiving processed files...");
         foreach (var filePath in newFiles.Values)

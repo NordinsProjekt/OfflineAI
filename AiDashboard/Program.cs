@@ -40,6 +40,16 @@ public class Program
             options.MaximumReceiveMessageSize = 110 * 1024 * 1024;
         });
 
+        // Companion to the HubOptions change above: if the SignalR circuit ever falls back from
+        // WebSockets to long-polling (proxies, some browsers/networks), that transport sends
+        // data as regular HTTP request bodies, which Kestrel caps at ~28.6 MB by default —
+        // independently of MaximumReceiveMessageSize. Without raising this too, a large upload
+        // over long-polling gets its request rejected and the circuit dies ("Rejoin failed").
+        builder.WebHost.ConfigureKestrel(options =>
+        {
+            options.Limits.MaxRequestBodySize = 110 * 1024 * 1024;
+        });
+
         // Register AppConfiguration
         var appConfig = builder.Configuration.GetSection("AppConfiguration").Get<AppConfiguration>() ?? new AppConfiguration();
         builder.Services.AddSingleton(appConfig);
@@ -372,13 +382,14 @@ public class Program
 
                 Console.WriteLine("[+] Chat service initialized");
                 return new DashboardChatService(
-                    vectorMemory, 
-                    conversationMemory, 
-                    modelPool, 
+                    vectorMemory,
+                    conversationMemory,
+                    modelPool,
                     domainDetector,
                     questionRepository,
                     llmRepository,
-                    null); // Will be set when DashboardState attaches the service
+                    null, // Will be set when DashboardState attaches the service
+                    appConfig.Llm?.ContextSize ?? 0);
             }
             catch (Exception ex)
             {

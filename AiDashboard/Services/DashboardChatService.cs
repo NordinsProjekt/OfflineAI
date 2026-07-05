@@ -29,7 +29,8 @@ namespace AiDashboard.Services
         private Func<string?>? _getCurrentModelName;
         private Guid? _conversationId;
         private bool _disposed;
-        
+        private readonly int _contextSize;
+
         /// <summary>
         /// Get the domain detector for domain registration.
         /// </summary>
@@ -42,7 +43,8 @@ namespace AiDashboard.Services
             IDomainDetector? domainDetector = null,
             IQuestionRepository? questionRepository = null,
             ILlmRepository? llmRepository = null,
-            Func<string?>? getCurrentModelName = null)
+            Func<string?>? getCurrentModelName = null,
+            int contextSize = 0)
         {
             _memory = memory ?? throw new ArgumentNullException(nameof(memory));
             _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
@@ -51,6 +53,7 @@ namespace AiDashboard.Services
             _questionRepository = questionRepository;
             _llmRepository = llmRepository;
             _getCurrentModelName = getCurrentModelName;
+            _contextSize = contextSize;
         }
 
         /// <summary>
@@ -194,7 +197,8 @@ namespace AiDashboard.Services
                 var llmSettings = new LlmSettings
                 {
                     UseGpu = useGpu,
-                    GpuLayers = gpuLayers
+                    GpuLayers = gpuLayers,
+                    ContextSize = _contextSize
                 };
 
                 // Create chat service with current settings
