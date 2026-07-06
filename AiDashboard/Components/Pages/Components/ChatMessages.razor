@@ -1,4 +1,4 @@
-<div class="oa-messages no-scrollbar" @ref="messagesContainer">
+<div class="oa-messages no-scrollbar">
     <div class="oa-messages-list">
         @foreach (var msg in Messages)
         {
@@ -32,14 +32,4 @@
 
     [Parameter]
     public bool IsProcessing { get; set; }
-
-    [Parameter]
-    public ElementReference MessagesContainerRef { get; set; }
-
-    private ElementReference messagesContainer;
-
-    protected override void OnAfterRender(bool firstRender)
-    {
-        MessagesContainerRef = messagesContainer;
-    }
 }

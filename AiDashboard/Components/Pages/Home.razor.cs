@@ -17,7 +17,6 @@ public partial class Home : IDisposable
 
     private string composerText = string.Empty;
     private bool isProcessing = false;
-    private ElementReference messagesContainer;
 
     // Bare filename of the most recently uploaded file (via AgentFileUpload), so a terse
     // follow-up like "Summarize" can still be resolved to the right /läs-pdf or /läs command —

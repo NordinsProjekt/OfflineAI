@@ -254,16 +254,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         
         const string createDatabaseSql = @"
             CREATE DATABASE [{0}]";
-        
-        // SQL to grant access to current Windows user
-        const string grantAccessSql = @"
-            USE [{0}];
-            IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = CURRENT_USER)
-            BEGIN
-                CREATE USER [CURRENT_USER] FOR LOGIN [CURRENT_USER];
-            END;
-            ALTER ROLE db_owner ADD MEMBER [CURRENT_USER];";
-        
+
         using var connection = new SqlConnection(masterConnectionString);
         await connection.OpenAsync();
         

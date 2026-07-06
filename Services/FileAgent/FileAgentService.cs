@@ -387,18 +387,30 @@ public class FileAgentService : IFileAgentService
         {
             using var document = PdfDocument.Open(path);
             var text = new StringBuilder();
+            var hasAnyRealText = false;
 
             foreach (var page in document.GetPages())
             {
                 text.AppendLine($"--- Page {page.Number} ---");
                 text.AppendLine(page.Text);
                 text.AppendLine();
+
+                if (!string.IsNullOrWhiteSpace(page.Text))
+                    hasAnyRealText = true;
             }
 
-            var content = text.ToString().Trim();
-            if (string.IsNullOrWhiteSpace(content))
-                return (null, FileAgentResult.Failure($"Ingen text kunde extraheras ur PDF:en: {Path.GetFileName(path)}"));
+            // A PDF can "succeed" here with only the "--- Page N ---" markers and no actual page
+            // text — e.g. when the document's text was flattened to vector outlines/curves at
+            // export time (common for print-ready designs) instead of real embedded text objects.
+            // Checking the joined content alone would miss this, since the markers make it
+            // non-blank; the LLM would then silently get zero real information about the file.
+            if (!hasAnyRealText)
+                return (null, FileAgentResult.Failure(
+                    $"Ingen text kunde extraheras ur PDF:en: {Path.GetFileName(path)}. " +
+                    "Filen verkar sakna riktig inbäddad text (t.ex. skannade sidor eller text som " +
+                    "konverterats till kurvor/bilder vid export), vilket kräver OCR som inte stöds ännu."));
 
+            var content = text.ToString().Trim();
             return (TruncateForLlm(content), null);
         }
         catch (Exception ex)

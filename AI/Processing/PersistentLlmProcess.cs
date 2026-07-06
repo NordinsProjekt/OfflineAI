@@ -145,8 +145,13 @@ public class PersistentLlmProcess : IPersistentLlmProcess
                 processInfo.Arguments += $" -ngl 0";
             }
             
-            // Apply generation parameters
-            processInfo.Arguments += $" -n {maxTokens}";
+            // Apply generation parameters. Cap -n at half the context window: the prompt
+            // (system prompt + any injected document content + question) needs room too, and
+            // asking llama-cli to generate as many tokens as the entire context holds leaves zero
+            // space for the prompt itself — a combination that can make llama-cli fail outright
+            // (empty output, or worse) rather than just truncating gracefully.
+            var effectiveMaxTokens = Math.Min(maxTokens, Math.Max(1, contextSize / 2));
+            processInfo.Arguments += $" -n {effectiveMaxTokens}";
             processInfo.Arguments += $" --temp {temperature:F2}";
             processInfo.Arguments += $" --top-p {topP:F2}";
             processInfo.Arguments += $" --top-k {topK}";

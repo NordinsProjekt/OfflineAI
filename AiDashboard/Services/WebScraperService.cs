@@ -14,7 +14,6 @@ public class WebScraperService : IWebScraperService
     private readonly ILogger<WebScraperService>? _logger;
 
     private static readonly string[] ExcludedTags = { "script", "style", "nav", "footer", "header", "aside", "iframe", "noscript" };
-    private static readonly int DefaultMaxLength = 10000;
 
     public WebScraperService(IHttpClientFactory httpClientFactory, ILogger<WebScraperService>? logger = null)
     {

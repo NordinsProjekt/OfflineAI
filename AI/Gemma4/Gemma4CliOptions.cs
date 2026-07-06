@@ -38,10 +38,14 @@ public sealed class Gemma4CliOptions
 
     /// <summary>
     /// KV-cache context size in tokens (<c>-c</c>).
-    /// Gemma 4 26B A4B supports up to 256 K tokens.
-    /// Default: 256 000
+    /// Gemma 4 models can be configured up to 256K tokens architecturally, but the KV cache for
+    /// a large context adds up fast on top of the model weights themselves — a 12B model at
+    /// Q4 quantization already uses ~7GB just for weights, so a 256K context on a 10GB GPU
+    /// generally won't fit and causes llama-cli to fail (empty output or a hard crash) rather
+    /// than gracefully falling back to CPU/partial offload. Default: 32 768 — a much safer
+    /// starting point for typical consumer GPUs; raise it only if you've confirmed it fits.
     /// </summary>
-    public int ContextSize { get; init; } = 256_000;
+    public int ContextSize { get; init; } = 32_768;
 
     /// <summary>
     /// Maximum new tokens to generate per call (<c>-n</c>).

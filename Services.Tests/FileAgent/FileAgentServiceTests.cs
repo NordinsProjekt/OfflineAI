@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Services.FileAgent;
 using Services.Tests.TestHelpers;
+using Xunit.Abstractions;
 
 namespace Services.Tests.FileAgent;
 
@@ -13,9 +14,11 @@ public class FileAgentServiceTests : IDisposable
 {
     private readonly string _tempDir;
     private readonly FileAgentService _sut;
+    private readonly ITestOutputHelper _output;
 
-    public FileAgentServiceTests()
+    public FileAgentServiceTests(ITestOutputHelper output)
     {
+        _output = output;
         _tempDir = Path.Combine(Path.GetTempPath(), "FileAgentServiceTests_" + Guid.NewGuid());
         _sut = new FileAgentService(_tempDir);
     }
@@ -753,6 +756,41 @@ public class FileAgentServiceTests : IDisposable
 
         result.IsSuccess.Should().BeFalse();
         result.Message.Should().Contain("hittades inte");
+    }
+
+    /// <summary>
+    /// Regression test for a real-world PDF (51 MB rulebook, 74 pages) that reproduced "same
+    /// problem again" after the earlier context-overflow fix: PdfPig extracts zero letters from
+    /// every page (the book's text was flattened to vector outlines/curves at export, so there
+    /// are no embedded text objects to read — confirmed via <c>page.Letters.Count == 0</c> on
+    /// every page during investigation). Before this test, <see cref="FileAgentService"/> still
+    /// reported success because the joined "--- Page N ---" markers alone made the content
+    /// non-blank, so the LLM silently received zero real information about the file instead of
+    /// a clear error. Reads the PDF straight from the user's Desktop rather than checking a 51 MB
+    /// fixture into the repo, so it's a no-op on machines without the file (e.g. CI).
+    /// </summary>
+    [Fact]
+    public async Task ReadPdfFileAsync_GloomhavenRulebook_NoEmbeddedText_ReturnsFailureInsteadOfEmptyContent()
+    {
+        var desktopDir = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+        var pdfFilename = "Gloomhaven-2025-Rulebook.pdf";
+        if (!File.Exists(Path.Combine(desktopDir, pdfFilename)))
+        {
+            _output.WriteLine($"Skipping: {pdfFilename} not found in {desktopDir} on this machine.");
+            return;
+        }
+
+        var sut = new FileAgentService(desktopDir);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = await sut.ReadPdfFileAsync(pdfFilename);
+
+        stopwatch.Stop();
+        _output.WriteLine($"Extraction took {stopwatch.Elapsed.TotalSeconds:F1}s");
+        _output.WriteLine($"IsSuccess={result.IsSuccess}, Message={result.Message}");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("Ingen text kunde extraheras");
     }
 
     [Fact]

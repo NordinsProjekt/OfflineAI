@@ -9,7 +9,7 @@
 
     <ChatTopBar />
     <ActiveContextBar />
-    <ChatMessages Messages="@Messages" IsProcessing="@IsProcessing" MessagesContainerRef="@MessagesContainerRef" />
+    <ChatMessages Messages="@Messages" IsProcessing="@IsProcessing" />
     <ChatComposer ComposerText="@ComposerText"
                   IsProcessing="@IsProcessing"
                   OnComposerTextChanged="@OnComposerTextChanged"
@@ -28,9 +28,6 @@
 
     [Parameter]
     public string ComposerText { get; set; } = string.Empty;
-
-    [Parameter]
-    public ElementReference MessagesContainerRef { get; set; }
 
     [Parameter]
     public EventCallback<string> OnComposerTextChanged { get; set; }
