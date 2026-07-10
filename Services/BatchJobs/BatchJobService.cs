@@ -9,7 +9,10 @@ public sealed class BatchJobService : IBatchJobService
     private readonly List<BatchJob> _jobs = new();
     private readonly object _lock = new();
     private volatile bool _isProcessing;
+    // Shared across RequestStop() and the StartProcessingAsync() loop to signal cancellation between them.
+#pragma warning disable S1450
     private volatile bool _stopRequested;
+#pragma warning restore S1450
 
     public event Action? OnChange;
 
@@ -19,6 +22,9 @@ public sealed class BatchJobService : IBatchJobService
     }
 
     /// <inheritdoc/>
+    // Returns a thread-safe snapshot copy (not a live view) since _jobs is mutated under lock
+    // from background processing; IBatchJobService exposes this as a property, so keep the shape.
+#pragma warning disable S2365
     public IReadOnlyList<BatchJob> Jobs
     {
         get
@@ -29,6 +35,7 @@ public sealed class BatchJobService : IBatchJobService
             }
         }
     }
+#pragma warning restore S2365
 
     /// <inheritdoc/>
     public bool IsProcessing => _isProcessing;

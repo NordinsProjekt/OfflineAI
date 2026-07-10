@@ -35,7 +35,7 @@ public class ChatMessagesTests : TestContext
                 IsUser = true,
                 Text = "Hello, AI!",
                 FormattedText = "Hello, AI!",
-                Timestamp = new DateTime(2024, 1, 1, 10, 30, 0)
+                Timestamp = new DateTime(2024, 1, 1, 10, 30, 0, DateTimeKind.Local)
             }
         };
 
@@ -71,7 +71,7 @@ public class ChatMessagesTests : TestContext
                 IsUser = false,
                 Text = "Hello, human!",
                 FormattedText = "Hello, human!",
-                Timestamp = new DateTime(2024, 1, 1, 10, 31, 0)
+                Timestamp = new DateTime(2024, 1, 1, 10, 31, 0, DateTimeKind.Local)
             }
         };
 

@@ -12,7 +12,7 @@ namespace Presentation.AiDashboard.Tests.Components;
 /// the LLM can subsequently read it. Uses a real <see cref="FileAgentService"/> rooted at a
 /// per-test temp directory, mirroring the convention in <see cref="Services.Tests.FileAgent.FileAgentServiceTests"/>.
 /// </summary>
-public class AgentFileUploadTests : TestContext, IDisposable
+public sealed class AgentFileUploadTests : TestContext, IDisposable
 {
     private readonly string _tempDir;
 
@@ -167,8 +167,8 @@ public class AgentFileUploadTests : TestContext, IDisposable
     public void DropZoneSelector_Set_JsInteropFailureIsSwallowed()
     {
         // No JSInterop configured for "fileDropZone.initializePersistent" — bUnit's strict mode
-        // would throw for an unconfigured call, but AgentFileUpload wraps it in try/catch (same
-        // pattern as FileDropZone.razor) so the component still renders successfully.
+        // would throw for an unconfigured call, but AgentFileUpload wraps it in a try/catch, the
+        // same pattern used by FileDropZone.razor, so the component still renders successfully.
         var cut = RenderComponent<AgentFileUpload>(parameters => parameters
             .Add(p => p.DropZoneSelector, ".oa-chat"));
 

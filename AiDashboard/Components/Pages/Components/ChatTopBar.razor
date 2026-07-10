@@ -39,9 +39,7 @@
             Temperature: @Dashboard.SettingsService.Temperature.ToString("0.0")
         </span>
         <span class="oa-badge @(Dashboard.SettingsService.UseGpu ? "orange" : "gray")">
-            GPU: @(Dashboard.SettingsService.UseGpu
-                ? $"ON ({(Dashboard.SettingsService.GpuLayers >= 99 ? "Max" : Dashboard.SettingsService.GpuLayers.ToString())})"
-                : "OFF (0)")
+            GPU: @GetGpuBadgeText()
         </span>
     </div>
 </div>
@@ -69,6 +67,15 @@
         Navigation.NavigateTo("/");
     }
 
+    private string GetGpuBadgeText()
+    {
+        if (!Dashboard.SettingsService.UseGpu)
+            return "OFF (0)";
+
+        var layers = Dashboard.SettingsService.GpuLayers >= 99 ? "Max" : Dashboard.SettingsService.GpuLayers.ToString();
+        return $"ON ({layers})";
+    }
+
     private async Task OnModelChanged()
     {
         // The CurrentModel setter already calls NotifyStateChanged internally
@@ -76,20 +83,22 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    private string FormatModelName(string modelFileName)
+    private static string FormatModelName(string modelFileName)
     {
         if (string.IsNullOrEmpty(modelFileName))
             return modelFileName;
 
         // Remove .gguf extension
         var name = modelFileName.Replace(".gguf", "", StringComparison.OrdinalIgnoreCase);
-        
+
         // If name is too long, truncate intelligently
         if (name.Length > 25)
         {
             // Try to keep the important parts (model name and quantization)
             // Example: "Mistral-14b-Merge-Base-Q5_K_M" -> "Mistral-14b...Q5_K_M"
-            var parts = name.Split('-', '_');
+            // Regex.Split avoids Split('-', '_') binding to the (char, int count) overload via an
+            // implicit char->int conversion instead of splitting on both characters.
+            var parts = System.Text.RegularExpressions.Regex.Split(name, "[-_]");
             if (parts.Length > 3)
             {
                 // Keep first 2 parts and last part

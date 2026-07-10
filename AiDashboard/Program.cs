@@ -9,7 +9,7 @@ using Services.Memory;
 using Services.Interfaces;
 using Services.Repositories;
 using Services.AgentTools;
-using Microsoft.SemanticKernel.Embeddings;
+using Microsoft.Extensions.AI;
 using Infrastructure.Data.Dapper;
 using Services.Configuration;
 using Services.Management;
@@ -19,9 +19,12 @@ using Services.QuickAsk;
 using Services.Workspace;
 using Services.BatchJobs;
 
+// Infrastructure.Data.Dapper uses WindowsIdentity to grant DB access; this app only runs on Windows.
+[assembly: System.Runtime.Versioning.SupportedOSPlatform("windows")]
+
 namespace AiDashboard;
 
-public class Program
+public static class Program
 {
     public static void Main(string[] args)
     {
@@ -73,7 +76,9 @@ public class Program
                 : Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
                     "OfflineAI", "AgentFiles");
-            return new WorkspaceService(defaultAgentDir);
+            // Confine every workspace to the configured root (defaults to the parent of the
+            // agent-files folder) so the file agent can never be pointed outside that tree.
+            return new WorkspaceService(defaultAgentDir, workspaceRoot: appConfig.Folders.WorkspaceRoot);
         });
 
         // Register file agent service for /skapa, /fyll, /läs chat commands. Rooted at the
@@ -153,8 +158,12 @@ public class Program
         builder.Services.AddScoped<IKursplanAnalysisService, KursplanAnalysisService>();
         builder.Services.AddScoped<IDocumentTypeDetector, DocumentTypeDetector>();
 
-        // Register web scraper service
+        // Register web scraper service. The named "WebScraper" client disables automatic redirect
+        // following so WebScraperService can validate every redirect hop against its SSRF host
+        // allow-list instead of letting HttpClient silently follow a redirect to an internal target.
         builder.Services.AddHttpClient();
+        builder.Services.AddHttpClient("WebScraper")
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         builder.Services.AddScoped<IWebScraperService, WebScraperService>();
 
         // Read configuration for LLM
@@ -190,6 +199,7 @@ public class Program
         }
 
         // Register embedding service (optional for dashboard - only needed if RAG is enabled)
+        var embeddingServiceRegistered = false;
         if (!string.IsNullOrEmpty(embeddingModelPath) && !string.IsNullOrEmpty(embeddingVocabPath))
         {
             try
@@ -200,9 +210,10 @@ public class Program
                     embeddingDimension,
                     debugMode: false));
 
-                builder.Services.AddSingleton<ITextEmbeddingGenerationService>(sp =>
+                builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
                     sp.GetRequiredService<SemanticEmbeddingService>());
 
+                embeddingServiceRegistered = true;
                 Console.WriteLine("[+] Embedding service registered (RAG available)");
             }
             catch (Exception ex)
@@ -217,47 +228,34 @@ public class Program
         }
 
         // Register Dapper repositories (optional - but required for table management and collections)
-        IVectorMemoryRepository? repositoryInstance = null;
         if (!string.IsNullOrEmpty(dbConnectionString))
         {
             try
             {
                 builder.Services.AddDapperVectorMemoryRepository(dbConnectionString, dbTableName);
-                
+
                 // Register KnowledgeDomainRepository for domain-based filtering
                 builder.Services.AddDapperKnowledgeDomainRepository(dbConnectionString);
-                
+
                 // Register LLM and Question repositories
                 builder.Services.AddDapperLlmRepository(dbConnectionString);
                 builder.Services.AddDapperQuestionRepository(dbConnectionString);
-                
+
                 // Register BotPersonalityRepository for personality management
                 builder.Services.AddDapperBotPersonalityRepository(dbConnectionString);
 
-// Build a temporary service provider to check if services are registered
-                using var tempProvider = builder.Services.BuildServiceProvider();
-                repositoryInstance = tempProvider.GetService<IVectorMemoryRepository>();
-                
-                if (repositoryInstance != null)
+                Console.WriteLine("[+] Database repository registered");
+
+                // Only register persistence service if we have both repository AND embedding service
+                if (embeddingServiceRegistered)
                 {
-                    Console.WriteLine("[+] Database repository registered");
-                    
-                    // Only register persistence service if we have both repository AND embedding service
-                    var embeddingService = tempProvider.GetService<ITextEmbeddingGenerationService>();
-                    if (embeddingService != null)
-                    {
-                        builder.Services.AddSingleton<VectorMemoryPersistenceService>();
-                        Console.WriteLine("[+] Persistence service registered (collection loading available)");
-                    }
-                    else
-                    {
-                        Console.WriteLine("[!] Persistence service not registered - embedding service missing");
-                        Console.WriteLine("   Collection loading will not be available");
-                    }
+                    builder.Services.AddSingleton<VectorMemoryPersistenceService>();
+                    Console.WriteLine("[+] Persistence service registered (collection loading available)");
                 }
                 else
                 {
-                    Console.WriteLine("[!] Database repository registration failed");
+                    Console.WriteLine("[!] Persistence service not registered - embedding service missing");
+                    Console.WriteLine("   Collection loading will not be available");
                 }
             }
             catch (Exception ex)
@@ -292,7 +290,7 @@ public class Program
         // Register memory for knowledge base
         builder.Services.AddSingleton<ILlmMemory>(sp =>
         {
-            var embeddingService = sp.GetService<ITextEmbeddingGenerationService>();
+            var embeddingService = sp.GetService<IEmbeddingGenerator<string, Embedding<float>>>();
             var repository = sp.GetService<IVectorMemoryRepository>();
             var stopWordsService = sp.GetRequiredService<ILanguageStopWordsService>();
             var collectionName = appConfig.Debug?.CollectionName ?? builder.Configuration["AppConfiguration:Debug:CollectionName"] ?? "game-rules-mpnet";
@@ -463,7 +461,11 @@ public class Program
                             await dashboardState.RefreshModelsAsync();
                             Console.WriteLine($"[+] Found {dashboardState.ModelService.AvailableModels.Count} models in {modelFolder}");
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            // Background startup refresh — a failure here shouldn't crash the app.
+                            Console.WriteLine($"[!] Failed to refresh models: {ex.Message}");
+                        }
                     });
                 }
                 
@@ -473,7 +475,11 @@ public class Program
                     {
                         await dashboardState.RefreshCollectionsAsync();
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        // Background startup refresh — a failure here shouldn't crash the app.
+                        Console.WriteLine($"[!] Failed to refresh collections: {ex.Message}");
+                    }
                 });
 
                 Console.WriteLine("[+] Dashboard state initialized");

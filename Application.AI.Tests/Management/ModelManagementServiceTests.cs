@@ -6,7 +6,7 @@ namespace Application.AI.Tests.Management;
 /// Unit tests for ModelManagementService class.
 /// Tests cover model discovery, selection, switching, and event notifications.
 /// </summary>
-public class ModelManagementServiceTests : IDisposable
+public sealed class ModelManagementServiceTests : IDisposable
 {
     private readonly string _testDirectory;
     private readonly List<string> _createdFiles = new();
@@ -340,9 +340,9 @@ public class ModelManagementServiceTests : IDisposable
     {
         // Arrange
         CreateTestModelFile("model.gguf");
-        CreateTestFile("model.txt");
-        CreateTestFile("model.bin");
-        CreateTestFile("readme.md");
+        CreateTestModelFile("model.txt");
+        CreateTestModelFile("model.bin");
+        CreateTestModelFile("readme.md");
 
         // Act
         var service = new ModelManagementService(_testDirectory);
@@ -576,7 +576,7 @@ public class ModelManagementServiceTests : IDisposable
         CreateTestModelFile("new-model.gguf");
 
         // Act
-        var result = await service.SwitchModelAsync();
+        await service.SwitchModelAsync();
 
         // Assert
         Assert.Single(service.AvailableModels);
@@ -811,14 +811,6 @@ public class ModelManagementServiceTests : IDisposable
     #region Helper Methods
 
     private string CreateTestModelFile(string fileName)
-    {
-        var fullPath = Path.Combine(_testDirectory, fileName);
-        File.WriteAllText(fullPath, "test content");
-        _createdFiles.Add(fullPath);
-        return fullPath;
-    }
-
-    private string CreateTestFile(string fileName)
     {
         var fullPath = Path.Combine(_testDirectory, fileName);
         File.WriteAllText(fullPath, "test content");

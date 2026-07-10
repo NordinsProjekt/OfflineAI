@@ -11,7 +11,7 @@ namespace Presentation.AiDashboard.Tests.Components;
 /// ChatComposer embeds <c>AgentFileUpload</c>, which injects <see cref="IFileAgentService"/>, so
 /// a real instance rooted at a per-test temp directory is registered for every test.
 /// </summary>
-public class ChatComposerTests : TestContext, IDisposable
+public sealed class ChatComposerTests : TestContext, IDisposable
 {
     private readonly string _tempDir;
 

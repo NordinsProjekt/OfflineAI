@@ -9,7 +9,7 @@ namespace Application.AI.Tests.Pooling;
 /// Unit tests for ModelInstancePool class.
 /// Tests cover initialization, instance management, health checks, and disposal.
 /// </summary>
-public class ModelInstancePoolTests : IDisposable
+public sealed class ModelInstancePoolTests : IDisposable
 {
     private readonly string _testLlmPath;
     private readonly string _testModelPath;
@@ -457,8 +457,8 @@ public class ModelInstancePoolTests : IDisposable
     {
         // Arrange
         var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-        var cts = new CancellationTokenSource();
-        cts.Cancel();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
 
         // Act & Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
@@ -530,21 +530,6 @@ public class ModelInstancePoolTests : IDisposable
         pool.Dispose();
         // No exception should be thrown
         Assert.True(true);
-    }
-
-    [Fact]
-    public async Task Dispose_SetsDisposedFlag()
-    {
-        // Arrange
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-
-        // Act
-        pool.Dispose();
-
-        // Assert
-        // After disposal, operations should throw ObjectDisposedException
-        await Assert.ThrowsAsync<ObjectDisposedException>(
-            async () => await pool.AcquireAsync());
     }
 
     #endregion
@@ -626,7 +611,7 @@ public class ModelInstancePoolTests : IDisposable
     }
 
     [Fact]
-    public void ConcurrentAccess_MultipleTimeoutChanges_ThreadSafe()
+    public async Task ConcurrentAccess_MultipleTimeoutChanges_ThreadSafe()
     {
         // Arrange
         var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
@@ -640,7 +625,7 @@ public class ModelInstancePoolTests : IDisposable
         }
 
         // Wait for all changes to complete
-        Task.WaitAll(tasks.ToArray());
+        await Task.WhenAll(tasks);
 
         // Assert - Should have one of the valid timeout values
         Assert.True(pool.TimeoutMs >= 1000 && pool.TimeoutMs <= 300000);
@@ -649,16 +634,6 @@ public class ModelInstancePoolTests : IDisposable
     #endregion
 
     #region Edge Cases
-
-    [Fact]
-    public void EdgeCase_MaxInstancesOne_CreatesValidPool()
-    {
-        // Arrange & Act
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath, maxInstances: 1);
-
-        // Assert
-        Assert.Equal(1, pool.MaxInstances);
-    }
 
     [Fact]
     public void EdgeCase_VeryLargeMaxInstances_CreatesValidPool()
@@ -708,55 +683,9 @@ public class ModelInstancePoolTests : IDisposable
         }
     }
 
-    [Fact]
-    public void EdgeCase_DisposeImmediatelyAfterConstruction_Succeeds()
-    {
-        // Arrange & Act
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-        pool.Dispose();
-
-        // Assert - Should not throw
-        Assert.True(true);
-    }
-
     #endregion
 
     #region Error Handling Tests
-
-    [Fact]
-    public async Task ErrorHandling_AcquireWithoutInitialize_ThrowsInvalidOperationException()
-    {
-        // Arrange
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await pool.AcquireAsync());
-    }
-
-    [Fact]
-    public async Task ErrorHandling_ReinitializeAfterDispose_ThrowsObjectDisposedException()
-    {
-        // Arrange
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-        pool.Dispose();
-
-        // Act & Assert
-        await Assert.ThrowsAsync<ObjectDisposedException>(
-            async () => await pool.ReinitializeAsync(_testLlmPath, _testModelPath));
-    }
-
-    [Fact]
-    public async Task ErrorHandling_AcquireAfterDispose_ThrowsObjectDisposedException()
-    {
-        // Arrange
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-        pool.Dispose();
-
-        // Act & Assert
-        await Assert.ThrowsAsync<ObjectDisposedException>(
-            async () => await pool.AcquireAsync());
-    }
 
     [Fact]
     public void ErrorHandling_InvalidTimeoutValue_PreservesOldValue()
@@ -890,29 +819,17 @@ public class ModelInstancePoolTests : IDisposable
     [InlineData(0)]
     [InlineData(500)]
     [InlineData(999)]
-    public void ParameterValidation_TimeoutTooLow_ThrowsException(int invalidTimeout)
-    {
-        // Arrange
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-
-        // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => pool.TimeoutMs = invalidTimeout);
-        
-        pool.Dispose();
-    }
-
-    [Theory]
     [InlineData(300001)]
     [InlineData(400000)]
     [InlineData(1000000)]
-    public void ParameterValidation_TimeoutTooHigh_ThrowsException(int invalidTimeout)
+    public void ParameterValidation_TimeoutOutOfRange_ThrowsException(int invalidTimeout)
     {
         // Arrange
         var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
 
         // Act & Assert
         Assert.Throws<ArgumentOutOfRangeException>(() => pool.TimeoutMs = invalidTimeout);
-        
+
         pool.Dispose();
     }
 

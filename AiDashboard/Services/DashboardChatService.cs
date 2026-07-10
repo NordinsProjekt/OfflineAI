@@ -18,7 +18,7 @@ namespace AiDashboard.Services
     /// Wraps AiChatServicePooled for use in the Blazor dashboard.
     /// Manages chat state and applies dashboard settings to the AI chat service.
     /// </summary>
-    public class DashboardChatService : IDisposable
+    public sealed class DashboardChatService : IDisposable
     {
         private ILlmMemory _memory;
         private readonly ILlmMemory _conversationMemory;
@@ -135,7 +135,7 @@ namespace AiDashboard.Services
         /// <summary>
         /// Apply bot personality settings to generation settings.
         /// </summary>
-        private void ApplyPersonalitySettings(BotPersonalityEntity? personality, GenerationSettings settings)
+        private static void ApplyPersonalitySettings(BotPersonalityEntity? personality, GenerationSettings settings)
         {
             if (personality == null) return;
             

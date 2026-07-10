@@ -8,7 +8,7 @@ using Services.AgentTools;
 
 namespace AiDashboard.Components.Pages;
 
-public partial class Home : IDisposable
+public sealed partial class Home : IDisposable
 {
     [Inject] private DashboardState Dashboard { get; set; } = default!;
     [Inject] private ILlmResponseFormatterService Formatter { get; set; } = default!;
@@ -275,5 +275,6 @@ public partial class Home : IDisposable
     public void Dispose()
     {
         Dashboard.OnChange -= Refresh;
+        GC.SuppressFinalize(this);
     }
 }

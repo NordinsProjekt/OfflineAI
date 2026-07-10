@@ -381,7 +381,7 @@ public class FileAgentService : IFileAgentService
     /// pages with a <c>--- Page N ---</c> marker. Returns the extracted content on success, or a
     /// <see cref="FileAgentResult"/> describing why extraction failed (corrupt file, no text, etc.).
     /// </summary>
-    private (string? Content, FileAgentResult? Error) ExtractPdfText(string path)
+    private static (string? Content, FileAgentResult? Error) ExtractPdfText(string path)
     {
         try
         {
@@ -540,6 +540,9 @@ public class FileAgentService : IFileAgentService
 
         if (!string.IsNullOrWhiteSpace(llmResponse))
         {
+            // Each match branches into multiple continue/skip paths below, so this isn't a
+            // simple filter+project that reads better as a LINQ chain.
+#pragma warning disable S3267
             foreach (Match match in EditBlockRegex.Matches(llmResponse))
             {
                 var keyword = match.Groups[1].Value;
@@ -572,6 +575,7 @@ public class FileAgentService : IFileAgentService
                     found.Add(new LineEdit(anchorLine, endLine, content));
                 }
             }
+#pragma warning restore S3267
         }
 
         edits = found;
@@ -814,8 +818,11 @@ public class FileAgentService : IFileAgentService
 
         var fullPath = Path.GetFullPath(Path.Combine(BaseDirectory, safeName));
 
-        // Ensure the resolved path stays within BaseDirectory.
-        if (!fullPath.StartsWith(BaseDirectory, StringComparison.OrdinalIgnoreCase))
+        // Ensure the resolved path stays within BaseDirectory. Compare against the directory plus a
+        // trailing separator so a sibling directory whose name merely shares the prefix (e.g. base
+        // "C:\data" vs "C:\data-evil") is not treated as inside it.
+        var baseWithSeparator = Path.TrimEndingDirectorySeparator(BaseDirectory) + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(baseWithSeparator, StringComparison.OrdinalIgnoreCase))
             return null;
 
         return fullPath;

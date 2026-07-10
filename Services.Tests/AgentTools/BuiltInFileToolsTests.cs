@@ -11,7 +11,7 @@ namespace Services.Tests.AgentTools;
 /// <see cref="FileAgentService"/> rooted at a temp directory, mirroring the convention in
 /// <see cref="Services.Tests.FileAgent.FileAgentServiceTests"/>.
 /// </summary>
-public class BuiltInFileToolsTests : IDisposable
+public sealed class BuiltInFileToolsTests : IDisposable
 {
     private readonly string _tempDir;
     private readonly FileAgentService _fileAgent;

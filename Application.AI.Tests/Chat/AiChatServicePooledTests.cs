@@ -72,22 +72,12 @@ public class AiChatServicePooledTests
     }
 
     /// <summary>
-    /// Helper method to setup SearchRelevantMemoryAsync with all parameters.
-    /// Moq doesn't support optional parameters in expression trees (CS0854).
-    /// Always use It.IsAny<> for flexible matching unless specific values are needed.
+    /// Helper method to setup SearchRelevantMemoryAsync with broad argument matching.
+    /// Moq doesn't support optional parameters in expression trees (CS0854), so every
+    /// parameter is matched with It.IsAny&lt;&gt;.
     /// </summary>
-    private void SetupSearchAsync(
-        Mock<ISearchableMemory> mock,
-        string? returnValue,
-        string? query = null,
-        int? topK = null,
-        double? minRelevanceScore = null,
-        List<string>? domainFilter = null,
-        int? maxCharsPerFragment = null,
-        bool? includeMetadata = null,
-        string? language = null)
+    private static void SetupSearchAsync(Mock<ISearchableMemory> mock, string? returnValue)
     {
-        // Use It.IsAny for all parameters for broadest matching
         mock.Setup(m => m.SearchRelevantMemoryAsync(
             It.IsAny<string>(),      // query
             It.IsAny<int>(),         // topK
@@ -489,7 +479,7 @@ public class AiChatServicePooledTests
     {
         // Arrange
         var question = "What is AI?";
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         var cancellationToken = cts.Token;
         
         // Return a meaningful context that's long enough (> 150 chars)
@@ -613,7 +603,7 @@ public class AiChatServicePooledTests
         _mockDomainDetector.Setup(d => d.GetDisplayNameAsync("gloomhaven"))
             .ReturnsAsync("Gloomhaven");
         
-        SetupSearchAsync(_mockSearchableMemory, context, domainFilter: detectedDomains);
+        SetupSearchAsync(_mockSearchableMemory, context);
 
         var mockPooledInstance = CreateMockPooledInstance("Gloomhaven is a cooperative game.");
         
@@ -644,7 +634,7 @@ public class AiChatServicePooledTests
         // Return a meaningful context that's long enough (> 150 chars)
         var context = "Artificial Intelligence (AI) refers to the simulation of human intelligence in machines that are programmed to think like humans and mimic leur actions. This includes learning, reasoning, and self-correction.";
         
-        SetupSearchAsync(_mockSearchableMemory, context, domainFilter: null);
+        SetupSearchAsync(_mockSearchableMemory, context);
 
         var mockPooledInstance = CreateMockPooledInstance("Response");
         
@@ -729,7 +719,7 @@ public class AiChatServicePooledTests
         // Return a meaningful context that's long enough (> 150 chars)
         var context = "Artificial Intelligence (AI) refers to the simulation of human intelligence in machines that are programmed to think like humans and mimic leur actions. This includes learning, reasoning, and self-correction.";
         
-        SetupSearchAsync(_mockSearchableMemory, context, topK: 5, minRelevanceScore: 0.7);
+        SetupSearchAsync(_mockSearchableMemory, context);
 
         var mockPooledInstance = CreateMockPooledInstance("Response");
         

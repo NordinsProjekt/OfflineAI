@@ -1,7 +1,21 @@
+using System.Threading.RateLimiting;
+using OfflineAI.Api.Security;
 using OfflineAI.Api.Services;
 using Application.AI.Pooling;
+using Application.AI.Embeddings;
+using Application.AI.Gemma4;
 using Services.Configuration;
+using Services.FileAgent;
+using Services.Language;
+using Services.Memory;
+using Services.Repositories;
+using Services.Workspace;
+using Infrastructure.Data.Dapper;
+using Microsoft.Extensions.AI;
 using Microsoft.OpenApi;
+
+// Infrastructure.Data.Dapper uses WindowsIdentity to grant DB access; this app only runs on Windows.
+[assembly: System.Runtime.Versioning.SupportedOSPlatform("windows")]
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,7 +28,7 @@ builder.Services.AddSwaggerGen(c =>
     {
         Title = "OfflineAI API",
         Version = "v1",
-        Description = "REST API for querying local LLM with RAG support"
+        Description = "REST API for querying local LLM with RAG, workspace file management, and image/PDF support"
     });
 });
 
@@ -22,16 +36,21 @@ builder.Services.AddSwaggerGen(c =>
 var appConfig = builder.Configuration.GetSection("AppConfiguration").Get<AppConfiguration>() ?? new AppConfiguration();
 builder.Services.AddSingleton(appConfig);
 
+// Security settings (API key auth, CORS allow-list, concurrency cap)
+var securityOptions = builder.Configuration.GetSection(ApiSecurityOptions.SectionName).Get<ApiSecurityOptions>()
+    ?? new ApiSecurityOptions();
+builder.Services.AddSingleton(securityOptions);
+
 // Read configuration for LLM - Check both nested object and flat key format
-var llmExe = appConfig.Llm?.ExecutablePath 
-    ?? builder.Configuration["AppConfiguration:Llm:ExecutablePath"] 
+var llmExe = appConfig.Llm?.ExecutablePath
+    ?? builder.Configuration["AppConfiguration:Llm:ExecutablePath"]
     ?? string.Empty;
-var llmModel = appConfig.Llm?.ModelPath 
-    ?? builder.Configuration["AppConfiguration:Llm:ModelPath"] 
+var llmModel = appConfig.Llm?.ModelPath
+    ?? builder.Configuration["AppConfiguration:Llm:ModelPath"]
     ?? string.Empty;
-var poolMax = appConfig.Pool?.MaxInstances 
+var poolMax = appConfig.Pool?.MaxInstances
     ?? (int.TryParse(builder.Configuration["AppConfiguration:Pool:MaxInstances"], out var m) ? m : 3);
-var poolTimeout = appConfig.Pool?.TimeoutMs 
+var poolTimeout = appConfig.Pool?.TimeoutMs
     ?? (int.TryParse(builder.Configuration["AppConfiguration:Pool:TimeoutMs"], out var t) ? t : 300000);
 
 // Debug: Print what we found
@@ -107,16 +126,174 @@ builder.Services.AddSingleton<IModelInstancePool>(sp =>
 // Register LLM Query Service
 builder.Services.AddScoped<ILlmQueryService, LlmQueryService>();
 
-// Configure CORS
+// ── RAG (auto vector search): embedding service + vector/domain repositories ──────────────
+
+// Register language stop words service (used to clean queries before vector search)
+builder.Services.AddSingleton<ILanguageStopWordsService, LanguageStopWordsService>();
+
+var embeddingModelPath = appConfig.Embedding?.ModelPath ?? builder.Configuration["AppConfiguration:Embedding:ModelPath"] ?? string.Empty;
+var embeddingVocabPath = appConfig.Embedding?.VocabPath ?? builder.Configuration["AppConfiguration:Embedding:VocabPath"] ?? string.Empty;
+var embeddingDimension = appConfig.Embedding?.Dimension ?? (int.TryParse(builder.Configuration["AppConfiguration:Embedding:Dimension"], out var dim) ? dim : 768);
+
+var embeddingServiceRegistered = false;
+if (!string.IsNullOrEmpty(embeddingModelPath) && !string.IsNullOrEmpty(embeddingVocabPath))
+{
+    try
+    {
+        builder.Services.AddSingleton(sp => new SemanticEmbeddingService(
+            embeddingModelPath,
+            embeddingVocabPath,
+            embeddingDimension,
+            debugMode: false));
+
+        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
+            sp.GetRequiredService<SemanticEmbeddingService>());
+
+        embeddingServiceRegistered = true;
+        Console.WriteLine("[+] Embedding service registered (auto vector search RAG available)");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[!] Warning: Failed to register embedding service: {ex.Message}");
+        Console.WriteLine("   Auto vector search RAG will not be available (manual context RAG still works).");
+    }
+}
+else
+{
+    Console.WriteLine("[!] Embedding service not configured (AppConfiguration:Embedding:ModelPath/VocabPath missing)");
+    Console.WriteLine("   Auto vector search RAG disabled; manual context RAG (Context field) still works.");
+}
+
+var dbConnectionString = appConfig.Database?.ConnectionString
+    ?? builder.Configuration["AppConfiguration:Database:ConnectionString"]
+    ?? string.Empty;
+var dbTableName = appConfig.Database?.ActiveTableName
+    ?? builder.Configuration["AppConfiguration:Database:ActiveTableName"]
+    ?? "MemoryFragments";
+
+if (!string.IsNullOrEmpty(dbConnectionString))
+{
+    try
+    {
+        builder.Services.AddDapperVectorMemoryRepository(dbConnectionString, dbTableName);
+        builder.Services.AddDapperKnowledgeDomainRepository(dbConnectionString);
+
+        Console.WriteLine("[+] Vector memory + knowledge domain repositories registered");
+
+        if (embeddingServiceRegistered)
+        {
+            builder.Services.AddSingleton<VectorMemoryPersistenceService>();
+            Console.WriteLine("[+] Persistence service registered (PDF ingestion into RAG available)");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[!] Warning: Failed to register database services: {ex.Message}");
+        Console.WriteLine("   Auto vector search RAG and PDF ingestion will not be available.");
+    }
+}
+else
+{
+    Console.WriteLine("[!] Database not configured (AppConfiguration:Database:ConnectionString missing)");
+    Console.WriteLine("   Auto vector search RAG, domain filtering, and PDF ingestion disabled.");
+}
+
+// ── Workspace + file agent: confines uploaded/created files to a user-selected directory ──
+
+builder.Services.AddSingleton<IWorkspaceService>(_ =>
+{
+    var defaultAgentDir = !string.IsNullOrWhiteSpace(appConfig.Folders.AgentFilesFolder)
+        ? appConfig.Folders.AgentFilesFolder
+        : Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "OfflineAI", "AgentFiles");
+    // Confine every workspace to the configured root (defaults to the parent of the agent-files
+    // folder) so an API caller can't point the file agent at an arbitrary location on disk.
+    return new WorkspaceService(defaultAgentDir, workspaceRoot: appConfig.Folders.WorkspaceRoot);
+});
+
+builder.Services.AddSingleton<IFileAgentService>(sp =>
+{
+    var workspaceService = sp.GetRequiredService<IWorkspaceService>();
+    var fileAgent = new FileAgentService(workspaceService.GetActiveWorkspace().Path);
+    workspaceService.ActiveWorkspaceChanged += workspace => fileAgent.SetBaseDirectory(workspace.Path);
+    return fileAgent;
+});
+
+Console.WriteLine("[+] Workspace + file agent services registered");
+
+// ── Gemma 4 multimodal CLI service: powers image (picture) queries ────────────────────────
+
+var gemma4CliCfg = appConfig.Gemma4Cli;
+var gemma4CliExe = !string.IsNullOrWhiteSpace(gemma4CliCfg.LlamaCliPath)
+    ? gemma4CliCfg.LlamaCliPath
+    : appConfig.Llm?.ExecutablePath ?? string.Empty;
+if (!string.IsNullOrWhiteSpace(gemma4CliCfg.ModelPath) && !string.IsNullOrWhiteSpace(gemma4CliExe))
+{
+    builder.Services.AddSingleton<IGemma4CliService>(sp =>
+    {
+        var opts = new Gemma4CliOptions
+        {
+            LlamaCliPath          = gemma4CliExe,
+            ModelPath             = gemma4CliCfg.ModelPath,
+            GpuLayers             = gemma4CliCfg.GpuLayers,
+            ContextSize           = gemma4CliCfg.ContextSize,
+            MaxTokens             = gemma4CliCfg.MaxTokens,
+            Temperature           = gemma4CliCfg.Temperature,
+            TopP                  = gemma4CliCfg.TopP,
+            TopK                  = gemma4CliCfg.TopK,
+            TimeoutMs             = gemma4CliCfg.TimeoutMs,
+            PauseTimeoutMs        = gemma4CliCfg.PauseTimeoutMs,
+            MaxToolCallIterations = gemma4CliCfg.MaxToolCallIterations
+        };
+        Console.WriteLine($"[+] Gemma 4 CLI service registered (model: {Path.GetFileName(gemma4CliCfg.ModelPath)}, image queries available)");
+        return new Gemma4CliService(opts);
+    });
+}
+else
+{
+    Console.WriteLine("[!] Gemma 4 CLI service not configured (AppConfiguration:Gemma4Cli:ModelPath missing)");
+    Console.WriteLine("   Image (picture) queries will not be available.");
+}
+
+// Configure CORS from an explicit allow-list. Reflecting any origin together with
+// AllowCredentials() would let any website the user visits make credentialed calls to this API,
+// so origins must be named explicitly. When none are configured, no cross-origin browser access
+// is granted (non-browser clients such as scripts are unaffected by CORS).
+const string CorsPolicyName = "ConfiguredOrigins";
+var allowedOrigins = securityOptions.AllowedCorsOrigins
+    .Where(o => !string.IsNullOrWhiteSpace(o))
+    .ToArray();
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", policy =>
+    options.AddPolicy(CorsPolicyName, policy =>
     {
-        policy.SetIsOriginAllowed(origin => true) // Allow any origin for local network access
-              .AllowAnyMethod()
-              .AllowAnyHeader()
-              .AllowCredentials();
+        if (allowedOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedOrigins)
+                  .AllowAnyMethod()
+                  .AllowAnyHeader()
+                  .AllowCredentials();
+        }
+        // else: empty policy — cross-origin browser requests are denied.
     });
+});
+
+// Bound concurrency so a caller cannot exhaust the (small) model pool. Requests beyond the limit
+// queue briefly, then receive HTTP 429 rather than piling up.
+var maxConcurrent = securityOptions.MaxConcurrentRequests > 0
+    ? securityOptions.MaxConcurrentRequests
+    : Math.Max(2, poolMax * 2);
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(_ =>
+        RateLimitPartition.GetConcurrencyLimiter("global", _ => new ConcurrencyLimiterOptions
+        {
+            PermitLimit = maxConcurrent,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            QueueLimit = maxConcurrent * 2
+        }));
 });
 
 var app = builder.Build();
@@ -130,19 +307,19 @@ if (configErrors.Count == 0)
     Console.WriteLine($"Loading {poolMax} model instance(s)...");
     Console.WriteLine("This may take 10-30 seconds depending on model size and GPU usage.");
     Console.WriteLine("");
-    
+
     try
     {
         // Get the pool from DI
         var modelPool = app.Services.GetRequiredService<IModelInstancePool>() as ModelInstancePool;
-        
+
         if (modelPool != null)
         {
             await modelPool.InitializeAsync((current, total) =>
             {
                 Console.WriteLine($"?? [{current}/{total}] Loading model instance {current}...");
             });
-            
+
             Console.WriteLine($"\n? Model pool initialized: {modelPool.AvailableCount}/{modelPool.MaxInstances} instances ready");
         }
         else
@@ -165,6 +342,24 @@ if (configErrors.Count == 0)
     Console.WriteLine("========================================\n");
 }
 
+// Initialize the RAG database on startup (non-blocking)
+if (app.Services.GetService<IVectorMemoryRepository>() != null)
+{
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            var repository = app.Services.GetRequiredService<IVectorMemoryRepository>();
+            await repository.InitializeDatabaseAsync();
+            Console.WriteLine("[+] RAG database initialized");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[!] Warning: Failed to initialize RAG database: {ex.Message}");
+        }
+    });
+}
+
 // Configure the HTTP request pipeline
 app.UseSwagger();
 app.UseSwaggerUI(c =>
@@ -174,22 +369,36 @@ app.UseSwaggerUI(c =>
 });
 
 // IMPORTANT: CORS must come before UseHttpsRedirection to handle preflight requests
-app.UseCors("AllowAll");
+app.UseCors(CorsPolicyName);
 
 // Only use HTTPS redirection if the app is configured to use HTTPS
 if (app.Environment.IsDevelopment())
 {
-    // In development, don't force HTTPS redirection to allow HTTP access from network
-    // Comment out the line below to enable HTTPS redirection in development
-    // app.UseHttpsRedirection();
+    // In development, don't force HTTPS redirection to allow HTTP access from network.
 }
 else
 {
+    app.UseHsts();
     app.UseHttpsRedirection();
 }
 
+app.UseRateLimiter();
+
+// API-key authentication gate (before authorization / controllers). Swagger, health, and CORS
+// preflight are allowed through anonymously inside the middleware.
+app.UseMiddleware<ApiKeyMiddleware>();
+
 app.UseAuthorization();
 app.MapControllers();
+
+if (securityOptions.RequireApiKey && string.IsNullOrEmpty(securityOptions.ApiKey))
+{
+    Console.WriteLine("[!] SECURITY: API key auth is ON but no Security:ApiKey is set — all API requests will be rejected until you configure one (user secrets) or set Security:RequireApiKey=false.");
+}
+else if (!securityOptions.RequireApiKey)
+{
+    Console.WriteLine("[!] SECURITY: API key auth is DISABLED (Security:RequireApiKey=false). Only run this way on a trusted, localhost-only machine.");
+}
 
 Console.WriteLine("========================================");
 Console.WriteLine("? OfflineAI API is running");
@@ -214,4 +423,4 @@ catch
 
 Console.WriteLine("========================================\n");
 
-app.Run();
+await app.RunAsync();

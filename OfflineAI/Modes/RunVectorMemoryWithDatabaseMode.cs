@@ -334,7 +334,7 @@ internal static class RunVectorMemoryWithDatabaseMode
             // Check if table management commands
             if (input.StartsWith("/table", StringComparison.OrdinalIgnoreCase))
             {
-                var tableWasSwitched = await HandleTableCommandAsync(input, services.PersistenceService, services.DbConfig, config);
+                var tableWasSwitched = await HandleTableCommandAsync(input, services.PersistenceService, services.DbConfig);
                 if (tableWasSwitched)
                 {
                     vectorMemoryNeedsReload = true;
@@ -578,7 +578,7 @@ internal static class RunVectorMemoryWithDatabaseMode
         DisplayService.WriteLine();
     }
 
-    private record FragmentWithLength(string Category, int Length);
+    private sealed record FragmentWithLength(string Category, int Length);
     
     private static async Task HandleCollectionsCommandAsync(VectorMemoryPersistenceService persistenceService)
     {
@@ -800,17 +800,16 @@ internal static class RunVectorMemoryWithDatabaseMode
     }
 
     private static async Task<bool> HandleTableCommandAsync(
-        string input, 
+        string input,
         VectorMemoryPersistenceService persistenceService,
-        DatabaseConfig dbConfig,
-        AppConfiguration appConfig)
+        DatabaseConfig dbConfig)
     {
         var parts = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         
         // /table - show current table and available commands
         if (parts.Length == 1)
         {
-            await ShowTableManagementMenuAsync(persistenceService, dbConfig);
+            await ShowTableManagementMenuAsync(dbConfig);
             return false;
         }
         
@@ -839,7 +838,7 @@ internal static class RunVectorMemoryWithDatabaseMode
                     DisplayService.WriteLine("    Use '/table list' to see available tables");
                     return false;
                 }
-                return await HandleTableSwitchCommandAsync(parts[2], persistenceService, dbConfig, appConfig);
+                return await HandleTableSwitchCommandAsync(parts[2], persistenceService, dbConfig);
                 
             case "delete":
                 if (parts.Length < 3)
@@ -852,22 +851,18 @@ internal static class RunVectorMemoryWithDatabaseMode
                 return false;
                 
             case "info":
-                await HandleTableInfoCommandAsync(persistenceService, dbConfig, appConfig);
+                await HandleTableInfoCommandAsync(persistenceService, dbConfig);
                 return false;
                 
             default:
                 DisplayService.WriteLine($"\n[!] Unknown table command: {subCommand}");
-                await ShowTableManagementMenuAsync(persistenceService, dbConfig);
+                await ShowTableManagementMenuAsync(dbConfig);
                 return false;
         }
     }
 
-    private static async Task ShowTableManagementMenuAsync(
-        VectorMemoryPersistenceService persistenceService,
-        DatabaseConfig dbConfig)
+    private static Task ShowTableManagementMenuAsync(DatabaseConfig dbConfig)
     {
-        var repository = await GetRepositoryFromServiceAsync(persistenceService);
-        
         DisplayService.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
         DisplayService.WriteLine("║  RAG Context Table Management                                 ║");
         DisplayService.WriteLine("╚═══════════════════════════════════════════════════════════════╝");
@@ -882,13 +877,14 @@ internal static class RunVectorMemoryWithDatabaseMode
         DisplayService.WriteLine("    - Create separate tables for different knowledge domains");
         DisplayService.WriteLine("    - Switch contexts without reloading files");
         DisplayService.WriteLine("    - E.g., GameRules_Fantasy, GameRules_SciFi, Programming_Docs");
+        return Task.CompletedTask;
     }
 
     private static async Task HandleTableListCommandAsync(
         VectorMemoryPersistenceService persistenceService,
         DatabaseConfig dbConfig)
     {
-        var repository = await GetRepositoryFromServiceAsync(persistenceService);
+        var repository = persistenceService.Repository;
         var tables = await repository.GetAllTablesAsync();
         
         DisplayService.WriteLine("\n╔═══════════════════════════════════════════════════════════════╗");
@@ -930,7 +926,7 @@ internal static class RunVectorMemoryWithDatabaseMode
         string tableName,
         VectorMemoryPersistenceService persistenceService)
     {
-        var repository = await GetRepositoryFromServiceAsync(persistenceService);
+        var repository = persistenceService.Repository;
         
         try
         {
@@ -989,10 +985,9 @@ internal static class RunVectorMemoryWithDatabaseMode
     private static async Task<bool> HandleTableSwitchCommandAsync(
         string tableName,
         VectorMemoryPersistenceService persistenceService,
-        DatabaseConfig dbConfig,
-        AppConfiguration appConfig)
+        DatabaseConfig dbConfig)
     {
-        var repository = await GetRepositoryFromServiceAsync(persistenceService);
+        var repository = persistenceService.Repository;
         
         try
         {
@@ -1043,7 +1038,7 @@ internal static class RunVectorMemoryWithDatabaseMode
         string tableName,
         VectorMemoryPersistenceService persistenceService)
     {
-        var repository = await GetRepositoryFromServiceAsync(persistenceService);
+        var repository = persistenceService.Repository;
         
         try
         {
@@ -1067,7 +1062,7 @@ internal static class RunVectorMemoryWithDatabaseMode
             DisplayService.Write("\n   Type 'DELETE' to confirm: ");
             
             var confirmation = Console.ReadLine()?.Trim();
-            if (!confirmation.Equals("DELETE", StringComparison.Ordinal))
+            if (!string.Equals(confirmation, "DELETE", StringComparison.Ordinal))
             {
                 DisplayService.WriteLine("[*] Table deletion cancelled.");
                 return;
@@ -1085,10 +1080,9 @@ internal static class RunVectorMemoryWithDatabaseMode
 
     private static async Task HandleTableInfoCommandAsync(
         VectorMemoryPersistenceService persistenceService,
-        DatabaseConfig dbConfig,
-        AppConfiguration appConfig)
+        DatabaseConfig dbConfig)
     {
-        var repository = await GetRepositoryFromServiceAsync(persistenceService);
+        var repository = persistenceService.Repository;
         
         try
         {
@@ -1122,28 +1116,6 @@ internal static class RunVectorMemoryWithDatabaseMode
         {
             DisplayService.WriteLine($"\n[!] Error getting table info: {ex.Message}");
         }
-    }
-
-    /// <summary>
-    /// Helper to get the repository instance from the persistence service.
-    /// Uses reflection as a workaround since the repository isn't directly exposed.
-    /// </summary>
-    private static async Task<IVectorMemoryRepository> GetRepositoryFromServiceAsync(
-        VectorMemoryPersistenceService persistenceService)
-    {
-        // The repository is private in VectorMemoryPersistenceService
-        // We need to access it via reflection or add a public property
-        var repositoryField = persistenceService.GetType()
-            .GetField("_repository", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        
-        if (repositoryField == null)
-            throw new InvalidOperationException("Could not access repository from persistence service");
-        
-        var repository = repositoryField.GetValue(persistenceService) as IVectorMemoryRepository;
-        if (repository == null)
-            throw new InvalidOperationException("Repository is null");
-        
-        return repository;
     }
 
     private static async Task<bool> HandleSwitchModelCommandAsync(AppConfiguration config, ModelInstancePool modelPool)

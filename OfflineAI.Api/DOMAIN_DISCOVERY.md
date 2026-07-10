@@ -4,7 +4,7 @@
 
 ### 1. Get All Domains
 ```http
-GET /api/Health/domains
+GET /api/Domains
 ```
 
 **Returns:**
@@ -36,12 +36,12 @@ GET /api/Health/domains
 
 ### 2. Get Domains by Category
 ```http
-GET /api/Health/domains/category/{category}
+GET /api/Domains/category/{category}
 ```
 
 **Example:**
 ```http
-GET /api/Health/domains/category/board-games
+GET /api/Domains/category/board-games
 ```
 
 **Returns:**
@@ -58,7 +58,7 @@ GET /api/Health/domains/category/board-games
 
 ### 3. Get All Categories
 ```http
-GET /api/Health/domains/categories
+GET /api/Domains/categories
 ```
 
 **Returns:**
@@ -75,7 +75,7 @@ GET /api/Health/domains/categories
 
 ```bash
 # 1. Discover available domains
-GET /api/Health/domains
+GET /api/Domains
 
 # 2. Choose relevant domains from response
 # Look at the "domainId" field
@@ -95,10 +95,10 @@ POST /api/Query
 
 ```bash
 # 1. Get all categories
-GET /api/Health/domains/categories
+GET /api/Domains/categories
 
 # 2. Get domains for a category
-GET /api/Health/domains/category/board-games
+GET /api/Domains/category/board-games
 
 # 3. Use multiple domains from same category
 POST /api/Query
@@ -112,7 +112,7 @@ POST /api/Query
 
 ## When Domains Are Not Available
 
-If you call `/api/Health/domains` and get:
+If you call `/api/Domains` and get:
 
 ```json
 {
@@ -140,39 +140,39 @@ Use the updated `.http` file which now includes:
 
 ```http
 ### Get All Available Domain Filters
-GET {{OfflineAI.Api_HostAddress}}/api/Health/domains
+GET {{OfflineAI.Api_HostAddress}}/api/Domains
 
 ### Get Domains by Category
-GET {{OfflineAI.Api_HostAddress}}/api/Health/domains/category/board-games
+GET {{OfflineAI.Api_HostAddress}}/api/Domains/category/board-games
 
 ### Get All Categories
-GET {{OfflineAI.Api_HostAddress}}/api/Health/domains/categories
+GET {{OfflineAI.Api_HostAddress}}/api/Domains/categories
 ```
 
 ## Common Scenarios
 
 ### Scenario 1: "What domains can I use?"
 ```bash
-GET /api/Health/domains
+GET /api/Domains
 # Use the "domainId" values in your queries
 ```
 
 ### Scenario 2: "What board game rules do you have?"
 ```bash
-GET /api/Health/domains/category/board-games
+GET /api/Domains/category/board-games
 # Returns all board game domains
 ```
 
 ### Scenario 3: "Show me all categories"
 ```bash
-GET /api/Health/domains/categories
+GET /api/Domains/categories
 # Returns list of all category names
 ```
 
 ### Scenario 4: "Search across multiple related domains"
 ```bash
 # Get domains in a category
-GET /api/Health/domains/category/card-games
+GET /api/Domains/category/card-games
 
 # Use multiple domains in query
 POST /api/Query
@@ -186,9 +186,9 @@ POST /api/Query
 
 ## Quick Tips
 
-? **Always check domains first** - Run `GET /api/Health/domains` before making RAG queries with domain filters
+? **Always check domains first** - Run `GET /api/Domains` before making RAG queries with domain filters
 
-? **Use categories to group** - Get related domains via `GET /api/Health/domains/category/{category}`
+? **Use categories to group** - Get related domains via `GET /api/Domains/category/{category}`
 
 ? **Cache the results** - Domain lists don't change frequently, cache them in your client
 
@@ -214,7 +214,7 @@ POST /api/Query
 // JavaScript/TypeScript example
 class OfflineAIClient {
   async getAvailableDomains() {
-    const response = await fetch('https://localhost:7015/api/Health/domains');
+    const response = await fetch('https://localhost:7015/api/Domains');
     const data = await response.json();
     
     if (response.status === 503) {

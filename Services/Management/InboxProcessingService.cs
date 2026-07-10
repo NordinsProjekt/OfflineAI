@@ -267,7 +267,6 @@ public class InboxProcessingService(
 
             UpdateStatus($"Found {pdfFiles.Length} PDF file(s). Starting conversion...");
 
-            var pdfProcessor = new PdfFragmentProcessor();
             var filesConverted = 0;
             var errorMessages = new List<string>();
 
@@ -330,7 +329,7 @@ public class InboxProcessingService(
     /// <summary>
     /// Extract raw text from PDF file using PdfPig
     /// </summary>
-    private async Task<string> ExtractTextFromPdfAsync(string pdfPath)
+    private static async Task<string> ExtractTextFromPdfAsync(string pdfPath)
     {
         return await Task.Run(() =>
         {

@@ -35,7 +35,7 @@
                         <div class="oa-upload-icon">[+]</div>
                         <h2>Drop your document here</h2>
                         <p>or click to browse</p>
-                        <InputFile @ref="fileInput" id="file-input" OnChange="HandleFileSelected" class="oa-file-input" accept=".txt,.doc,.docx,.pdf" />
+                        <InputFile id="file-input" OnChange="HandleFileSelected" class="oa-file-input" accept=".txt,.doc,.docx,.pdf" />
                         <p class="oa-upload-hint">Supports: TXT, DOCX, PDF (Max 10MB)</p>
                     </div>
                 }
@@ -126,7 +126,7 @@
                 @if (showAbortButton)
                 {
                     <p style="margin-top: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">
-                        Analysering pågår... Du kan avbryta om det tar för lång tid.
+                        Analysering pÃ¥gÃ¥r sedan @((int)(DateTime.UtcNow - analysisStartTime).TotalSeconds)s... Du kan avbryta om det tar fÃ¶r lÃ¥ng tid.
                     </p>
                     <button class="oa-abort-button" @onclick="AbortAnalysis">
                         Avbryt analys
@@ -144,7 +144,7 @@
                     <div class="oa-kursplan-summary">
                         <div class="oa-summary-stat">
                             <span class="oa-stat-number">@kursplanResult.TotalItems</span>
-                            <span class="oa-stat-label">KURSMÅL TOTALT</span>
+                            <span class="oa-stat-label">KURSMÃ…L TOTALT</span>
                         </div>
                         <div class="oa-summary-stat">
                             <span class="oa-stat-number">@kursplanResult.Sections.Count</span>
@@ -236,7 +236,6 @@
 
 @code {
     private IBrowserFile? uploadedFile;
-    private InputFile? fileInput;
     private bool isDragOver;
     private bool isAnalyzing;
     private string analysisStatus = "";
@@ -254,11 +253,12 @@
     private DateTime analysisStartTime;
     private bool showAbortButton = false;
     private const int MaxAnalysisTimeMs = 300000; // 5 minutes
+    private const long MaxUploadSizeBytes = 10 * 1024 * 1024; // 10 MB
 
     // Q&A mode state
     private bool isQAMode = false;
     private string currentQuestion = "";
-    private List<(string Question, string Answer)> qaHistory = [];
+    private readonly List<(string Question, string Answer)> qaHistory = [];
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -302,24 +302,26 @@
     {
         if (file == null) return;
 
-        analysisStatus = $"Läser {file.Name}...";
+        analysisStatus = $"LÃ¤ser {file.Name}...";
         
         try
         {
             var extension = Path.GetExtension(file.Name).ToLowerInvariant();
-            
+
+            // MaxUploadSizeBytes (10 MB) below is the reviewed, intentional cap for all three
+            // branches (S5693 severity for *.razor is set to none in .editorconfig â€” see comment there).
             if (extension == ".txt")
             {
-                using var stream = file.OpenReadStream(maxAllowedSize: 10485760);
+                using var stream = file.OpenReadStream(MaxUploadSizeBytes);
                 using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
                 fullDocumentText = await reader.ReadToEndAsync();
             }
             else if (extension == ".docx" || extension == ".doc")
             {
                 using var memoryStream = new MemoryStream();
-                await file.OpenReadStream(maxAllowedSize: 10485760).CopyToAsync(memoryStream);
+                await file.OpenReadStream(MaxUploadSizeBytes).CopyToAsync(memoryStream);
                 memoryStream.Position = 0;
-                
+
                 var (success, text, error) = ExtractTextFromDocxStream(memoryStream);
                 if (!success)
                 {
@@ -332,9 +334,9 @@
             else if (extension == ".pdf")
             {
                 using var memoryStream = new MemoryStream();
-                await file.OpenReadStream(maxAllowedSize: 10485760).CopyToAsync(memoryStream);
+                await file.OpenReadStream(MaxUploadSizeBytes).CopyToAsync(memoryStream);
                 memoryStream.Position = 0;
-                
+
                 var (success, text, error) = ExtractTextFromPdfStream(memoryStream);
                 if (!success)
                 {
@@ -353,7 +355,7 @@
 
             if (string.IsNullOrWhiteSpace(fullDocumentText))
             {
-                errorMessage = "Kunde inte extrahera text från filen.";
+                errorMessage = "Kunde inte extrahera text frÃ¥n filen.";
                 return;
             }
 
@@ -363,12 +365,12 @@
         }
         catch (Exception ex)
         {
-            errorMessage = $"Fel vid läsning av fil: {ex.Message}";
+            errorMessage = $"Fel vid lÃ¤sning av fil: {ex.Message}";
             fullDocumentText = "";
         }
     }
 
-    private (bool Success, string Text, string Error) ExtractTextFromDocxStream(MemoryStream stream)
+    private static (bool Success, string Text, string Error) ExtractTextFromDocxStream(MemoryStream stream)
     {
         try
         {
@@ -380,17 +382,15 @@
             }
 
             var textBuilder = new System.Text.StringBuilder();
-            var body = doc.MainDocumentPart.Document.Body;
+            var body = doc.MainDocumentPart.Document?.Body;
             
             if (body != null)
             {
-                foreach (var paragraph in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>())
+                foreach (var text in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>()
+                             .Select(paragraph => paragraph.InnerText)
+                             .Where(text => !string.IsNullOrWhiteSpace(text)))
                 {
-                    var text = paragraph.InnerText;
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        textBuilder.AppendLine(text);
-                    }
+                    textBuilder.AppendLine(text);
                 }
 
                 foreach (var table in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Table>())
@@ -415,18 +415,18 @@
             
             if (string.IsNullOrWhiteSpace(extractedText))
             {
-                return (false, "", "Ingen textinnehåll hittades i DOCX-filen");
+                return (false, "", "Ingen textinnehÃ¤ll hittades i DOCX-filen");
             }
 
             return (true, extractedText, "");
         }
         catch (Exception ex)
         {
-            return (false, "", $"Fel vid läsning av DOCX: {ex.Message}");
+            return (false, "", $"Fel vid lÃ¤sning av DOCX: {ex.Message}");
         }
     }
 
-    private (bool Success, string Text, string Error) ExtractTextFromPdfStream(MemoryStream stream)
+    private static (bool Success, string Text, string Error) ExtractTextFromPdfStream(MemoryStream stream)
     {
         try
         {
@@ -442,14 +442,14 @@
 
             if (string.IsNullOrWhiteSpace(extractedText))
             {
-                return (false, "", "Ingen textinnehåll hittades i PDF-filen");
+                return (false, "", "Ingen textinnehÃ¤ll hittades i PDF-filen");
             }
 
             return (true, extractedText, "");
         }
         catch (Exception ex)
         {
-            return (false, "", $"Fel vid läsning av PDF: {ex.Message}");
+            return (false, "", $"Fel vid lÃ¤sning av PDF: {ex.Message}");
         }
     }
 
@@ -469,7 +469,7 @@
     {
         if (string.IsNullOrEmpty(fullDocumentText))
         {
-            errorMessage = "Ingen dokumenttext tillgänglig. Ladda upp en fil.";
+            errorMessage = "Ingen dokumenttext tillgÃ¤nglig. Ladda upp en fil.";
             return;
         }
 
@@ -514,7 +514,7 @@
         }
         catch (OperationCanceledException)
         {
-            analysisResult = "Analys avbruten av användaren.";
+            analysisResult = "Analys avbruten av anvÃ¤ndaren.";
             analysisStatus = "Avbryten";
             analysisSubStatus = "";
         }
@@ -704,7 +704,7 @@ Provide a clear, accurate answer based only on the information in the document. 
 
     private async Task AnalyzeKursmal()
     {
-        analysisStatus = "Extraherar kursmål...";
+        analysisStatus = "Extraherar kursmÃ¥l...";
         StateHasChanged();
         await Task.Delay(300);
 
@@ -713,7 +713,7 @@ Provide a clear, accurate answer based only on the information in the document. 
 
         if (kursplanResult.TotalItems > 0)
         {
-            analysisStatus = $"Hittade {kursplanResult.TotalItems} kursmål i {kursplanResult.Sections.Count} sektioner";
+            analysisStatus = $"Hittade {kursplanResult.TotalItems} kursmÃ¥l i {kursplanResult.Sections.Count} sektioner";
             analysisSubStatus = "";
             StateHasChanged();
             await Task.Delay(200);
@@ -723,17 +723,17 @@ Provide a clear, accurate answer based only on the information in the document. 
         }
         else
         {
-            analysisStatus = "Inga strukturerade mål hittades";
-            analysisResult = "Kunde inte hitta Kunskaper, Färdigheter eller Kompetenser i dokumentet.\n\n";
-            analysisResult += "Förväntad struktur:\n#Kunskaper\n#Färdigheter\n#Kompetenser\n\n";
-            analysisResult += "Råtext (första 1000 tecken):\n\n";
+            analysisStatus = "Inga strukturerade mÃ¥l hittades";
+            analysisResult = "Kunde inte hitta Kunskaper, FÃ¤rdigheter eller Kompetenser i dokumentet.\n\n";
+            analysisResult += "FÃ¶rvÃ¤ntad struktur:\n#Kunskaper\n#FÃ¤rdigheter\n#Kompetenser\n\n";
+            analysisResult += "RÃ¥text (fÃ¶rsta 1000 tecken):\n\n";
             analysisResult += fullDocumentText.Length > 1000 
                 ? fullDocumentText.Substring(0, 1000) + "..." 
                 : fullDocumentText;
         }
     }
 
-    private string GetTypeClass(DocumentTypeDetector.DocumentType type)
+    private static string GetTypeClass(DocumentTypeDetector.DocumentType type)
     {
         return type switch
         {
@@ -744,7 +744,7 @@ Provide a clear, accurate answer based only on the information in the document. 
         };
     }
 
-    private string GetActionIcon(string actionId)
+    private static string GetActionIcon(string actionId)
     {
         return actionId switch
         {
@@ -760,7 +760,7 @@ Provide a clear, accurate answer based only on the information in the document. 
     {
         if (string.IsNullOrEmpty(analysisResult))
         {
-            errorMessage = "Ingen innehåll att kopiera.";
+            errorMessage = "Ingen innehÃ¤ll att kopiera.";
             return;
         }
 
@@ -784,7 +784,7 @@ Provide a clear, accurate answer based only on the information in the document. 
     {
         if (string.IsNullOrEmpty(analysisResult))
         {
-            errorMessage = "Ingen innehåll att ladda ner.";
+            errorMessage = "Ingen innehÃ¤ll att ladda ner.";
             return;
         }
 
@@ -812,7 +812,7 @@ Provide a clear, accurate answer based only on the information in the document. 
         kursplanResult = null;
     }
 
-    private string FormatFileSize(long bytes)
+    private static string FormatFileSize(long bytes)
     {
         string[] sizes = ["B", "KB", "MB", "GB"];
         double len = bytes;

@@ -77,7 +77,7 @@ public sealed class Gemma4CliService : IGemma4CliService
             throw new ArgumentException("Image data must not be empty.", nameof(imageData));
 
         var ext = MimeTypeToExtension(mimeType);
-        var tempImage = Path.ChangeExtension(Path.GetTempFileName(), ext);
+        var tempImage = Path.ChangeExtension(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()), ext);
         try
         {
             await File.WriteAllBytesAsync(tempImage, imageData.ToArray(), cancellationToken);
@@ -141,7 +141,7 @@ public sealed class Gemma4CliService : IGemma4CliService
         string? imagePath,
         CancellationToken cancellationToken)
     {
-        var tempPromptFile = Path.GetTempFileName();
+        var tempPromptFile = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
         try
         {
             await File.WriteAllTextAsync(tempPromptFile, prompt, Encoding.UTF8, cancellationToken);
@@ -218,7 +218,7 @@ public sealed class Gemma4CliService : IGemma4CliService
             try { process.Kill(entireProcessTree: true); } catch { /* already exited */ }
         }
 
-        process.WaitForExit();
+        await process.WaitForExitAsync();
         process.Dispose();
 
         // Small delay so the last OutputDataReceived events can flush

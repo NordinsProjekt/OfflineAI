@@ -12,7 +12,7 @@ namespace Presentation.AiDashboard.Tests.Components;
 /// </summary>
 public class ChatTopBarTests : TestContext
 {
-    private DashboardState CreateMockDashboardState()
+    private static DashboardState CreateMockDashboardState()
     {
         var state = new DashboardState();
         return state;
@@ -38,7 +38,8 @@ public class ChatTopBarTests : TestContext
         Assert.NotNull(cut.Find(".oa-badge.green")); // RAG badge (when enabled)
         Assert.NotNull(cut.Find(".oa-badge.blue"));  // Model badge
         Assert.NotNull(cut.Find(".oa-badge.purple")); // Temperature badge
-        var gpuBadge = cut.FindAll(".oa-badge").Last(); // GPU badge (last one)
+        var gpuBadges = cut.FindAll(".oa-badge");
+        var gpuBadge = gpuBadges[gpuBadges.Count - 1]; // GPU badge (last one)
         Assert.True(gpuBadge.ClassList.Contains("oa-badge"));
     }
 

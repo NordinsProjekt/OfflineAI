@@ -18,6 +18,8 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
     private readonly string _connectionString;
     private const string DomainsTable = "KnowledgeDomains";
     private const string VariantsTable = "DomainVariants";
+    private const string DomainsTableRef = "[KnowledgeDomains]";
+    private const string VariantsTableRef = "[DomainVariants]";
 
     public KnowledgeDomainRepository(string connectionString)
     {
@@ -30,7 +32,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
             -- Create KnowledgeDomains table
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{DomainsTable}')
             BEGIN
-                CREATE TABLE [{DomainsTable}] (
+                CREATE TABLE {DomainsTableRef} (
                     Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
                     DomainId NVARCHAR(255) NOT NULL UNIQUE,
                     DisplayName NVARCHAR(500) NOT NULL,
@@ -40,24 +42,24 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
                     Source NVARCHAR(100) NOT NULL DEFAULT 'manual'
                 );
 
-                CREATE INDEX IX_{DomainsTable}_DomainId ON [{DomainsTable}](DomainId);
-                CREATE INDEX IX_{DomainsTable}_Category ON [{DomainsTable}](Category);
-                CREATE INDEX IX_{DomainsTable}_CreatedAt ON [{DomainsTable}](CreatedAt);
+                CREATE INDEX IX_{DomainsTable}_DomainId ON {DomainsTableRef}(DomainId);
+                CREATE INDEX IX_{DomainsTable}_Category ON {DomainsTableRef}(Category);
+                CREATE INDEX IX_{DomainsTable}_CreatedAt ON {DomainsTableRef}(CreatedAt);
             END
 
             -- Create DomainVariants table
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{VariantsTable}')
             BEGIN
-                CREATE TABLE [{VariantsTable}] (
+                CREATE TABLE {VariantsTableRef} (
                     Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
                     DomainId UNIQUEIDENTIFIER NOT NULL,
                     VariantText NVARCHAR(500) NOT NULL,
                     CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
-                    FOREIGN KEY (DomainId) REFERENCES [{DomainsTable}](Id) ON DELETE CASCADE
+                    FOREIGN KEY (DomainId) REFERENCES {DomainsTableRef}(Id) ON DELETE CASCADE
                 );
 
-                CREATE INDEX IX_{VariantsTable}_DomainId ON [{VariantsTable}](DomainId);
-                CREATE INDEX IX_{VariantsTable}_VariantText ON [{VariantsTable}](VariantText);
+                CREATE INDEX IX_{VariantsTable}_DomainId ON {VariantsTableRef}(DomainId);
+                CREATE INDEX IX_{VariantsTable}_VariantText ON {VariantsTableRef}(VariantText);
             END";
 
         using var connection = new SqlConnection(_connectionString);
@@ -79,13 +81,13 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
 
         using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
-        using var transaction = connection.BeginTransaction();
+        await using var transaction = await connection.BeginTransactionAsync();
 
         try
         {
             // Check if domain already exists
             var existingDomain = await connection.QuerySingleOrDefaultAsync<KnowledgeDomainEntity>(
-                $"SELECT * FROM [{DomainsTable}] WHERE DomainId = @DomainId",
+                $"SELECT * FROM {DomainsTableRef} WHERE DomainId = @DomainId",
                 new { DomainId = domainId },
                 transaction);
 
@@ -95,7 +97,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
             {
                 // Update existing domain
                 await connection.ExecuteAsync(
-                    $@"UPDATE [{DomainsTable}] 
+                    $@"UPDATE {DomainsTableRef} 
                        SET DisplayName = @DisplayName,
                            Category = @Category,
                            UpdatedAt = GETUTCDATE(),
@@ -108,7 +110,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
 
                 // Remove old variants
                 await connection.ExecuteAsync(
-                    $"DELETE FROM [{VariantsTable}] WHERE DomainId = @DomainId",
+                    $"DELETE FROM {VariantsTableRef} WHERE DomainId = @DomainId",
                     new { DomainId = entityId },
                     transaction);
             }
@@ -125,7 +127,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
                 };
 
                 await connection.ExecuteAsync(
-                    $@"INSERT INTO [{DomainsTable}] (Id, DomainId, DisplayName, Category, CreatedAt, UpdatedAt, Source)
+                    $@"INSERT INTO {DomainsTableRef} (Id, DomainId, DisplayName, Category, CreatedAt, UpdatedAt, Source)
                        VALUES (@Id, @DomainId, @DisplayName, @Category, @CreatedAt, @UpdatedAt, @Source)",
                     entity,
                     transaction);
@@ -148,19 +150,19 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
                 if (variantEntities.Any())
                 {
                     await connection.ExecuteAsync(
-                        $@"INSERT INTO [{VariantsTable}] (Id, DomainId, VariantText, CreatedAt)
+                        $@"INSERT INTO {VariantsTableRef} (Id, DomainId, VariantText, CreatedAt)
                            VALUES (@Id, @DomainId, @VariantText, @CreatedAt)",
                         variantEntities,
                         transaction);
                 }
             }
 
-            transaction.Commit();
+            await transaction.CommitAsync();
             return entityId;
         }
         catch
         {
-            transaction.Rollback();
+            await transaction.RollbackAsync();
             throw;
         }
     }
@@ -169,7 +171,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
     {
         using var connection = new SqlConnection(_connectionString);
         var results = await connection.QueryAsync<KnowledgeDomainEntity>(
-            $"SELECT * FROM [{DomainsTable}] ORDER BY Category, DisplayName");
+            $"SELECT * FROM {DomainsTableRef} ORDER BY Category, DisplayName");
         
         return results.AsList();
     }
@@ -178,7 +180,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
     {
         using var connection = new SqlConnection(_connectionString);
         var results = await connection.QueryAsync<KnowledgeDomainEntity>(
-            $"SELECT * FROM [{DomainsTable}] WHERE Category = @Category ORDER BY DisplayName",
+            $"SELECT * FROM {DomainsTableRef} WHERE Category = @Category ORDER BY DisplayName",
             new { Category = category });
         
         return results.AsList();
@@ -188,7 +190,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
     {
         using var connection = new SqlConnection(_connectionString);
         return await connection.QuerySingleOrDefaultAsync<KnowledgeDomainEntity>(
-            $"SELECT * FROM [{DomainsTable}] WHERE DomainId = @DomainId",
+            $"SELECT * FROM {DomainsTableRef} WHERE DomainId = @DomainId",
             new { DomainId = domainId });
     }
 
@@ -196,7 +198,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
     {
         using var connection = new SqlConnection(_connectionString);
         var results = await connection.QueryAsync<DomainVariantEntity>(
-            $"SELECT * FROM [{VariantsTable}] WHERE DomainId = @DomainId",
+            $"SELECT * FROM {VariantsTableRef} WHERE DomainId = @DomainId",
             new { DomainId = domainId });
         
         return results.AsList();
@@ -206,8 +208,8 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
     {
         var sql = $@"
             SELECT d.DomainId, v.VariantText
-            FROM [{DomainsTable}] d
-            INNER JOIN [{VariantsTable}] v ON d.Id = v.DomainId
+            FROM {DomainsTableRef} d
+            INNER JOIN {VariantsTableRef} v ON d.Id = v.DomainId
             ORDER BY d.DomainId, v.VariantText";
 
         using var connection = new SqlConnection(_connectionString);
@@ -225,7 +227,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
     {
         using var connection = new SqlConnection(_connectionString);
         var count = await connection.ExecuteScalarAsync<int>(
-            $"SELECT COUNT(1) FROM [{DomainsTable}] WHERE DomainId = @DomainId",
+            $"SELECT COUNT(1) FROM {DomainsTableRef} WHERE DomainId = @DomainId",
             new { DomainId = domainId });
         
         return count > 0;
@@ -235,7 +237,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
     {
         using var connection = new SqlConnection(_connectionString);
         await connection.ExecuteAsync(
-            $@"UPDATE [{DomainsTable}] 
+            $@"UPDATE {DomainsTableRef} 
                SET DisplayName = @DisplayName, UpdatedAt = GETUTCDATE()
                WHERE DomainId = @DomainId",
             new { DomainId = domainId, DisplayName = displayName });
@@ -245,7 +247,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
     {
         using var connection = new SqlConnection(_connectionString);
         await connection.ExecuteAsync(
-            $@"UPDATE [{DomainsTable}] 
+            $@"UPDATE {DomainsTableRef} 
                SET Category = @Category, UpdatedAt = GETUTCDATE()
                WHERE DomainId = @DomainId",
             new { DomainId = domainId, Category = category });
@@ -265,7 +267,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
 
         // Check if variant already exists
         var existingVariant = await connection.ExecuteScalarAsync<int>(
-            $@"SELECT COUNT(1) FROM [{VariantsTable}] 
+            $@"SELECT COUNT(1) FROM {VariantsTableRef} 
                WHERE DomainId = @DomainId AND VariantText = @VariantText",
             new { DomainId = domain.Id, VariantText = variant.ToLowerInvariant() });
 
@@ -280,7 +282,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
         };
 
         await connection.ExecuteAsync(
-            $@"INSERT INTO [{VariantsTable}] (Id, DomainId, VariantText, CreatedAt)
+            $@"INSERT INTO {VariantsTableRef} (Id, DomainId, VariantText, CreatedAt)
                VALUES (@Id, @DomainId, @VariantText, @CreatedAt)",
             variantEntity);
     }
@@ -294,7 +296,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
             return;
 
         await connection.ExecuteAsync(
-            $"DELETE FROM [{VariantsTable}] WHERE DomainId = @DomainId AND VariantText = @VariantText",
+            $"DELETE FROM {VariantsTableRef} WHERE DomainId = @DomainId AND VariantText = @VariantText",
             new { DomainId = domain.Id, VariantText = variant.ToLowerInvariant() });
     }
 
@@ -304,7 +306,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
         
         // Foreign key cascade will delete variants automatically
         await connection.ExecuteAsync(
-            $"DELETE FROM [{DomainsTable}] WHERE DomainId = @DomainId",
+            $"DELETE FROM {DomainsTableRef} WHERE DomainId = @DomainId",
             new { DomainId = domainId });
     }
 
@@ -318,8 +320,8 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
         // Get all variants and check which ones match
         var sql = $@"
             SELECT DISTINCT d.DomainId
-            FROM [{DomainsTable}] d
-            INNER JOIN [{VariantsTable}] v ON d.Id = v.DomainId
+            FROM {DomainsTableRef} d
+            INNER JOIN {VariantsTableRef} v ON d.Id = v.DomainId
             WHERE @Query LIKE '%' + v.VariantText + '%'
             ORDER BY d.DomainId";
 
@@ -333,7 +335,7 @@ public class KnowledgeDomainRepository : IKnowledgeDomainRepository
     {
         using var connection = new SqlConnection(_connectionString);
         var results = await connection.QueryAsync<string>(
-            $"SELECT DISTINCT Category FROM [{DomainsTable}] ORDER BY Category");
+            $"SELECT DISTINCT Category FROM {DomainsTableRef} ORDER BY Category");
         
         return results.AsList();
     }

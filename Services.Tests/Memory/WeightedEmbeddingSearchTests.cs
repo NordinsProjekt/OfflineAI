@@ -150,7 +150,7 @@ public class WeightedEmbeddingSearchTests
             new MockMemoryFragment
             {
                 Category = "Sopsortering - Patronhylsa, med kula",
-                Content = "Lämnas till polisen eller godkänd vapenhandlare.",
+                Content = "LÃ¤mnas till polisen eller godkÃ¤nd vapenhandlare.",
                 CategoryEmbedding = CreateEmbedding(2.0f, similarity: 0.65f), // Partial match ("kula")
                 ContentEmbedding = CreateEmbedding(2.1f, similarity: 0.70f),
                 CombinedEmbedding = CreateEmbedding(2.05f, similarity: 0.67f)
@@ -160,7 +160,7 @@ public class WeightedEmbeddingSearchTests
             new MockMemoryFragment
             {
                 Category = "Sopsortering - Vapen",
-                Content = "Kontakta polisen. Får inte kastas i hushållssopor.",
+                Content = "Kontakta polisen. FÃ¥r inte kastas i hushÃ¥llssopor.",
                 CategoryEmbedding = CreateEmbedding(3.0f, similarity: 0.60f),
                 ContentEmbedding = CreateEmbedding(3.1f, similarity: 0.65f),
                 CombinedEmbedding = CreateEmbedding(3.05f, similarity: 0.62f)
@@ -169,8 +169,8 @@ public class WeightedEmbeddingSearchTests
             // Completely unrelated items - should score very low
             new MockMemoryFragment
             {
-                Category = "Sopsortering - Fallskärm",
-                Content = "Lämnas till återvinningscentralen som textil.",
+                Category = "Sopsortering - FallskÃ¤rm",
+                Content = "LÃ¤mnas till Ã¥tervinningscentralen som textil.",
                 CategoryEmbedding = CreateEmbedding(4.0f, similarity: 0.20f),
                 ContentEmbedding = CreateEmbedding(4.1f, similarity: 0.25f),
                 CombinedEmbedding = CreateEmbedding(4.05f, similarity: 0.22f)
@@ -179,7 +179,7 @@ public class WeightedEmbeddingSearchTests
             new MockMemoryFragment
             {
                 Category = "Sopsortering - Ugnsformar - metall",
-                Content = "Metallåtervinning. Rengör innan lämning.",
+                Content = "MetallÃ¥tervinning. RengÃ¶r innan lÃ¤mning.",
                 CategoryEmbedding = CreateEmbedding(5.0f, similarity: 0.15f),
                 ContentEmbedding = CreateEmbedding(5.1f, similarity: 0.18f),
                 CombinedEmbedding = CreateEmbedding(5.05f, similarity: 0.16f)
@@ -188,7 +188,7 @@ public class WeightedEmbeddingSearchTests
             new MockMemoryFragment
             {
                 Category = "Sopsortering - Trikloretylen",
-                Content = "Farligt avfall. Lämnas till återvinningscentralen.",
+                Content = "Farligt avfall. LÃ¤mnas till Ã¥tervinningscentralen.",
                 CategoryEmbedding = CreateEmbedding(6.0f, similarity: 0.12f),
                 ContentEmbedding = CreateEmbedding(6.1f, similarity: 0.14f),
                 CombinedEmbedding = CreateEmbedding(6.05f, similarity: 0.13f)
@@ -196,8 +196,8 @@ public class WeightedEmbeddingSearchTests
             
             new MockMemoryFragment
             {
-                Category = "Sopsortering - Spritkök - tömd på vätskor",
-                Content = "Metallskrot eller återvinningscentral.",
+                Category = "Sopsortering - SpritkÃ¶k - tÃ¶md pÃ¥ vÃ¤tskor",
+                Content = "Metallskrot eller Ã¥tervinningscentral.",
                 CategoryEmbedding = CreateEmbedding(7.0f, similarity: 0.10f),
                 ContentEmbedding = CreateEmbedding(7.1f, similarity: 0.12f),
                 CombinedEmbedding = CreateEmbedding(7.05f, similarity: 0.11f)
@@ -206,7 +206,7 @@ public class WeightedEmbeddingSearchTests
             new MockMemoryFragment
             {
                 Category = "Sopsortering - Kvicksilvertermometer",
-                Content = "Farligt avfall. Måste lämnas separat.",
+                Content = "Farligt avfall. MÃ¥ste lÃ¤mnas separat.",
                 CategoryEmbedding = CreateEmbedding(8.0f, similarity: 0.08f),
                 ContentEmbedding = CreateEmbedding(8.1f, similarity: 0.10f),
                 CombinedEmbedding = CreateEmbedding(8.05f, similarity: 0.09f)
@@ -214,8 +214,8 @@ public class WeightedEmbeddingSearchTests
             
             new MockMemoryFragment
             {
-                Category = "Sopsortering - Armeringsjärn",
-                Content = "Metallskrot. Lämnas på återvinningscentralen.",
+                Category = "Sopsortering - ArmeringsjÃ¤rn",
+                Content = "Metallskrot. LÃ¤mnas pÃ¥ Ã¥tervinningscentralen.",
                 CategoryEmbedding = CreateEmbedding(9.0f, similarity: 0.06f),
                 ContentEmbedding = CreateEmbedding(9.1f, similarity: 0.08f),
                 CombinedEmbedding = CreateEmbedding(9.05f, similarity: 0.07f)
@@ -223,8 +223,8 @@ public class WeightedEmbeddingSearchTests
             
             new MockMemoryFragment
             {
-                Category = "Sopsortering - Vattenfärg",
-                Content = "Restavfall om torrfärg, annars farligt avfall.",
+                Category = "Sopsortering - VattenfÃ¤rg",
+                Content = "Restavfall om torrfÃ¤rg, annars farligt avfall.",
                 CategoryEmbedding = CreateEmbedding(10.0f, similarity: 0.05f),
                 ContentEmbedding = CreateEmbedding(10.1f, similarity: 0.07f),
                 CombinedEmbedding = CreateEmbedding(10.05f, similarity: 0.06f)
@@ -254,8 +254,8 @@ public class WeightedEmbeddingSearchTests
             .ToList();
         
         // Assert
-        var topMatch = scoredFragments.First();
-        
+        var topMatch = scoredFragments[0];
+
         // The top match should be "Kulspruta"
         topMatch.Fragment.Category.Should().Be("Sopsortering - Kulspruta");
         
@@ -289,11 +289,11 @@ public class WeightedEmbeddingSearchTests
                     fragment.ContentEmbedding,
                     fragment.CombinedEmbedding)
             })
-            .OrderByDescending(x => x.Score)
             .Where(x => x.Score >= minRelevanceScore)
+            .OrderByDescending(x => x.Score)
             .Take(topK)
             .ToList();
-        
+
         // Assert
         results.Should().HaveCount(3);
         
@@ -389,8 +389,8 @@ public class WeightedEmbeddingSearchTests
             .OrderByDescending(x => x.WeightedScore)
             .ToList();
         
-        var topMatch = scores.First();
-        
+        var topMatch = scores[0];
+
         // Assert - Category weight (40%) should make category match dominant
         topMatch.Category.Should().Be("Sopsortering - Kulspruta");
         topMatch.CategoryScore.Should().BeGreaterThan(topMatch.ContentScore);
@@ -459,7 +459,7 @@ public class WeightedEmbeddingSearchTests
         // Assert
         results.Should().NotBeEmpty();
         results.All(r => r.Score >= minScore).Should().BeTrue();
-        results.First().Fragment.Category.Should().Be("Sopsortering - Kulspruta");
+        results[0].Fragment.Category.Should().Be("Sopsortering - Kulspruta");
     }
 
     [Fact]
@@ -467,7 +467,7 @@ public class WeightedEmbeddingSearchTests
     {
         // Arrange - Simulate the real production issue
         var fragments = CreateMockFragments();
-        var queryEmbedding = CreateEmbedding(1.0f, similarity: 1.0f); // "Hur återvinner jag en kulspruta?"
+        var queryEmbedding = CreateEmbedding(1.0f, similarity: 1.0f); // "Hur Ã¥tervinner jag en kulspruta?"
         
         // Act
         var results = fragments
@@ -588,10 +588,10 @@ public class WeightedEmbeddingSearchTests
                     fragment.ContentEmbedding,
                     fragment.CombinedEmbedding)
             })
-            .OrderByDescending(x => x.Score)
             .Where(x => x.Score >= minRelevanceScore)
+            .OrderByDescending(x => x.Score)
             .ToList();
-        
+
         // Assert - "How to Win" category should be top match
         results.Should().NotBeEmpty();
         results[0].Fragment.Category.Should().Contain("How to Win");

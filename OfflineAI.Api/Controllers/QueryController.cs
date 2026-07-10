@@ -1,15 +1,15 @@
 using Microsoft.AspNetCore.Mvc;
 using OfflineAI.Api.Models;
 using OfflineAI.Api.Services;
-using System.Diagnostics;
 
 namespace OfflineAI.Api.Controllers;
 
 /// <summary>
-/// Main API controller for LLM query operations with RAG support.
+/// Text-based LLM query operations with RAG support. Image queries live in
+/// <see cref="ImageQueryController"/>.
 /// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/Query")]
 [Produces("application/json")]
 public class QueryController : ControllerBase
 {
@@ -44,8 +44,8 @@ public class QueryController : ControllerBase
         [FromBody] QueryRequest request,
         CancellationToken cancellationToken = default)
     {
-        var stopwatch = Stopwatch.StartNew();
-        
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
         try
         {
             // Validate request
@@ -108,9 +108,9 @@ public class QueryController : ControllerBase
 
             return Ok(response);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
         {
-            _logger.LogWarning("Query was cancelled by client");
+            _logger.LogWarning(ex, "Query was cancelled by client");
             return StatusCode(408, new ErrorResponse
             {
                 Error = "Request cancelled",
@@ -118,9 +118,9 @@ public class QueryController : ControllerBase
                 Details = "The request was cancelled before completion"
             });
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
-            _logger.LogWarning("Query exceeded {Timeout} second timeout", MaxTimeoutSeconds);
+            _logger.LogWarning(ex, "Query exceeded {Timeout} second timeout", MaxTimeoutSeconds);
             return StatusCode(408, new ErrorResponse
             {
                 Error = $"Request timeout after {MaxTimeoutSeconds} seconds",
@@ -151,7 +151,7 @@ public class QueryController : ControllerBase
             {
                 Error = "Internal server error",
                 StatusCode = 500,
-                Details = ex.Message,
+                Details = "An unexpected error occurred. See the server logs for details.",
                 Suggestions = new List<string>
                 {
                     "Check server logs for details",

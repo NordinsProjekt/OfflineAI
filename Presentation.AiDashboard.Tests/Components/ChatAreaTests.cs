@@ -17,7 +17,7 @@ namespace Presentation.AiDashboard.Tests.Components;
 /// <see cref="IFileAgentService"/>, so a real instance rooted at a per-test temp directory is
 /// registered for every test.
 /// </summary>
-public class ChatAreaTests : TestContext, IDisposable
+public sealed class ChatAreaTests : TestContext, IDisposable
 {
     private readonly string _tempDir;
 
@@ -35,7 +35,7 @@ public class ChatAreaTests : TestContext, IDisposable
         GC.SuppressFinalize(this);
     }
 
-    private DashboardState CreateMockDashboardState()
+    private static DashboardState CreateMockDashboardState()
     {
         var state = new DashboardState();
         return state;

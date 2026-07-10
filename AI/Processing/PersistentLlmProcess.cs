@@ -12,7 +12,7 @@ namespace Application.AI.Processing;
 /// NOTE: This is a simplified implementation. For production use with llama-cli interactive mode,
 /// you may need to use llama.cpp server mode instead (--server flag) with HTTP API.
 /// </summary>
-public class PersistentLlmProcess : IPersistentLlmProcess
+public sealed class PersistentLlmProcess : IPersistentLlmProcess
 {
     private readonly string _llmPath;
     private readonly string _modelPath;
@@ -117,7 +117,7 @@ public class PersistentLlmProcess : IPersistentLlmProcess
             // double-quote characters (code samples, SQL strings, etc.) or real newlines,
             // because CreateProcess argument parsing terminates the quoted token at the first
             // unescaped " it encounters.  Using -f <file> bypasses all of that entirely.
-            tempPromptFile = Path.GetTempFileName();
+            tempPromptFile = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
             await File.WriteAllTextAsync(tempPromptFile, fullPrompt, System.Text.Encoding.UTF8);
 
             // Create process for this query
@@ -210,48 +210,59 @@ public class PersistentLlmProcess : IPersistentLlmProcess
                 // Look for assistant tag - support multiple formats
                 if (!assistantStarted)
                 {
-                    var fullText = output.ToString() + e.Data;
-                    
+                    // Accumulate every pre-marker chunk (not just the latest one) so a marker
+                    // split across two OutputDataReceived callbacks is still detected.
+                    output.Append(e.Data).Append('\n');
+                    var fullText = output.ToString();
+
                     // Try different assistant tag formats used by different models
                     // Order matters - check more specific patterns first!
+                    var foundMarker = false;
                     foreach (var (pattern, marker) in LlmOutputPatterns.AssistantPatterns)
                     {
                         var assistantIndex = fullText.IndexOf(pattern, StringComparison.Ordinal); // Use Ordinal for exact match
                         if (assistantIndex >= 0)
                         {
                             assistantStarted = true;
+                            foundMarker = true;
                             var startIndex = assistantIndex + marker.Length;
                             output.Clear();
-                            
+
                             // Extract text after the assistant marker
                             var textAfterMarker = fullText.Substring(startIndex).TrimStart('\r', '\n', ' ');
                             output.Append(textAfterMarker);
-                            
+
                             Console.WriteLine($"\n[Detected format: {pattern}]"); // Debug info
                             Console.Write(textAfterMarker); // Write the first chunk
                             break;
                         }
                     }
+
+                    // Stream the raw, not-yet-matched output live instead of staying silent
+                    // until the marker is found (or the call times out). This is what shows
+                    // model-loading progress, banners, and any interactive-mode prompts while
+                    // we're waiting for the assistant marker to appear.
+                    if (!foundMarker)
+                    {
+                        Console.Write($"\n[raw] {e.Data}");
+                    }
                 }
                 else
                 {
                     // Check if this chunk contains an end marker
-                    foreach (var endMarker in LlmOutputPatterns.EndMarkers)
+                    var matchedEndMarker = LlmOutputPatterns.EndMarkers.FirstOrDefault(m => e.Data.Contains(m));
+                    if (matchedEndMarker != null)
                     {
-                        if (e.Data.Contains(endMarker))
+                        // Extract text before the end marker
+                        var endIndex = e.Data.IndexOf(matchedEndMarker, StringComparison.Ordinal);
+                        if (endIndex > 0)
                         {
-                            // Extract text before the end marker
-                            var endIndex = e.Data.IndexOf(endMarker, StringComparison.Ordinal);
-                            if (endIndex > 0)
-                            {
-                                var finalText = e.Data.Substring(0, endIndex);
-                                Console.Write(finalText);
-                                output.Append(finalText);
-                            }
-                            Console.WriteLine($"\n[End marker detected: {endMarker}]");
-                            endMarkerDetected = true;
-                            break;
+                            var finalText = e.Data.Substring(0, endIndex);
+                            Console.Write(finalText);
+                            output.Append(finalText);
                         }
+                        Console.WriteLine($"\n[End marker detected: {matchedEndMarker}]");
+                        endMarkerDetected = true;
                     }
                     
                     // Only append if no end marker detected
@@ -272,6 +283,14 @@ public class PersistentLlmProcess : IPersistentLlmProcess
                 lock (outputLock)
                 {
                     error.AppendLine(e.Data);
+
+                    // Stream stderr live too (skip the noisy, purely informational backend
+                    // lines) so model-loading progress is visible instead of only appearing
+                    // in the final error dump.
+                    if (!e.Data.Contains("ggml_cuda_init") && !e.Data.Contains("load_backend"))
+                    {
+                        Console.Write($"\n[stderr] {e.Data}");
+                    }
                 }
             }
         };
@@ -333,7 +352,7 @@ public class PersistentLlmProcess : IPersistentLlmProcess
         }
 
         // Wait for output/error streams to finish
-        process.WaitForExit();
+        await process.WaitForExitAsync();
 
         var result = output.ToString();
         var errorText = error.ToString();
@@ -374,7 +393,7 @@ public class PersistentLlmProcess : IPersistentLlmProcess
 
         // Remove incomplete sentence at the end if it ends with '>'
         // This happens when generation is cut off mid-token
-        if (cleaned.EndsWith(">") && !cleaned.EndsWith(">>"))
+        if (cleaned.EndsWith('>') && !cleaned.EndsWith(">>"))
         {
             var lastCompleteStop = Math.Max(
                 cleaned.LastIndexOf('.'),
@@ -392,11 +411,12 @@ public class PersistentLlmProcess : IPersistentLlmProcess
 
     public void Dispose()
     {
-        if (_disposed)
-            return;
-
-        _disposed = true;
-        _requestLock?.Dispose();
+        if (!_disposed)
+        {
+            _requestLock?.Dispose();
+            _disposed = true;
+        }
+        GC.SuppressFinalize(this);
     }
 }
 

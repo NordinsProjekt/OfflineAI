@@ -12,7 +12,7 @@ namespace Services.Tests.AgentTools;
 /// LLM. Uses <see cref="ScriptedLlm"/> to script a sequence of canned LLM replies and capture
 /// every prompt sent to it.
 /// </summary>
-public class AgenticChatServiceTests : IDisposable
+public sealed class AgenticChatServiceTests : IDisposable
 {
     private readonly string _tempDir;
     private readonly FileAgentService _fileAgent;
@@ -147,7 +147,7 @@ public class AgenticChatServiceTests : IDisposable
     {
         var llm = new ScriptedLlm("Stockholm är huvudstaden i Sverige.");
         using var cts = new CancellationTokenSource();
-        cts.Cancel();
+        await cts.CancelAsync();
 
         var act = async () => await _sut.SendWithToolsAsync("Fråga", llm.SendAsync, cts.Token);
 

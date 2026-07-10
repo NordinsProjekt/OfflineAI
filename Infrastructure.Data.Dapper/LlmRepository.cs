@@ -13,6 +13,7 @@ public class LlmRepository : ILlmRepository
 {
     private readonly string _connectionString;
     private const string LlmsTable = "LLMs";
+    private const string LlmsTableRef = "[LLMs]";
 
     public LlmRepository(string connectionString)
     {
@@ -32,14 +33,14 @@ public class LlmRepository : ILlmRepository
         {
             // Create new table with correct schema
             var createTableSql = $@"
-                CREATE TABLE [{LlmsTable}] (
+                CREATE TABLE {LlmsTableRef} (
                     Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
                     LlmName NVARCHAR(500) NOT NULL UNIQUE,
                     CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
                 );
 
-                CREATE INDEX IX_{LlmsTable}_LlmName ON [{LlmsTable}](LlmName);
-                CREATE INDEX IX_{LlmsTable}_CreatedAt ON [{LlmsTable}](CreatedAt);";
+                CREATE INDEX IX_{LlmsTable}_LlmName ON {LlmsTableRef}(LlmName);
+                CREATE INDEX IX_{LlmsTable}_CreatedAt ON {LlmsTableRef}(CreatedAt);";
 
             await connection.ExecuteAsync(createTableSql);
         }
@@ -72,10 +73,12 @@ public class LlmRepository : ILlmRepository
 
                     if (!string.IsNullOrEmpty(oldColumnName))
                     {
-                        // Rename the column
-                        await connection.ExecuteAsync($@"
-                            EXEC sp_rename '{LlmsTable}.{oldColumnName}', 'LlmName', 'COLUMN'");
-                        
+                        // Rename the column. sp_rename's parameters are string values (not raw SQL
+                        // identifiers), so they can be passed as regular bound parameters.
+                        await connection.ExecuteAsync(
+                            "EXEC sp_rename @ObjectName, @NewName, @ObjectType",
+                            new { ObjectName = $"{LlmsTable}.{oldColumnName}", NewName = "LlmName", ObjectType = "COLUMN" });
+
                         Console.WriteLine($"[MIGRATION] Renamed column '{oldColumnName}' to 'LlmName' in {LlmsTable} table");
                     }
                 }
@@ -83,7 +86,7 @@ public class LlmRepository : ILlmRepository
                 {
                     // Add the missing column
                     await connection.ExecuteAsync($@"
-                        ALTER TABLE [{LlmsTable}] 
+                        ALTER TABLE {LlmsTableRef} 
                         ADD LlmName NVARCHAR(500) NOT NULL DEFAULT ''");
                     
                     Console.WriteLine($"[MIGRATION] Added LlmName column to {LlmsTable} table");
@@ -101,13 +104,13 @@ public class LlmRepository : ILlmRepository
                     try
                     {
                         await connection.ExecuteAsync($@"
-                            CREATE UNIQUE INDEX IX_{LlmsTable}_LlmName ON [{LlmsTable}](LlmName)");
+                            CREATE UNIQUE INDEX IX_{LlmsTable}_LlmName ON {LlmsTableRef}(LlmName)");
                     }
                     catch
                     {
                         // If unique constraint fails, try non-unique index
                         await connection.ExecuteAsync($@"
-                            CREATE INDEX IX_{LlmsTable}_LlmName ON [{LlmsTable}](LlmName)");
+                            CREATE INDEX IX_{LlmsTable}_LlmName ON {LlmsTableRef}(LlmName)");
                     }
                 }
             }
@@ -124,7 +127,7 @@ public class LlmRepository : ILlmRepository
 
         // Check if LLM already exists
         var existingLlm = await connection.QuerySingleOrDefaultAsync<LlmEntity>(
-            $"SELECT * FROM [{LlmsTable}] WHERE LlmName = @LlmName",
+            $"SELECT * FROM {LlmsTableRef} WHERE LlmName = @LlmName",
             new { LlmName = llmName });
 
         if (existingLlm != null)
@@ -141,7 +144,7 @@ public class LlmRepository : ILlmRepository
         };
 
         await connection.ExecuteAsync(
-            $@"INSERT INTO [{LlmsTable}] (Id, LlmName, CreatedAt)
+            $@"INSERT INTO {LlmsTableRef} (Id, LlmName, CreatedAt)
                VALUES (@Id, @LlmName, @CreatedAt)",
             newLlm);
 
@@ -152,7 +155,7 @@ public class LlmRepository : ILlmRepository
     {
         using var connection = new SqlConnection(_connectionString);
         var results = await connection.QueryAsync<LlmEntity>(
-            $"SELECT * FROM [{LlmsTable}] ORDER BY CreatedAt DESC");
+            $"SELECT * FROM {LlmsTableRef} ORDER BY CreatedAt DESC");
 
         return results.AsList();
     }
@@ -161,7 +164,7 @@ public class LlmRepository : ILlmRepository
     {
         using var connection = new SqlConnection(_connectionString);
         return await connection.QuerySingleOrDefaultAsync<LlmEntity>(
-            $"SELECT * FROM [{LlmsTable}] WHERE LlmName = @LlmName",
+            $"SELECT * FROM {LlmsTableRef} WHERE LlmName = @LlmName",
             new { LlmName = llmName });
     }
 
@@ -169,7 +172,7 @@ public class LlmRepository : ILlmRepository
     {
         using var connection = new SqlConnection(_connectionString);
         return await connection.QuerySingleOrDefaultAsync<LlmEntity>(
-            $"SELECT * FROM [{LlmsTable}] WHERE Id = @Id",
+            $"SELECT * FROM {LlmsTableRef} WHERE Id = @Id",
             new { Id = id });
     }
 
@@ -177,7 +180,7 @@ public class LlmRepository : ILlmRepository
     {
         using var connection = new SqlConnection(_connectionString);
         var count = await connection.ExecuteScalarAsync<int>(
-            $"SELECT COUNT(1) FROM [{LlmsTable}] WHERE LlmName = @LlmName",
+            $"SELECT COUNT(1) FROM {LlmsTableRef} WHERE LlmName = @LlmName",
             new { LlmName = llmName });
 
         return count > 0;
@@ -187,7 +190,7 @@ public class LlmRepository : ILlmRepository
     {
         using var connection = new SqlConnection(_connectionString);
         await connection.ExecuteAsync(
-            $"DELETE FROM [{LlmsTable}] WHERE Id = @Id",
+            $"DELETE FROM {LlmsTableRef} WHERE Id = @Id",
             new { Id = id });
     }
 }

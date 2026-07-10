@@ -11,9 +11,9 @@ namespace AiDashboard.Services
     {
         private readonly List<IMemoryFragment> _memory = new();
 
-        public void ImportMemory(IMemoryFragment memoryFragment)
+        public void ImportMemory(IMemoryFragment section)
         {
-            _memory.Add(memoryFragment);
+            _memory.Add(section);
         }
 
         public override string ToString()

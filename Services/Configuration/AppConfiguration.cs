@@ -245,6 +245,16 @@ public class FolderSettings
     /// Defaults to Documents\OfflineAI\AgentFiles when left empty.
     /// </summary>
     public string AgentFilesFolder { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Root directory that every workspace must live inside. Workspaces created via the API or
+    /// dashboard are rejected if their resolved path falls outside this root, so the file agent
+    /// can never be pointed at an arbitrary location on disk (see the WorkspaceService
+    /// confinement check). When left empty, the root defaults to the parent directory of
+    /// <see cref="AgentFilesFolder"/> (i.e. Documents\OfflineAI when AgentFilesFolder is unset).
+    /// Widen this only if you deliberately want workspaces outside that tree.
+    /// </summary>
+    public string WorkspaceRoot { get; set; } = string.Empty;
 }
 
 public class PoolSettings

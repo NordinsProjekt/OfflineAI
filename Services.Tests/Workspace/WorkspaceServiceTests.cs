@@ -9,7 +9,7 @@ namespace Services.Tests.Workspace;
 /// file agent is confined to, so correct seeding, switching, and persistence here are what
 /// guarantee the LLM can never leave the directory the user selected.
 /// </summary>
-public class WorkspaceServiceTests : IDisposable
+public sealed class WorkspaceServiceTests : IDisposable
 {
     private readonly string _rootDir;
     private readonly string _defaultWorkspacePath;

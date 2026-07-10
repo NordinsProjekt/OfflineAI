@@ -10,7 +10,7 @@ namespace Services.Tests.FileAgent;
 /// parsing &lt;REDIGERA RAD=...&gt; blocks from an LLM response and applying the resulting
 /// <see cref="LineEdit"/> replacements to a file.
 /// </summary>
-public class FileAgentServiceTests : IDisposable
+public sealed class FileAgentServiceTests : IDisposable
 {
     private readonly string _tempDir;
     private readonly FileAgentService _sut;
@@ -972,5 +972,6 @@ public class FileAgentServiceTests : IDisposable
         var found = _sut.TryFindAgentCommand(response, out var command);
 
         found.Should().BeFalse();
+        command.Should().BeEmpty();
     }
 }

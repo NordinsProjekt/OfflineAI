@@ -91,18 +91,15 @@ public static class DocumentChunker
                 var sentences = SplitIntoSentences(paragraph);
                 foreach (var sentence in sentences)
                 {
-                    if (currentChunk.Length + sentence.Length > options.MaxChunkSize)
+                    if (currentChunk.Length + sentence.Length > options.MaxChunkSize && currentChunk.Length >= options.MinChunkSize)
                     {
-                        if (currentChunk.Length >= options.MinChunkSize)
+                        chunks.Add(CreateChunk(currentChunk.ToString(), chunkIndex++));
+                        currentChunk.Clear();
+
+                        if (options.OverlapSize > 0)
                         {
-                            chunks.Add(CreateChunk(currentChunk.ToString(), chunkIndex++));
-                            currentChunk.Clear();
-                            
-                            if (options.OverlapSize > 0)
-                            {
-                                var overlap = GetOverlap(chunks[^1].Content, options.OverlapSize);
-                                currentChunk.Append(overlap);
-                            }
+                            var overlap = GetOverlap(chunks[^1].Content, options.OverlapSize);
+                            currentChunk.Append(overlap);
                         }
                     }
                     
@@ -387,7 +384,6 @@ public static class DocumentChunker
         // - Code: ~3 chars per token
         // - Numbers/symbols: ~2 chars per token
         
-        var charCount = text.Length;
         var wordCount = text.Split(new[] { ' ', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries).Length;
         
         // Average approach

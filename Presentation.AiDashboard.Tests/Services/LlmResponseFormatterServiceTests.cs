@@ -704,7 +704,9 @@ public class Person
 
         // Assert
         Assert.Contains("[C# Code]", result);
-        Assert.Contains("Sure, here's a simple", result);
+        // Prose is HTML-encoded for safety, so an apostrophe is emitted as its HTML entity and
+        // renders back to an apostrophe in the browser.
+        Assert.Contains("Sure, here&#39;s a simple", result);
         Assert.Contains("To run this program", result);
         
         // Verify code elements are present
@@ -906,6 +908,51 @@ public class Person
         // The code contents must not have been turned into list/strong tags
         Assert.DoesNotContain("<ul class=\"llm-list\">", result);
         Assert.DoesNotContain("<strong>not bold</strong>", result);
+    }
+
+    // ----- XSS: model text is rendered as a raw MarkupString, so any markup in it must be encoded -----
+
+    [Fact]
+    public void FormatResponse_WithScriptTagInProse_EncodesIt()
+    {
+        // Arrange
+        var input = "Here is the answer.<script>alert('xss')</script>";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert - the raw executable tag must not survive into the rendered markup
+        Assert.DoesNotContain("<script>", result);
+        Assert.Contains("&lt;script&gt;", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithEventHandlerAttributeInProse_EncodesIt()
+    {
+        // Arrange
+        var input = "Look at this image: <img src=x onerror=\"alert(document.cookie)\">";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert - no live <img> element / event handler is emitted
+        Assert.DoesNotContain("<img", result);
+        Assert.Contains("&lt;img", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithHtmlInsideCodeBlock_EncodesButStillHighlights()
+    {
+        // Arrange - a script tag inside a code fence must be shown as text, never executed
+        var input = "```html\n<script>alert(1)</script>\n```";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("[HTML Code]", result);
+        Assert.DoesNotContain("<script>", result);
+        Assert.Contains("&lt;", result); // encoded angle brackets present
     }
 
     [Fact]

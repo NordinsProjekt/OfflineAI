@@ -5,11 +5,18 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>4ad32ab0-0a7e-4a93-be10-20d63b660d7e</UserSecretsId>
+    <!-- S5693 is a Security Hotspot ("Limit the content length of HTTP requests") that fires on
+         every IBrowserFile.OpenReadStream(maxAllowedSize:) call regardless of the limit's value —
+         it has no code fix, only manual review, and neither #pragma nor .editorconfig severity
+         overrides suppress it for Razor-generated code. DocumentAnalysis.razor and
+         DocumentAnalysisService.cs already pass an explicit, reviewed size cap to every call. -->
+    <NoWarn>$(NoWarn);S5693</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
     <PackageReference Include="HtmlAgilityPack" Version="1.12.4" />
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.5.0" />
     <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
   </ItemGroup>
 

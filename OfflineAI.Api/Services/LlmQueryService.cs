@@ -8,7 +8,7 @@ using Services.Interfaces;
 using Services.Memory;
 using Services.Repositories;
 using Services.Language;
-using Microsoft.SemanticKernel.Embeddings;
+using Microsoft.Extensions.AI;
 using System.Diagnostics;
 
 namespace OfflineAI.Api.Services;
@@ -22,7 +22,7 @@ public class LlmQueryService : ILlmQueryService
     private readonly IModelInstancePool _modelPool;
     private readonly ILogger<LlmQueryService> _logger;
     private readonly AppConfiguration _appConfig;
-    private readonly ITextEmbeddingGenerationService? _embeddingService;
+    private readonly IEmbeddingGenerator<string, Embedding<float>>? _embeddingService;
     private readonly IVectorMemoryRepository? _vectorRepository;
     private readonly ILanguageStopWordsService? _stopWordsService;
 
@@ -30,7 +30,7 @@ public class LlmQueryService : ILlmQueryService
         IModelInstancePool modelPool,
         ILogger<LlmQueryService> logger,
         AppConfiguration appConfig,
-        ITextEmbeddingGenerationService? embeddingService = null,
+        IEmbeddingGenerator<string, Embedding<float>>? embeddingService = null,
         IVectorMemoryRepository? vectorRepository = null,
         ILanguageStopWordsService? stopWordsService = null)
     {
@@ -44,139 +44,124 @@ public class LlmQueryService : ILlmQueryService
 
     public async Task<QueryResponse> QueryAsync(QueryRequest request, CancellationToken cancellationToken = default)
     {
+        // Errors intentionally propagate uncaught: QueryController already logs and translates
+        // every exception type here (InvalidOperationException, OperationCanceledException, etc.)
+        // into the appropriate HTTP response, so catching and re-logging here would just duplicate it.
         var stopwatch = Stopwatch.StartNew();
         var warnings = new List<string>();
 
-        try
+        // Get model settings
+        var llmSettings = _appConfig.Llm;
+        if (llmSettings == null || string.IsNullOrEmpty(llmSettings.ExecutablePath) || string.IsNullOrEmpty(llmSettings.ModelPath))
         {
-            // Get model settings
-            var llmSettings = _appConfig.Llm;
-            if (llmSettings == null || string.IsNullOrEmpty(llmSettings.ExecutablePath) || string.IsNullOrEmpty(llmSettings.ModelPath))
-            {
-                throw new InvalidOperationException(
-                    "LLM is not configured. Please set ExecutablePath and ModelPath in User Secrets. " +
-                    "Right-click the project > Manage User Secrets");
-            }
-
-            // Verify files exist
-            if (!System.IO.File.Exists(llmSettings.ExecutablePath))
-            {
-                throw new InvalidOperationException($"LLM executable not found at: {llmSettings.ExecutablePath}");
-            }
-
-            if (!System.IO.File.Exists(llmSettings.ModelPath))
-            {
-                throw new InvalidOperationException($"LLM model file not found at: {llmSettings.ModelPath}");
-            }
-
-            // Create generation settings from request
-            var generationSettings = new GenerationSettings
-            {
-                Temperature = (float)request.Temperature,
-                MaxTokens = request.MaxTokens,
-                TopK = 40,
-                TopP = 0.95f,
-                RepeatPenalty = 1.1f,
-                PresencePenalty = 0.0f,
-                FrequencyPenalty = 0.0f,
-                RagTopK = request.TopK,
-                RagMinRelevanceScore = request.MinRelevanceScore
-            };
-
-            // Determine RAG context and mode
-            string? ragContext = request.Context;
-            int documentsRetrieved = 0;
-            bool usedVectorSearch = false;
-
-            if (request.EnableRag)
-            {
-                if (string.IsNullOrEmpty(ragContext))
-                {
-                    // Auto RAG: Use vector search
-                    (ragContext, documentsRetrieved) = await RetrieveContextFromVectorSearchAsync(
-                        request.Question,
-                        request.TopK,
-                        request.MinRelevanceScore,
-                        request.DomainFilter,
-                        warnings);
-                    usedVectorSearch = true;
-                }
-                else
-                {
-                    // Manual RAG: Use provided context
-                    _logger.LogInformation("Using provided manual context ({Length} characters)", ragContext.Length);
-                }
-            }
-
-            // Create memory instances (use SimpleMemory for now since DatabaseVectorMemory requires more setup)
-            var memory = new SimpleMemory();
-            var conversationMemory = new SimpleMemory();
-
-            // Create chat service
-            var chatService = new AiChatServicePooled(
-                memory,
-                conversationMemory,
-                _modelPool,
-                generationSettings,
-                llmSettings,
-                debugMode: false,
-                enableRag: request.EnableRag && !string.IsNullOrEmpty(ragContext),
-                showPerformanceMetrics: false);
-
-            // Execute query
-            _logger.LogInformation(
-                "Executing LLM query. Question: '{Question}', RAG: {RagEnabled}, Vector Search: {VectorSearch}, Docs: {Docs}",
-                request.Question,
-                request.EnableRag,
-                usedVectorSearch,
-                documentsRetrieved);
-
-            var answer = await chatService.SendMessageAsync(
-                request.Question,
-                cancellationToken);
-
-            stopwatch.Stop();
-
-            // Parse answer and estimate tokens
-            var (promptTokens, completionTokens) = EstimateTokens(request.Question, answer, ragContext);
-
-            var response = new QueryResponse
-            {
-                Answer = CleanAnswer(answer),
-                Model = request.Model ?? llmSettings.ModelName ?? "local-llm",
-                UsedRag = request.EnableRag && !string.IsNullOrEmpty(ragContext),
-                DocumentsRetrieved = documentsRetrieved,
-                ResponseTimeMs = stopwatch.ElapsedMilliseconds,
-                PromptTokens = promptTokens,
-                CompletionTokens = completionTokens,
-                TokensPerSecond = completionTokens / (stopwatch.ElapsedMilliseconds / 1000.0),
-                Success = true,
-                Warnings = warnings
-            };
-
-            _logger.LogInformation(
-                "Query completed. Time: {Time}ms, Tokens: {Tokens}, RAG: {Rag}",
-                response.ResponseTimeMs,
-                response.TotalTokens,
-                response.UsedRag);
-
-            return response;
+            throw new InvalidOperationException(
+                "LLM is not configured. Please set ExecutablePath and ModelPath in User Secrets. " +
+                "Right-click the project > Manage User Secrets");
         }
-        catch (InvalidOperationException ex)
+
+        // Verify files exist
+        if (!System.IO.File.Exists(llmSettings.ExecutablePath))
         {
-            _logger.LogError(ex, "Configuration error");
-            throw;
+            throw new InvalidOperationException($"LLM executable not found at: {llmSettings.ExecutablePath}");
         }
-        catch (OperationCanceledException)
+
+        if (!System.IO.File.Exists(llmSettings.ModelPath))
         {
-            _logger.LogWarning("Query was cancelled");
-            throw;
+            throw new InvalidOperationException($"LLM model file not found at: {llmSettings.ModelPath}");
         }
-        catch (Exception ex)
+
+        // Create generation settings from request
+        var generationSettings = new GenerationSettings
         {
-            _logger.LogError(ex, "Error executing query");
-            throw;
+            Temperature = request.Temperature,
+            MaxTokens = request.MaxTokens,
+            TopK = 40,
+            TopP = 0.95f,
+            RepeatPenalty = 1.1f,
+            PresencePenalty = 0.0f,
+            FrequencyPenalty = 0.0f,
+            RagTopK = request.TopK,
+            RagMinRelevanceScore = request.MinRelevanceScore
+        };
+
+        // Determine RAG context and mode
+        string? ragContext = request.Context;
+        int documentsRetrieved = 0;
+        bool usedVectorSearch = false;
+
+        if (request.EnableRag)
+        {
+            if (string.IsNullOrEmpty(ragContext))
+            {
+                // Auto RAG: Use vector search
+                (ragContext, documentsRetrieved) = await RetrieveContextFromVectorSearchAsync(
+                    request.Question,
+                    request.TopK,
+                    request.MinRelevanceScore,
+                    request.DomainFilter,
+                    warnings);
+                usedVectorSearch = true;
+            }
+            else
+            {
+                // Manual RAG: Use provided context
+                _logger.LogInformation("Using provided manual context ({Length} characters)", ragContext.Length);
+            }
         }
+
+        // Create memory instances (use SimpleMemory for now since DatabaseVectorMemory requires more setup)
+        var memory = new SimpleMemory();
+        var conversationMemory = new SimpleMemory();
+
+        // Create chat service
+        var chatService = new AiChatServicePooled(
+            memory,
+            conversationMemory,
+            _modelPool,
+            generationSettings,
+            llmSettings,
+            debugMode: false,
+            enableRag: request.EnableRag && !string.IsNullOrEmpty(ragContext),
+            showPerformanceMetrics: false);
+
+        // Execute query
+        _logger.LogInformation(
+            "Executing LLM query. Question: '{Question}', RAG: {RagEnabled}, Vector Search: {VectorSearch}, Docs: {Docs}",
+            request.Question,
+            request.EnableRag,
+            usedVectorSearch,
+            documentsRetrieved);
+
+        var answer = await chatService.SendMessageAsync(
+            request.Question,
+            cancellationToken);
+
+        stopwatch.Stop();
+
+        // Parse answer and estimate tokens
+        var (promptTokens, completionTokens) = EstimateTokens(request.Question, answer, ragContext);
+
+        var response = new QueryResponse
+        {
+            Answer = CleanAnswer(answer),
+            Model = request.Model ?? llmSettings.ModelName ?? "local-llm",
+            UsedRag = request.EnableRag && !string.IsNullOrEmpty(ragContext),
+            DocumentsRetrieved = documentsRetrieved,
+            ResponseTimeMs = stopwatch.ElapsedMilliseconds,
+            PromptTokens = promptTokens,
+            CompletionTokens = completionTokens,
+            TokensPerSecond = completionTokens / (stopwatch.ElapsedMilliseconds / 1000.0),
+            Success = true,
+            Warnings = warnings
+        };
+
+        _logger.LogInformation(
+            "Query completed. Time: {Time}ms, Tokens: {Tokens}, RAG: {Rag}",
+            response.ResponseTimeMs,
+            response.TotalTokens,
+            response.UsedRag);
+
+        return response;
     }
 
     /// <summary>

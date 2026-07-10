@@ -14,7 +14,7 @@ namespace Application.AI.Pooling;
 /// 
 /// Memory usage: ~1-1.5 GB per instance for TinyLlama 1.1B Q5_K_M
 /// </summary>
-public class ModelInstancePool : IModelInstancePool
+public sealed class ModelInstancePool : IModelInstancePool
 {
     private readonly ConcurrentBag<PersistentLlmProcess> _availableInstances = new();
     private readonly SemaphoreSlim _semaphore;
@@ -354,8 +354,9 @@ public class ModelInstancePool : IModelInstancePool
         }
 
         _semaphore?.Dispose();
-        
+
         Console.WriteLine($"[+] Pool disposed");
+        GC.SuppressFinalize(this);
     }
 }
 

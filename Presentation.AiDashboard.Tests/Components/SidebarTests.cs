@@ -12,7 +12,7 @@ namespace Presentation.AiDashboard.Tests.Components;
 /// </summary>
 public class SidebarTests : TestContext
 {
-    private DashboardState CreateMockDashboardState()
+    private static DashboardState CreateMockDashboardState()
     {
         var state = new DashboardState();
         return state;

@@ -209,10 +209,12 @@ public class QueryControllerTests
         var statusResult = Assert.IsType<ObjectResult>(actionResult.Result);
         
         Assert.Equal(500, statusResult.StatusCode);
-        
+
         var errorResponse = Assert.IsType<ErrorResponse>(statusResult.Value);
         Assert.Equal("Internal server error", errorResponse.Error);
-        Assert.Contains("LLM service unavailable", errorResponse.Details);
+        // The raw exception message must NOT be leaked to the client (it is logged server-side).
+        Assert.DoesNotContain("LLM service unavailable", errorResponse.Details);
+        Assert.Contains("server logs", errorResponse.Details);
     }
 
     [Fact]

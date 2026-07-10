@@ -9,22 +9,22 @@ public class LanguageStopWordsService : ILanguageStopWordsService
     // Swedish stop words for recycling/everyday queries
     private static readonly string[] SwedishStopWords = new[]
     {
-        "hur", "var", "vad", "när", "varför", "vem", "vilken", "vilket",
-        "ska", "kan", "måste", "bör", "sorterar", "sortera", "slänger", "slänga",
-        "jag", "vi", "du", "ni", "man", "återvinna", "återvinner",
+        "hur", "var", "vad", "nÃ¤r", "varfÃ¶r", "vem", "vilken", "vilket",
+        "ska", "kan", "mÃ¥ste", "bÃ¶r", "sorterar", "sortera", "slÃ¤nger", "slÃ¤nga",
+        "jag", "vi", "du", "ni", "man", "Ã¥tervinna", "Ã¥tervinner",
         "en", "ett", "den", "det", "de",
-        "i", "på", "till", "från", "med", "av",
-        "som", "för", "om", "åt"
+        "i", "pÃ¥", "till", "frÃ¥n", "med", "av",
+        "som", "fÃ¶r", "om", "Ã¥t"
     };
-    
+
     // Swedish light stop words (only pure articles/prepositions)
     private static readonly string[] SwedishLightStopWords = new[]
     {
         "en", "ett", "den", "det", "de",
-        "i", "på", "till", "från", "med", "av",
-        "är", "var", "blev", "vara"
+        "i", "pÃ¥", "till", "frÃ¥n", "med", "av",
+        "Ã¤r", "var", "blev", "vara"
     };
-    
+
     // English stop words for general queries
     private static readonly string[] EnglishStopWords = new[]
     {
@@ -34,14 +34,14 @@ public class LanguageStopWordsService : ILanguageStopWordsService
         "do", "does", "did", "can", "could", "should", "would",
         "to", "of", "and", "or", "but"
     };
-    
+
     // English light stop words (only articles/prepositions)
     private static readonly string[] EnglishLightStopWords = new[]
     {
         "the", "a", "an", "in", "on", "at", "by", "for", "with", "from",
         "is", "are", "was", "were", "be", "been", "being"
     };
-    
+
     public string[] GetStopWords(string language)
     {
         return language?.ToLowerInvariant() switch
@@ -51,7 +51,7 @@ public class LanguageStopWordsService : ILanguageStopWordsService
             _ => Array.Empty<string>() // Unknown language - no filtering
         };
     }
-    
+
     public string[] GetLightStopWords(string language)
     {
         return language?.ToLowerInvariant() switch

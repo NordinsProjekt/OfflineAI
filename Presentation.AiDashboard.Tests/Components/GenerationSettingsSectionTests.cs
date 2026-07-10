@@ -12,7 +12,7 @@ namespace Presentation.AiDashboard.Tests.Components;
 /// </summary>
 public class GenerationSettingsSectionTests : TestContext
 {
-    private DashboardState CreateMockDashboardState()
+    private static DashboardState CreateMockDashboardState()
     {
         var state = new DashboardState();
         // Expand sections by default for testing
@@ -21,7 +21,7 @@ public class GenerationSettingsSectionTests : TestContext
         return state;
     }
 
-    private double ParseNumber(string text)
+    private static double ParseNumber(string text)
     {
         // Try current culture first, then invariant
         if (double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out var result))

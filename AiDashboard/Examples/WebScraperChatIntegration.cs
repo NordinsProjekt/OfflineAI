@@ -259,7 +259,7 @@ Please list all facts in the format:
             _defaultSettings);
         
         var facts = response.Split('\n')
-            .Where(line => line.Trim().StartsWith("-"))
+            .Where(line => line.Trim().StartsWith('-'))
             .Select(line => line.Trim().TrimStart('-').Trim())
             .ToList();
 

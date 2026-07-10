@@ -1,5 +1,5 @@
 using Application.AI.Embeddings;
-using Microsoft.SemanticKernel;
+using Microsoft.Extensions.AI;
 using Moq;
 
 namespace Application.AI.Tests.Embeddings;
@@ -14,7 +14,6 @@ public class SemanticEmbeddingServiceTests
 {
     private const string TestModelPath = "test-models/test-model.onnx";
     private const string TestVocabPath = "test-models/vocab.txt";
-    private const string TestJsonTokenizerPath = "test-models/tokenizer.json";
 
     /// <summary>
     /// Creates a minimal valid BERT vocabulary file for testing.
@@ -233,25 +232,7 @@ public class SemanticEmbeddingServiceTests
 
     #endregion
 
-    #region Attributes Property Tests
-
-    [Fact]
-    public void Attributes_ReturnsEmptyDictionary()
-    {
-        // Note: This test requires a valid service instance
-        // We'll use a mock or skip if files don't exist
-        // For now, we document the expected behavior
-        
-        // The Attributes property should return an empty dictionary
-        // as per ITextEmbeddingGenerationService interface
-        
-        // This would be tested in integration tests with a real model
-        Assert.True(true, "Attributes property returns empty dictionary - tested in integration");
-    }
-
-    #endregion
-
-    #region GenerateEmbeddingAsync Tests - Input Validation
+    #region GenerateAsync Tests - Input Validation
 
     // Note: These tests would require a valid service instance
     // In a real scenario, you would either:
@@ -260,47 +241,25 @@ public class SemanticEmbeddingServiceTests
     // 3. Create test fixtures with minimal test models
 
     [Fact]
-    public async Task GenerateEmbeddingAsync_MethodExists_CanBeInvoked()
+    public async Task GenerateAsync_MethodExists_CanBeInvoked()
     {
         // This test documents the method signature
         // Actual testing requires a valid service instance with model files
-        
-        // Verify method signature through reflection
-        var method = typeof(SemanticEmbeddingService).GetMethod("GenerateEmbeddingAsync");
-        Assert.NotNull(method);
-        
-        // Verify parameters
-        var parameters = method!.GetParameters();
-        Assert.Equal(3, parameters.Length);
-        Assert.Equal("data", parameters[0].Name);
-        Assert.Equal(typeof(string), parameters[0].ParameterType);
-        Assert.Equal("kernel", parameters[1].Name);
-        Assert.Equal(typeof(Kernel), parameters[1].ParameterType);
-        Assert.Equal("cancellationToken", parameters[2].Name);
-        Assert.Equal(typeof(CancellationToken), parameters[2].ParameterType);
-        
-        await Task.CompletedTask; // Satisfy async requirement
-    }
 
-    [Fact]
-    public async Task GenerateEmbeddingsAsync_MethodExists_CanBeInvoked()
-    {
-        // This test documents the method signature
-        
         // Verify method signature through reflection
-        var method = typeof(SemanticEmbeddingService).GetMethod("GenerateEmbeddingsAsync");
+        var method = typeof(SemanticEmbeddingService).GetMethod("GenerateAsync");
         Assert.NotNull(method);
-        
+
         // Verify parameters
         var parameters = method!.GetParameters();
         Assert.Equal(3, parameters.Length);
-        Assert.Equal("data", parameters[0].Name);
-        Assert.True(parameters[0].ParameterType.IsGenericType);
-        Assert.Equal("kernel", parameters[1].Name);
-        Assert.Equal(typeof(Kernel), parameters[1].ParameterType);
+        Assert.Equal("values", parameters[0].Name);
+        Assert.True(typeof(IEnumerable<string>).IsAssignableFrom(parameters[0].ParameterType));
+        Assert.Equal("options", parameters[1].Name);
+        Assert.Equal(typeof(EmbeddingGenerationOptions), parameters[1].ParameterType);
         Assert.Equal("cancellationToken", parameters[2].Name);
         Assert.Equal(typeof(CancellationToken), parameters[2].ParameterType);
-        
+
         await Task.CompletedTask; // Satisfy async requirement
     }
 
@@ -449,15 +408,15 @@ public class SemanticEmbeddingServiceTests
     #region Method Signature Tests
 
     [Fact]
-    public void Class_ImplementsITextEmbeddingGenerationService()
+    public void Class_ImplementsIEmbeddingGenerator()
     {
         // Arrange & Act
-        var interfaceType = typeof(Microsoft.SemanticKernel.Embeddings.ITextEmbeddingGenerationService);
+        var interfaceType = typeof(IEmbeddingGenerator<string, Embedding<float>>);
         var classType = typeof(SemanticEmbeddingService);
 
         // Assert
         Assert.True(interfaceType.IsAssignableFrom(classType),
-            "SemanticEmbeddingService should implement ITextEmbeddingGenerationService");
+            "SemanticEmbeddingService should implement IEmbeddingGenerator<string, Embedding<float>>");
     }
 
     [Fact]
@@ -473,10 +432,10 @@ public class SemanticEmbeddingServiceTests
     }
 
     [Fact]
-    public void GenerateEmbeddingAsync_ReturnsReadOnlyMemoryOfFloat()
+    public void GenerateAsync_ReturnsGeneratedEmbeddingsOfEmbeddingOfFloat()
     {
         // Arrange & Act
-        var method = typeof(SemanticEmbeddingService).GetMethod("GenerateEmbeddingAsync");
+        var method = typeof(SemanticEmbeddingService).GetMethod("GenerateAsync");
         var returnType = method!.ReturnType;
 
         // Assert
@@ -484,26 +443,8 @@ public class SemanticEmbeddingServiceTests
         Assert.Equal(typeof(Task<>), returnType.GetGenericTypeDefinition());
         var taskArgument = returnType.GetGenericArguments()[0];
         Assert.True(taskArgument.IsGenericType);
-        Assert.Equal(typeof(ReadOnlyMemory<>), taskArgument.GetGenericTypeDefinition());
-        Assert.Equal(typeof(float), taskArgument.GetGenericArguments()[0]);
-    }
-
-    [Fact]
-    public void GenerateEmbeddingsAsync_ReturnsListOfReadOnlyMemoryOfFloat()
-    {
-        // Arrange & Act
-        var method = typeof(SemanticEmbeddingService).GetMethod("GenerateEmbeddingsAsync");
-        var returnType = method!.ReturnType;
-
-        // Assert
-        Assert.True(returnType.IsGenericType);
-        Assert.Equal(typeof(Task<>), returnType.GetGenericTypeDefinition());
-        var taskArgument = returnType.GetGenericArguments()[0];
-        Assert.True(taskArgument.IsGenericType);
-        
-        // Should return IList<ReadOnlyMemory<float>>
-        var ilistType = typeof(IList<>).MakeGenericType(typeof(ReadOnlyMemory<float>));
-        Assert.True(ilistType.IsAssignableFrom(taskArgument));
+        Assert.Equal(typeof(GeneratedEmbeddings<>), taskArgument.GetGenericTypeDefinition());
+        Assert.Equal(typeof(Embedding<float>), taskArgument.GetGenericArguments()[0]);
     }
 
     #endregion
@@ -558,7 +499,7 @@ public class SemanticEmbeddingServiceTests
         Assert.Equal(768, parameters[2].DefaultValue);
         
         Assert.True(parameters[3].HasDefaultValue);
-        Assert.Equal(false, parameters[3].DefaultValue);
+        Assert.False((bool)parameters[3].DefaultValue!);
     }
 
     #endregion

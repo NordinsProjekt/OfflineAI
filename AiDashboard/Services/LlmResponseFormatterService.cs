@@ -10,24 +10,6 @@ namespace AiDashboard.Services;
 /// </summary>
 public class LlmResponseFormatterService : ILlmResponseFormatterService
 {
-    private static readonly string[] SupportedLanguages = 
-    {
-        "csharp", "cs", "c#",
-        "python", "py",
-        "java",
-        "javascript", "js",
-        "typescript", "ts",
-        "html",
-        "css",
-        "sql",
-        "json",
-        "xml",
-        "bash", "sh",
-        "powershell", "ps1",
-        "razor", "cshtml",
-        "php"
-    };
-
     /// <summary>
     /// Formats an LLM response by detecting and formatting code blocks.
     /// Handles both markdown-style code blocks (```language) and inline code markers.
@@ -39,11 +21,22 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
             return response;
 
         // Step 0: strip common LLM wrapper artifacts (instruction tokens, metadata headers, etc.)
-        // so every response is normalized before any structural formatting is applied.
+        // so every response is normalized before any structural formatting is applied. This runs
+        // on the raw text because the artifacts it removes contain '<' characters (e.g. <<SYS>>,
+        // <|im_start|>) that the encoding step below would otherwise turn into entities.
         response = StripLlmArtifacts(response);
 
         if (string.IsNullOrWhiteSpace(response))
             return response;
+
+        // Step 0b: HTML-encode the entire response up front. The output of this method is rendered
+        // as a raw MarkupString, so without this any markup in the model's text (e.g.
+        // "<img src=x onerror=...>") would execute. After this point only the tags that the
+        // formatter itself inserts (<pre>, <strong>, <ol>, syntax-highlighting <span>s, etc.) are
+        // live HTML; every character that came from the model is inert. The code-block and
+        // syntax-highlighting passes below therefore no longer encode again (their input is
+        // already encoded), and the blockquote rule matches the encoded "&gt;" marker.
+        response = System.Net.WebUtility.HtmlEncode(response);
 
         // Step 1: ensure numbered list items each start on a new line (handles concatenated output)
         response = InsertLineBreaksBeforeNumberedItems(response);
@@ -80,7 +73,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// (&lt;|im_start|&gt;, &lt;|im_end|&gt;, etc.), metadata header lines (e.g. "[Detected format: Assistant:]"),
     /// and generation-complete footers, then collapses excess blank lines left behind.
     /// </summary>
-    private string StripLlmArtifacts(string response)
+    private static string StripLlmArtifacts(string response)
     {
         // Llama / Mistral / Qwen instruction tokens: [INST], [/INST], <<SYS>> ... <</SYS>>
         response = Regex.Replace(response, @"\[/?INST\]", string.Empty, RegexOptions.IgnoreCase);
@@ -113,7 +106,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// Converts newlines to br tags only outside pre tags.
     /// Preserves newlines inside pre tags for proper code formatting.
     /// </summary>
-    private string ConvertNewlinesToBrTagsOutsidePre(string html)
+    private static string ConvertNewlinesToBrTagsOutsidePre(string html)
     {
         var result = new StringBuilder();
         var inPreTag = false;
@@ -241,7 +234,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return codeBlocks;
     }
 
-    private string FormatMarkdownCodeBlocks(string response)
+    private static string FormatMarkdownCodeBlocks(string response)
     {
         // Pattern to match ```language code``` where language is one of our known languages
         // Order languages by length (longest first) to ensure proper matching
@@ -293,7 +286,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// Extracts the code, re-formats it with proper indentation and syntax highlighting,
     /// and wraps it in the same HTML structure used for markdown code blocks.
     /// </summary>
-    private string FormatCustomCodeMarkers(string response)
+    private static string FormatCustomCodeMarkers(string response)
     {
         // Matches e.g. [C# Code] ... [End C# Code] or [Python Code] ... [End Python Code]
         var pattern = @"\[([A-Za-z#+ ]+?) Code\](.*?)\[End \1 Code\]";
@@ -373,10 +366,12 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// Applies syntax highlighting to code based on language.
     /// Returns HTML with span elements for different syntax elements.
     /// </summary>
-    private string ApplySyntaxHighlighting(string code, string language)
+    private static string ApplySyntaxHighlighting(string code, string language)
     {
         var languageLower = language.ToLowerInvariant();
         
+        // Input is already HTML-encoded by FormatResponse, so the highlighters below insert only
+        // <span> tags and the fallback returns the (already-encoded) text unchanged.
         return languageLower switch
         {
             "csharp" or "cs" or "c#" => HighlightCSharp(code),
@@ -386,15 +381,14 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
             "json" => HighlightJson(code),
             "sql" => HighlightSql(code),
             "php" => HighlightPhp(code),
-            _ => System.Net.WebUtility.HtmlEncode(code) // Fallback: just HTML encode
+            _ => code // Fallback: already encoded upstream
         };
     }
 
-    private string HighlightCSharp(string code)
+    private static string HighlightCSharp(string code)
     {
-        // HTML encode first
-        code = System.Net.WebUtility.HtmlEncode(code);
-        
+        // 'code' is already HTML-encoded by FormatResponse.
+
         // C# keywords
         var keywords = new[] { 
             "public", "private", "protected", "internal", "static", "readonly", "const",
@@ -432,11 +426,10 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return code;
     }
 
-    private string HighlightHtml(string code)
+    private static string HighlightHtml(string code)
     {
-        // HTML encode first
-        code = System.Net.WebUtility.HtmlEncode(code);
-        
+        // 'code' is already HTML-encoded by FormatResponse, so tags arrive as &lt;tag&gt;.
+
         // HTML tags
         code = Regex.Replace(code, @"&lt;(/?)([a-zA-Z][a-zA-Z0-9]*)", 
             "&lt;$1<span class='syntax-tag'>$2</span>");
@@ -457,9 +450,9 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return code;
     }
 
-    private string HighlightJavaScript(string code)
+    private static string HighlightJavaScript(string code)
     {
-        code = System.Net.WebUtility.HtmlEncode(code);
+        // 'code' is already HTML-encoded by FormatResponse.
 
         // Apply single-quoted strings before keyword spans are added (same reason as HighlightPhp).
         code = Regex.Replace(code, @"'([^'\r\n])*?'", "<span class='syntax-string'>$0</span>");
@@ -484,10 +477,9 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return code;
     }
 
-    private string HighlightPhp(string code)
+    private static string HighlightPhp(string code)
     {
-        // HTML encode first
-        code = System.Net.WebUtility.HtmlEncode(code);
+        // 'code' is already HTML-encoded by FormatResponse.
 
         // Apply single-quoted string replacement BEFORE adding any span tags.
         // If applied after keyword/variable spans, the pattern '...' matches the
@@ -530,10 +522,10 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return code;
     }
 
-    private string HighlightCss(string code)
+    private static string HighlightCss(string code)
     {
-        code = System.Net.WebUtility.HtmlEncode(code);
-        
+        // 'code' is already HTML-encoded by FormatResponse.
+
         // Selectors
         code = Regex.Replace(code, @"([.#]?[\w-]+)\s*\{", "<span class='syntax-selector'>$1</span> {");
         
@@ -549,10 +541,10 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return code;
     }
 
-    private string HighlightJson(string code)
+    private static string HighlightJson(string code)
     {
-        code = System.Net.WebUtility.HtmlEncode(code);
-        
+        // 'code' is already HTML-encoded by FormatResponse.
+
         // Property names
         code = Regex.Replace(code, @"&quot;([^&]|&(?!quot;))*?&quot;\s*:", 
             "<span class='syntax-property'>$0</span>");
@@ -570,11 +562,11 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return code;
     }
 
-    private string HighlightSql(string code)
+    private static string HighlightSql(string code)
     {
-        code = System.Net.WebUtility.HtmlEncode(code);
-        
-        var keywords = new[] { 
+        // 'code' is already HTML-encoded by FormatResponse.
+
+        var keywords = new[] {
             "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", "JOIN", "LEFT", "RIGHT", "INNER",
             "ORDER BY", "GROUP BY", "HAVING", "AS", "ON", "AND", "OR", "NOT", "IN", "LIKE",
             "CREATE", "TABLE", "ALTER", "DROP", "PRIMARY KEY", "FOREIGN KEY"
@@ -598,7 +590,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// Handles LLM responses where items are concatenated without newlines,
     /// e.g. "...sentence.1. Next item 2. Another item".
     /// </summary>
-    private string InsertLineBreaksBeforeNumberedItems(string text)
+    private static string InsertLineBreaksBeforeNumberedItems(string text)
     {
         // Insert a newline before "N. " or "NN. " patterns that don't already start a line.
         // Require the item text to begin with an uppercase letter or digit to avoid false positives
@@ -611,7 +603,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// Works on the output of FormatMarkdownCodeBlocks so that &lt;pre&gt; blocks are skipped.
     /// Only converts a run to &lt;ol&gt; when two or more consecutive items are found.
     /// </summary>
-    private string FormatNumberedLists(string html)
+    private static string FormatNumberedLists(string html)
     {
         var result = new StringBuilder();
         var i = 0;
@@ -649,7 +641,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// <summary>
     /// Replaces runs of "N. text" lines in plain text with an HTML &lt;ol&gt; list.
     /// </summary>
-    private string ConvertNumberedListsToHtml(string text)
+    private static string ConvertNumberedListsToHtml(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
             return text;
@@ -682,7 +674,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// Skips content inside &lt;pre&gt; blocks (same strategy as <see cref="FormatNumberedLists"/>)
     /// so code is never altered by these rules.
     /// </summary>
-    private string FormatHumanReadableProse(string html)
+    private static string FormatHumanReadableProse(string html)
     {
         var result = new StringBuilder();
         var i = 0;
@@ -722,7 +714,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// other: whole-line rules (horizontal rules, headings, blockquotes, bullet lists) run first,
     /// then inline emphasis (bold/italic) runs last so it never disturbs a list/quote marker.
     /// </summary>
-    private string ConvertProseElements(string text)
+    private static string ConvertProseElements(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
             return text;
@@ -741,7 +733,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// A line must consist solely of 3+ of the same rule character (optionally spaced) to match,
     /// which keeps it from firing on bullet items or emphasis markers.
     /// </summary>
-    private string ConvertHorizontalRules(string text)
+    private static string ConvertHorizontalRules(string text)
     {
         return Regex.Replace(
             text,
@@ -754,7 +746,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// Converts markdown-style ATX headings (# through ######) into &lt;h1&gt;-&lt;h6&gt; elements.
     /// Trailing '#' characters (e.g. "## Title ##") are stripped from the heading text.
     /// </summary>
-    private string ConvertHeadings(string text)
+    private static string ConvertHeadings(string text)
     {
         return Regex.Replace(
             text,
@@ -775,16 +767,18 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// Converts consecutive markdown blockquote lines ("&gt; text") into a single &lt;blockquote&gt;
     /// element so quoted material stands out from regular prose.
     /// </summary>
-    private string ConvertBlockquotes(string text)
+    private static string ConvertBlockquotes(string text)
     {
+        // The '>' marker arrives HTML-encoded as "&gt;" because FormatResponse encodes the whole
+        // response before this runs, so the patterns match the encoded form.
         return Regex.Replace(
             text,
-            @"(?:^|\n)((?:[ \t]{0,3}>[ \t]?[^\n]*(?:\n|$))+)",
+            @"(?:^|\n)((?:[ \t]{0,3}&gt;[ \t]?[^\n]*(?:\n|$))+)",
             match =>
             {
                 var lines = match.Groups[1].Value
                     .Split('\n')
-                    .Select(l => Regex.Replace(l, @"^[ \t]{0,3}>[ \t]?", string.Empty).Trim())
+                    .Select(l => Regex.Replace(l, @"^[ \t]{0,3}&gt;[ \t]?", string.Empty).Trim())
                     .Where(l => l.Length > 0)
                     .ToList();
 
@@ -801,7 +795,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// HTML &lt;ul&gt; list. Requires a space right after the marker so it never matches bullet
     /// characters that are actually part of bold/italic emphasis (e.g. "**bold**").
     /// </summary>
-    private string ConvertBulletLists(string text)
+    private static string ConvertBulletLists(string text)
     {
         return Regex.Replace(
             text,
@@ -828,7 +822,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// '*' rule never splits a '**' pair, and italic underscores require non-word boundaries so
     /// identifiers like "my_variable_name" are left untouched.
     /// </summary>
-    private string ConvertBoldItalic(string text)
+    private static string ConvertBoldItalic(string text)
     {
         // Bold: **text** or __text__
         text = Regex.Replace(text, @"\*\*(?!\s)([^\n*]+?)(?<!\s)\*\*", "<strong>$1</strong>");
@@ -841,7 +835,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return text;
     }
 
-    private string FormatCode(string rawCode, string language)
+    private static string FormatCode(string rawCode, string language)
     {
         if (string.IsNullOrWhiteSpace(rawCode))
             return rawCode;
@@ -887,7 +881,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// <summary>
     /// Inserts line breaks into code that has none (common in LLM output).
     /// </summary>
-    private string InsertLineBreaksInCode(string code, string language)
+    private static string InsertLineBreaksInCode(string code, string language)
     {
         // If code already has decent line breaks, don't modify
         var lineCount = code.Split('\n').Length;
@@ -910,13 +904,13 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return code;
     }
 
-    private bool IsBraceBasedLanguage(string language)
+    private static bool IsBraceBasedLanguage(string language)
     {
         var braceLanguages = new[] { "csharp", "cs", "c#", "java", "javascript", "js", "typescript", "ts", "css", "php" };
         return braceLanguages.Contains(language);
     }
 
-    private string InsertLineBreaksForBraceLanguages(string code)
+    private static string InsertLineBreaksForBraceLanguages(string code)
     {
         // Insert line breaks after: { } ; and before certain keywords
         code = Regex.Replace(code, @"\{", "{\n");           // After opening brace
@@ -934,7 +928,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return code;
     }
 
-    private string InsertLineBreaksForPython(string code)
+    private static string InsertLineBreaksForPython(string code)
     {
         // Insert line breaks after colons and before keywords
         code = Regex.Replace(code, @":", ":\n");            // After colon
@@ -958,43 +952,47 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         var rawLines = code.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
         var result = new List<string>();
 
-        for (int i = 0; i < rawLines.Length; i++)
+        var i = 0;
+        while (i < rawLines.Length)
         {
             var trimmed = rawLines[i].Trim();
 
             if (string.IsNullOrEmpty(trimmed))
             {
                 result.Add(string.Empty);
+                i++;
                 continue;
             }
 
             // Comments and attributes are never continuation lines
             if (trimmed.StartsWith("//") || trimmed.StartsWith("/*") ||
-                trimmed.StartsWith("*") || trimmed.StartsWith("["))
+                trimmed.StartsWith('*') || trimmed.StartsWith('['))
             {
                 result.Add(trimmed);
+                i++;
                 continue;
             }
 
             // A line is complete when it ends with one of these terminators
-            var isComplete = trimmed.EndsWith(";") || trimmed.EndsWith("{") ||
-                             trimmed.EndsWith("}") || trimmed.EndsWith(",") ||
-                             trimmed.EndsWith(":");
+            var isComplete = trimmed.EndsWith(';') || trimmed.EndsWith('{') ||
+                             trimmed.EndsWith('}') || trimmed.EndsWith(',') ||
+                             trimmed.EndsWith(':');
 
             if (!isComplete && i + 1 < rawLines.Length)
             {
                 var next = rawLines[i + 1].Trim();
                 if (!string.IsNullOrEmpty(next) &&
                     !next.StartsWith("//") &&
-                    !next.StartsWith("["))
+                    !next.StartsWith('['))
                 {
                     result.Add(trimmed + " " + next);
-                    i++; // skip the merged line
+                    i += 2; // skip the merged line
                     continue;
                 }
             }
 
             result.Add(trimmed);
+            i++;
         }
 
         return string.Join("\n", result);
@@ -1015,7 +1013,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return string.Join("\n", lines);
     }
 
-    private (int newIndentLevel, int lineIndent) CalculateIndent(string line, int currentIndent, string language)
+    private static (int newIndentLevel, int lineIndent) CalculateIndent(string line, int currentIndent, string language)
     {
         var languageLower = language.ToLowerInvariant();
         
@@ -1046,19 +1044,19 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         }
     }
 
-    private (int newIndentLevel, int lineIndent) CalculateBraceBasedIndent(string line, int currentIndent)
+    private static (int newIndentLevel, int lineIndent) CalculateBraceBasedIndent(string line, int currentIndent)
     {
         var lineIndent = currentIndent;
-        var newIndentLevel = currentIndent;
+        int newIndentLevel;
 
         // Decrease indent if line starts with closing brace
-        if (line.TrimStart().StartsWith("}") || line.TrimStart().StartsWith("]"))
+        if (line.TrimStart().StartsWith('}') || line.TrimStart().StartsWith(']'))
         {
             lineIndent = Math.Max(0, currentIndent - 1);
             newIndentLevel = lineIndent;
         }
         // Increase indent if line ends with opening brace
-        else if (line.TrimEnd().EndsWith("{") || line.TrimEnd().EndsWith("["))
+        else if (line.TrimEnd().EndsWith('{') || line.TrimEnd().EndsWith('['))
         {
             newIndentLevel = currentIndent + 1;
         }
@@ -1076,13 +1074,13 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return (newIndentLevel, lineIndent);
     }
 
-    private (int newIndentLevel, int lineIndent) CalculatePythonIndent(string line, int currentIndent)
+    private static (int newIndentLevel, int lineIndent) CalculatePythonIndent(string line, int currentIndent)
     {
         var lineIndent = currentIndent;
         var newIndentLevel = currentIndent;
 
         // Increase indent after lines ending with :
-        if (line.TrimEnd().EndsWith(":"))
+        if (line.TrimEnd().EndsWith(':'))
         {
             newIndentLevel = currentIndent + 1;
         }
@@ -1103,7 +1101,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return (newIndentLevel, lineIndent);
     }
 
-    private (int newIndentLevel, int lineIndent) CalculateTagBasedIndent(string line, int currentIndent)
+    private static (int newIndentLevel, int lineIndent) CalculateTagBasedIndent(string line, int currentIndent)
     {
         var lineIndent = currentIndent;
         var newIndentLevel = currentIndent;
@@ -1166,7 +1164,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         return result.ToString();
     }
 
-    private string NormalizeLanguageName(string language)
+    private static string NormalizeLanguageName(string language)
     {
         return language.ToLowerInvariant() switch
         {

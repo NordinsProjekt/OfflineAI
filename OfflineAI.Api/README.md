@@ -1,5 +1,9 @@
 # OfflineAI API Configuration
 
+> **Related docs:** [RAG_CONTEXT_TEMPLATES.md](RAG_CONTEXT_TEMPLATES.md) (manual context templates) ·
+> [DOMAIN_DISCOVERY.md](DOMAIN_DISCOVERY.md) (domain filter endpoints) ·
+> [WORKSPACE_AND_FILES_GUIDE.md](WORKSPACE_AND_FILES_GUIDE.md) (workspaces, file upload, PDFs, pictures)
+
 ## Error: "No healthy instances available in pool"
 
 This error occurs when the LLM model pool cannot be initialized. The most common cause is missing or incorrect configuration.
@@ -100,13 +104,13 @@ Before using domain filters, discover what domains are available:
 
 ```bash
 # Get all available domains
-GET /api/Health/domains
+GET /api/Domains
 
 # Get domains by category
-GET /api/Health/domains/category/board-games
+GET /api/Domains/category/board-games
 
 # Get all categories
-GET /api/Health/domains/categories
+GET /api/Domains/categories
 ```
 
 **Example Response:**
@@ -147,9 +151,9 @@ GET /api/Health/domains/categories
 |----------|--------|-------------|
 | `/api/Health` | GET | Health check |
 | `/api/Health/models` | GET | Available LLM models |
-| `/api/Health/domains` | GET | **All available domain filters** |
-| `/api/Health/domains/category/{category}` | GET | Domains by category |
-| `/api/Health/domains/categories` | GET | All categories |
+| `/api/Domains` | GET | **All available domain filters** |
+| `/api/Domains/category/{category}` | GET | Domains by category |
+| `/api/Domains/categories` | GET | All categories |
 
 ### Query Endpoints
 
@@ -157,6 +161,24 @@ GET /api/Health/domains/categories
 |----------|--------|-------------|
 | `/api/Query` | POST | Execute LLM query (with optional RAG) |
 | `/api/Query/validate` | POST | Validate request parameters |
+| `/api/Query/image` | POST | Ask a question about an uploaded picture (Gemma 4 multimodal) |
+
+### Workspace & File Endpoints
+
+Workspaces, file upload/listing, PDF text extraction, PDF-to-RAG ingestion, and image
+question-answering are covered in detail in
+[WORKSPACE_AND_FILES_GUIDE.md](WORKSPACE_AND_FILES_GUIDE.md). Quick reference:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/Workspace` | GET / POST | List / create workspaces |
+| `/api/Workspace/active` | GET / POST | Get / switch the active workspace |
+| `/api/Workspace/{name}` | DELETE | Remove a workspace |
+| `/api/Files` | GET | List files in the active workspace |
+| `/api/Files/upload` | POST | Upload a file (image/PDF/text) into the active workspace |
+| `/api/Files/{filename}/text` | GET | Extract PDF/text content from a workspace file |
+| `/api/Files/{filename}/ingest` | POST | Ingest a workspace PDF into the RAG knowledge base |
+| `/api/Files/{filename}/ask-image` | POST | Ask a question about a workspace image |
 
 ## Query Modes
 
@@ -197,7 +219,7 @@ Let the API automatically search the knowledge base using semantic similarity.
 
 **Step 1: Discover Available Domains**
 ```bash
-GET /api/Health/domains
+GET /api/Domains
 ```
 
 **Step 2: Use Domain Filters in Your Query**
@@ -238,7 +260,7 @@ GET /api/Health/domains
 
 ### Recommended Workflow
 
-1. **Discover domains**: `GET /api/Health/domains`
+1. **Discover domains**: `GET /api/Domains`
 2. **Choose relevant domains**: Look at `domainId` values
 3. **Make RAG query**: Use `domainFilter` with chosen IDs
 
@@ -246,7 +268,7 @@ GET /api/Health/domains
 
 ```bash
 # Step 1: Discover what domains exist
-GET /api/Health/domains
+GET /api/Domains
 
 # Response shows:
 # - chess (board-games)
@@ -268,7 +290,7 @@ POST /api/Query
 
 ```bash
 # Get all board game domains
-GET /api/Health/domains/category/board-games
+GET /api/Domains/category/board-games
 
 # Use multiple board game domains
 POST /api/Query
@@ -460,7 +482,7 @@ If you see:
 
 **Always start with:**
 ```bash
-GET /api/Health/domains
+GET /api/Domains
 ```
 
 This tells you exactly which `domainId` values you can use in `domainFilter`.
@@ -481,7 +503,7 @@ Use the provided `.http` file (`OfflineAI.Api.http`) with examples for:
 
 **Step 1: Find available game domains**
 ```bash
-GET /api/Health/domains/category/board-games
+GET /api/Domains/category/board-games
 ```
 
 **Response:**
@@ -523,7 +545,7 @@ GET /api/Health/domains/category/board-games
 
 ```bash
 # Get all card game domains
-GET /api/Health/domains/category/card-games
+GET /api/Domains/category/card-games
 
 # Query across all card games
 POST /api/Query
@@ -537,7 +559,7 @@ POST /api/Query
 
 ## Best Practices
 
-1. **Discover First** - Always call `/api/Health/domains` before using domain filters
+1. **Discover First** - Always call `/api/Domains` before using domain filters
 2. **Start Broad** - Begin with no domain filter, then narrow down if needed
 3. **Use Categories** - Group related domains using category endpoints
 4. **Test Relevance** - Adjust `minRelevanceScore` based on result quality
@@ -547,6 +569,6 @@ POST /api/Query
 ## Performance Tips
 
 - **Domain Filtering**: Reduces search space, improves speed and relevance
-- **Category-Based Queries**: Use `/api/Health/domains/category/{category}` to get related domains
+- **Category-Based Queries**: Use `/api/Domains/category/{category}` to get related domains
 - **Relevance Threshold**: Higher `minRelevanceScore` = fewer documents = faster
 - **TopK**: Lower values (2-3) are faster than higher values (8-10)

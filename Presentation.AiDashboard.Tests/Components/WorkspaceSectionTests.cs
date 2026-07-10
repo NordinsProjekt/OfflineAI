@@ -17,7 +17,7 @@ namespace Presentation.AiDashboard.Tests.Components;
 /// <see cref="WorkspaceService"/> rooted at a per-test temp directory (rather than a mock) so the
 /// add/switch/remove behavior exercised through the UI matches production wiring exactly.
 /// </summary>
-public class WorkspaceSectionTests : TestContext, IDisposable
+public sealed class WorkspaceSectionTests : TestContext, IDisposable
 {
     private readonly Mock<IJSRuntime> _mockJSRuntime;
     private readonly string _rootDir;

@@ -99,16 +99,13 @@ public static class MemoryFragmentCleaner
     private static string RemoveControlCharacters(string text)
     {
         var sb = new StringBuilder(text.Length);
-        
-        foreach (char c in text)
+
+        // Keep only printable characters and common whitespace
+        foreach (var c in text.Where(c => !char.IsControl(c) || c == '\n' || c == '\r' || c == '\t'))
         {
-            // Keep only printable characters and common whitespace
-            if (!char.IsControl(c) || c == '\n' || c == '\r' || c == '\t')
-            {
-                sb.Append(c);
-            }
+            sb.Append(c);
         }
-        
+
         return sb.ToString();
     }
     
@@ -123,15 +120,15 @@ public static class MemoryFragmentCleaner
             // Common UTF-8 to Latin-1 issues
             { "\u00E2\u0080\u0099", "'" },  // ’ ? '
             { "\u00E2\u0080\u009C", "\"" }, // “ ? "
-            { "\u00E2\u0080\u009D", "\"" }, // � ? "
-            { "\u00E2\u0080\u0094", "\u2014" }, // �" ? em dash
-            { "\u00E2\u0080\u0093", "\u2013" }, // �" ? en dash
-            { "\u00E2\u0080\u00A6", "\u2026" }, // … ? �
-            { "\u00C2\u0020", " " },  // �  ? space
-            { "\u00C3\u00A9", "\u00E9" }, // é ? �
-            { "\u00C3\u00A8", "\u00E8" }, // è ? �
-            { "\u00C3\u00A0", "\u00E0" }, // �  ? �
-            { "\u00C2\u00B0", "\u00B0" }, // ° ? �
+            { "\u00E2\u0080\u009D", "\"" }, // ” ? "
+            { "\u00E2\u0080\u0094", "\u2014" }, // —" ? em dash
+            { "\u00E2\u0080\u0093", "\u2013" }, // –" ? en dash
+            { "\u00E2\u0080\u00A6", "\u2026" }, // … ? …
+            { "\u00C2\u0020", " " },  // Â  ? space
+            { "\u00C3\u00A9", "\u00E9" }, // é ? é
+            { "\u00C3\u00A8", "\u00E8" }, // è ? è
+            { "\u00C3\u00A0", "\u00E0" }, // à  ? à
+            { "\u00C2\u00B0", "\u00B0" }, // ° ? °
             
             // Zero-width and other invisible characters
             { "\u200B", "" },  // Zero-width space

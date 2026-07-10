@@ -11,7 +11,7 @@ namespace Presentation.AiDashboard.Tests.Components;
 /// </summary>
 public class ModesSectionTests : TestContext
 {
-    private DashboardState CreateMockDashboardState()
+    private static DashboardState CreateMockDashboardState()
     {
         var state = new DashboardState();
         // Expand the modes section for testing

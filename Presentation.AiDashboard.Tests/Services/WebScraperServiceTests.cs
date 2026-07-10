@@ -17,9 +17,6 @@ namespace Presentation.AiDashboard.Tests.Services;
 /// </summary>
 public class WebScraperServiceTests
 {
-    // For any tests that would use real LLM calls (not these mock tests)
-    private const int TestLlmTimeoutMs = LlmProgressTracker.ShortTimeoutMs; // 10 seconds for tests
-    
     private Mock<IHttpClientFactory> CreateMockHttpClientFactory(HttpStatusCode statusCode, string content)
     {
         var mockHttpMessageHandler = new Mock<HttpMessageHandler>();

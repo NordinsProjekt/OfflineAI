@@ -268,8 +268,11 @@ public class DashboardStateTests
         // Arrange
         var state = new DashboardState();
 
-        // Act & Assert - Should not throw
-        state.ToggleSection("unknown-section");
+        // Act
+        var exception = Record.Exception(() => state.ToggleSection("unknown-section"));
+
+        // Assert
+        Assert.Null(exception);
     }
 
     [Fact]

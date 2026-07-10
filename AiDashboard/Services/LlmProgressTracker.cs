@@ -9,7 +9,7 @@ namespace AiDashboard.Services
     /// Helper class for managing LLM request timeouts and progress tracking.
     /// Handles the 5-minute max wait and 40-second pause detection.
     /// </summary>
-    public class LlmProgressTracker : IDisposable
+    public sealed class LlmProgressTracker : IDisposable
     {
         private readonly Stopwatch _stopwatch = new();
         private DateTime _lastProgressUpdate = DateTime.UtcNow;
@@ -184,11 +184,13 @@ namespace AiDashboard.Services
         
         public void Dispose()
         {
-            if (_disposed) return;
-            
-            Cancel();
-            _cancellationTokenSource?.Dispose();
-            _disposed = true;
+            if (!_disposed)
+            {
+                Cancel();
+                _cancellationTokenSource?.Dispose();
+                _disposed = true;
+            }
+            GC.SuppressFinalize(this);
         }
     }
     

@@ -17,6 +17,7 @@ public sealed class WorkspaceService : IWorkspaceService
 
     private readonly string _settingsFilePath;
     private readonly string _defaultWorkspacePath;
+    private readonly string _workspaceRoot;
     private readonly object _syncRoot = new();
 
     private List<WorkspaceInfo> _workspaces = new();
@@ -33,7 +34,14 @@ public sealed class WorkspaceService : IWorkspaceService
     /// Full path to the JSON persistence file. Defaults to
     /// <c>%AppData%\OfflineAI\workspaces.json</c>.
     /// </param>
-    public WorkspaceService(string defaultWorkspacePath, string? settingsFilePath = null)
+    /// <param name="workspaceRoot">
+    /// Directory that every workspace path must resolve inside. Adding a workspace whose resolved
+    /// path is outside this root is rejected, which prevents an untrusted API/UI caller from
+    /// pointing the file agent at an arbitrary location on disk. When null/empty, the root
+    /// defaults to the parent directory of <paramref name="defaultWorkspacePath"/> so the seeded
+    /// default workspace and its siblings remain valid.
+    /// </param>
+    public WorkspaceService(string defaultWorkspacePath, string? settingsFilePath = null, string? workspaceRoot = null)
     {
         if (string.IsNullOrWhiteSpace(defaultWorkspacePath))
             throw new ArgumentNullException(nameof(defaultWorkspacePath));
@@ -45,7 +53,38 @@ public sealed class WorkspaceService : IWorkspaceService
                 "OfflineAI", "workspaces.json")
             : settingsFilePath;
 
+        _workspaceRoot = ResolveWorkspaceRoot(workspaceRoot, _defaultWorkspacePath);
+
         Load();
+    }
+
+    /// <summary>
+    /// Determines the containment root: the explicitly configured root when provided, otherwise
+    /// the parent directory of the default workspace path (falling back to the default workspace
+    /// path itself when it has no parent, e.g. a drive root).
+    /// </summary>
+    private static string ResolveWorkspaceRoot(string? configuredRoot, string defaultWorkspacePath)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredRoot))
+            return Path.GetFullPath(configuredRoot);
+
+        var parent = Path.GetDirectoryName(defaultWorkspacePath);
+        return string.IsNullOrWhiteSpace(parent) ? defaultWorkspacePath : Path.GetFullPath(parent);
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="candidateFullPath"/> is the workspace root itself or a
+    /// path nested inside it. The trailing-separator comparison prevents a sibling directory whose
+    /// name merely starts with the root (e.g. root <c>C:\data</c> vs <c>C:\data-evil</c>) from
+    /// being treated as contained.
+    /// </summary>
+    private bool IsWithinRoot(string candidateFullPath)
+    {
+        var root = Path.TrimEndingDirectorySeparator(_workspaceRoot);
+        var candidate = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidateFullPath));
+
+        return candidate.Equals(root, StringComparison.OrdinalIgnoreCase)
+            || candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc/>
@@ -75,6 +114,14 @@ public sealed class WorkspaceService : IWorkspaceService
             throw new ArgumentException("Workspace path must not be empty.", nameof(path));
 
         var fullPath = Path.GetFullPath(path);
+
+        // Confinement: the file agent operates inside the active workspace, so an arbitrary
+        // workspace path would let a caller read/write anywhere the process can. Reject anything
+        // that resolves outside the configured root before creating the directory.
+        if (!IsWithinRoot(fullPath))
+            throw new ArgumentException(
+                "Workspace path must be inside the configured workspace root.", nameof(path));
+
         Directory.CreateDirectory(fullPath);
 
         WorkspaceInfo added;
@@ -167,17 +214,25 @@ public sealed class WorkspaceService : IWorkspaceService
                 var dto = JsonSerializer.Deserialize<WorkspaceFileDto>(json);
                 if (dto is not null && dto.Workspaces.Count > 0)
                 {
-                    _workspaces = dto.Workspaces
+                    // Drop any persisted workspace that resolves outside the confinement root, so a
+                    // tampered/legacy settings file can't reintroduce an out-of-root workspace.
+                    var loaded = dto.Workspaces
+                        .Where(w => !string.IsNullOrWhiteSpace(w.Path) && IsWithinRoot(w.Path))
                         .Select(w => new WorkspaceInfo(w.Name, w.Path))
                         .ToList();
-                    _activeWorkspaceName = _workspaces.Any(w => NameEquals(w.Name, dto.ActiveWorkspaceName))
-                        ? dto.ActiveWorkspaceName
-                        : _workspaces[0].Name;
 
-                    foreach (var workspace in _workspaces)
-                        Directory.CreateDirectory(workspace.Path);
+                    if (loaded.Count > 0)
+                    {
+                        _workspaces = loaded;
+                        _activeWorkspaceName = _workspaces.Any(w => NameEquals(w.Name, dto.ActiveWorkspaceName))
+                            ? dto.ActiveWorkspaceName
+                            : _workspaces[0].Name;
 
-                    return;
+                        foreach (var workspace in _workspaces)
+                            Directory.CreateDirectory(workspace.Path);
+
+                        return;
+                    }
                 }
             }
         }

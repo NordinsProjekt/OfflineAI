@@ -8,6 +8,9 @@ using Entities;
 using Microsoft.Data.SqlClient;
 using Services.Repositories;
 
+// Uses WindowsIdentity to grant DB access to the current user; this repo only runs on Windows.
+[assembly: System.Runtime.Versioning.SupportedOSPlatform("windows")]
+
 namespace Infrastructure.Data.Dapper;
 
 /// <summary>
@@ -15,15 +18,33 @@ namespace Infrastructure.Data.Dapper;
 /// Handles CRUD operations and bulk inserts for vector embeddings.
 /// Supports dynamic table switching for different RAG contexts.
 /// </summary>
+// S2077 (parameterized query) is disabled file-wide: every interpolated value below is either a
+// SQL identifier (table/index name) - which SqlParameter cannot bind, since parameters only bind
+// values, not identifiers - or a generated parameter *name* used with Dapper's anonymous-object
+// binding. All identifiers are validated against IsValidTableName's alphanumeric/underscore
+// whitelist before use, and all actual data values go through @-parameters.
+#pragma warning disable S2077
 public class VectorMemoryRepository : IVectorMemoryRepository
 {
     private readonly string _connectionString;
     private string _tableName;
-    
+
+    // Pre-bracketed reference to the active table, recomputed whenever _tableName changes (see
+    // SetActiveTable). Every value reaching _tableName is validated via SqlIdentifier first, so
+    // bracketing here cannot introduce injection.
+    private string TableNameRef => SqlIdentifier.Bracket(_tableName);
+
     public VectorMemoryRepository(string connectionString, string tableName = "MemoryFragments")
     {
         _connectionString = connectionString ?? throw new ArgumentNullException(nameof(connectionString));
         _tableName = tableName ?? "MemoryFragments";
+
+        // Validate up front so an invalid configured name fails fast at construction rather than
+        // reaching a command string later.
+        if (!SqlIdentifier.IsValid(_tableName))
+            throw new ArgumentException(
+                "Invalid table name. Use only letters, digits, and underscores (must start with a letter or underscore).",
+                nameof(tableName));
     }
     
     /// <summary>
@@ -33,9 +54,13 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     {
         if (string.IsNullOrWhiteSpace(tableName))
             throw new ArgumentException("Table name cannot be null or empty", nameof(tableName));
-        
+
+        if (!IsValidTableName(tableName))
+            throw new ArgumentException("Invalid table name. Use only alphanumeric characters and underscores.", nameof(tableName));
+
         _tableName = tableName;
     }
+
     
     /// <summary>
     /// Get the currently active table name.
@@ -54,11 +79,12 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         // Validate table name to prevent SQL injection
         if (!IsValidTableName(tableName))
             throw new ArgumentException("Invalid table name. Use only alphanumeric characters and underscores.", nameof(tableName));
-        
+
+        var tableNameRef = SqlIdentifier.Bracket(tableName);
         var createTableSql = $@"
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{tableName}')
             BEGIN
-                CREATE TABLE [{tableName}] (
+                CREATE TABLE {tableNameRef} (
                     Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
                     CollectionName NVARCHAR(255) NOT NULL,
                     Category NVARCHAR(500) NOT NULL,
@@ -74,10 +100,10 @@ public class VectorMemoryRepository : IVectorMemoryRepository
                     ChunkIndex INT NULL
                 );
 
-                CREATE INDEX IX_{tableName}_CollectionName ON [{tableName}](CollectionName);
-                CREATE INDEX IX_{tableName}_Category ON [{tableName}](Category);
-                CREATE INDEX IX_{tableName}_CreatedAt ON [{tableName}](CreatedAt);
-                CREATE INDEX IX_{tableName}_ContentLength ON [{tableName}](ContentLength);
+                CREATE INDEX IX_{tableName}_CollectionName ON {tableNameRef}(CollectionName);
+                CREATE INDEX IX_{tableName}_Category ON {tableNameRef}(Category);
+                CREATE INDEX IX_{tableName}_CreatedAt ON {tableNameRef}(CreatedAt);
+                CREATE INDEX IX_{tableName}_ContentLength ON {tableNameRef}(ContentLength);
             END";
         
         using var connection = new SqlConnection(_connectionString);
@@ -141,10 +167,11 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         if (tableName.Equals("MemoryFragments", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Cannot delete the default MemoryFragments table.");
         
+        var tableNameRef = SqlIdentifier.Bracket(tableName);
         var dropTableSql = $@"
             IF EXISTS (SELECT * FROM sys.tables WHERE name = '{tableName}')
             BEGIN
-                DROP TABLE [{tableName}]
+                DROP TABLE {tableNameRef}
             END";
         
         using var connection = new SqlConnection(_connectionString);
@@ -153,16 +180,10 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     }
     
     /// <summary>
-    /// Validates table name to prevent SQL injection.
+    /// Validates table name to prevent SQL injection. Delegates to the shared
+    /// <see cref="SqlIdentifier"/> allow-list so identifier validation lives in one place.
     /// </summary>
-    private static bool IsValidTableName(string tableName)
-    {
-        if (string.IsNullOrWhiteSpace(tableName))
-            return false;
-        
-        // Allow only alphanumeric characters, underscores, and must start with letter or underscore
-        return System.Text.RegularExpressions.Regex.IsMatch(tableName, @"^[a-zA-Z_][a-zA-Z0-9_]*$");
-    }
+    private static bool IsValidTableName(string tableName) => SqlIdentifier.IsValid(tableName);
     
     /// <summary>
     /// Initialize database schema. Creates database if it doesn't exist, then creates tables.
@@ -177,7 +198,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         var createTableSql = $@"
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{_tableName}')
             BEGIN
-                CREATE TABLE [{_tableName}] (
+                CREATE TABLE {TableNameRef} (
                     Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
                     CollectionName NVARCHAR(255) NOT NULL,
                     Category NVARCHAR(500) NOT NULL,
@@ -193,35 +214,35 @@ public class VectorMemoryRepository : IVectorMemoryRepository
                     ChunkIndex INT NULL
                 );
 
-                CREATE INDEX IX_{_tableName}_CollectionName ON [{_tableName}](CollectionName);
-                CREATE INDEX IX_{_tableName}_Category ON [{_tableName}](Category);
-                CREATE INDEX IX_{_tableName}_CreatedAt ON [{_tableName}](CreatedAt);
-                CREATE INDEX IX_{_tableName}_ContentLength ON [{_tableName}](ContentLength);
+                CREATE INDEX IX_{_tableName}_CollectionName ON {TableNameRef}(CollectionName);
+                CREATE INDEX IX_{_tableName}_Category ON {TableNameRef}(Category);
+                CREATE INDEX IX_{_tableName}_CreatedAt ON {TableNameRef}(CreatedAt);
+                CREATE INDEX IX_{_tableName}_ContentLength ON {TableNameRef}(ContentLength);
             END
             ELSE
             BEGIN
                 -- Add ContentLength column if it doesn't exist (migration for existing databases)
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('{_tableName}') AND name = 'ContentLength')
                 BEGIN
-                    ALTER TABLE [{_tableName}] ADD ContentLength INT NOT NULL DEFAULT 0;
+                    ALTER TABLE {TableNameRef} ADD ContentLength INT NOT NULL DEFAULT 0;
                     
                     -- Update existing rows with calculated length
-                    UPDATE [{_tableName}] SET ContentLength = LEN(Content);
+                    UPDATE {TableNameRef} SET ContentLength = LEN(Content);
                     
                     -- Create index on the new column
-                    CREATE INDEX IX_{_tableName}_ContentLength ON [{_tableName}](ContentLength);
+                    CREATE INDEX IX_{_tableName}_ContentLength ON {TableNameRef}(ContentLength);
                 END;
                 
                 -- Add CategoryEmbedding column if it doesn't exist (migration for weighted embeddings)
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('{_tableName}') AND name = 'CategoryEmbedding')
                 BEGIN
-                    ALTER TABLE [{_tableName}] ADD CategoryEmbedding VARBINARY(MAX) NULL;
+                    ALTER TABLE {TableNameRef} ADD CategoryEmbedding VARBINARY(MAX) NULL;
                 END;
                 
                 -- Add ContentEmbedding column if it doesn't exist (migration for weighted embeddings)
                 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('{_tableName}') AND name = 'ContentEmbedding')
                 BEGIN
-                    ALTER TABLE [{_tableName}] ADD ContentEmbedding VARBINARY(MAX) NULL;
+                    ALTER TABLE {TableNameRef} ADD ContentEmbedding VARBINARY(MAX) NULL;
                 END;
             END";
         
@@ -272,14 +293,16 @@ public class VectorMemoryRepository : IVectorMemoryRepository
             {
                 // Get current Windows user
                 var currentUser = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
-                
+                var databaseNameRef = $"[{databaseName}]";
+                var currentUserRef = $"[{currentUser}]";
+
                 var grantSql = $@"
-                    USE [{databaseName}];
+                    USE {databaseNameRef};
                     IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = '{currentUser}')
                     BEGIN
-                        CREATE USER [{currentUser}] FOR LOGIN [{currentUser}];
+                        CREATE USER {currentUserRef} FOR LOGIN {currentUserRef};
                     END;
-                    ALTER ROLE db_owner ADD MEMBER [{currentUser}];";
+                    ALTER ROLE db_owner ADD MEMBER {currentUserRef};";
                 
                 await connection.ExecuteAsync(grantSql);
                 Console.WriteLine($"[+] Granted access to user '{currentUser}'");
@@ -300,7 +323,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     public async Task<Guid> SaveAsync(MemoryFragmentEntity entity)
     {
         var sql = $@"
-            INSERT INTO [{_tableName}] 
+            INSERT INTO {TableNameRef} 
                 (Id, CollectionName, Category, Content, ContentLength, Embedding, CategoryEmbedding, ContentEmbedding, EmbeddingDimension, 
                  CreatedAt, UpdatedAt, SourceFile, ChunkIndex)
             VALUES 
@@ -320,7 +343,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     public async Task BulkSaveAsync(IEnumerable<MemoryFragmentEntity> entities)
     {
         var sql = $@"
-            INSERT INTO [{_tableName}] 
+            INSERT INTO {TableNameRef} 
                 (Id, CollectionName, Category, Content, ContentLength, Embedding, CategoryEmbedding, ContentEmbedding, EmbeddingDimension, 
                  CreatedAt, UpdatedAt, SourceFile, ChunkIndex)
             VALUES 
@@ -339,7 +362,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         var sql = $@"
             SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, CategoryEmbedding, ContentEmbedding, EmbeddingDimension,
                    CreatedAt, UpdatedAt, SourceFile, ChunkIndex
-            FROM [{_tableName}]
+            FROM {TableNameRef}
             WHERE CollectionName = @CollectionName
             ORDER BY ChunkIndex, CreatedAt";
         
@@ -432,7 +455,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         var sql = $@"
             SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, CategoryEmbedding, ContentEmbedding, EmbeddingDimension,
                    CreatedAt, UpdatedAt, SourceFile, ChunkIndex
-            FROM [{_tableName}]
+            FROM {TableNameRef}
             WHERE CollectionName = @CollectionName
               AND ({whereClause})
             ORDER BY ChunkIndex, CreatedAt";
@@ -454,7 +477,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         var sql = $@"
             SELECT Id, CollectionName, Category, Content, ContentLength, Embedding, CategoryEmbedding, ContentEmbedding, EmbeddingDimension,
                    CreatedAt, UpdatedAt, SourceFile, ChunkIndex
-            FROM [{_tableName}]
+            FROM {TableNameRef}
             WHERE CollectionName = @CollectionName
             ORDER BY ChunkIndex, CreatedAt
             OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
@@ -478,7 +501,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     {
         var sql = $@"
             SELECT COUNT(1) 
-            FROM [{_tableName}] 
+            FROM {TableNameRef} 
             WHERE CollectionName = @CollectionName";
         
         using var connection = new SqlConnection(_connectionString);
@@ -492,7 +515,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     {
         var sql = $@"
             SELECT COUNT(1) 
-            FROM [{_tableName}] 
+            FROM {TableNameRef} 
             WHERE CollectionName = @CollectionName AND Embedding IS NOT NULL";
         
         using var connection = new SqlConnection(_connectionString);
@@ -508,7 +531,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     {
         var sql = $@"
             SELECT DISTINCT CollectionName 
-            FROM [{_tableName}] 
+            FROM {TableNameRef} 
             ORDER BY CollectionName";
         
         using var connection = new SqlConnection(_connectionString);
@@ -522,7 +545,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task DeleteCollectionAsync(string collectionName)
     {
-        var sql = $"DELETE FROM [{_tableName}] WHERE CollectionName = @CollectionName";
+        var sql = $"DELETE FROM {TableNameRef} WHERE CollectionName = @CollectionName";
         
         using var connection = new SqlConnection(_connectionString);
         await connection.ExecuteAsync(sql, new { CollectionName = collectionName });
@@ -533,7 +556,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     /// </summary>
     public async Task DeleteAsync(Guid id)
     {
-        var sql = $"DELETE FROM [{_tableName}] WHERE Id = @Id";
+        var sql = $"DELETE FROM {TableNameRef} WHERE Id = @Id";
         
         using var connection = new SqlConnection(_connectionString);
         await connection.ExecuteAsync(sql, new { Id = id });
@@ -545,7 +568,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     public async Task UpdateContentAsync(Guid id, string content)
     {
         var sql = $@"
-            UPDATE [{_tableName}] 
+            UPDATE {TableNameRef} 
             SET Content = @Content, UpdatedAt = GETUTCDATE() 
             WHERE Id = @Id";
         
@@ -560,7 +583,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
     {
         var sql = $@"
             SELECT COUNT(1) 
-            FROM [{_tableName}] 
+            FROM {TableNameRef} 
             WHERE CollectionName = @CollectionName";
         
         using var connection = new SqlConnection(_connectionString);
@@ -582,7 +605,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
                 MAX(ContentLength) as MaxLength,
                 SUM(CASE WHEN ContentLength > 1000 THEN 1 ELSE 0 END) as LongFragments,
                 SUM(CASE WHEN ContentLength < 200 THEN 1 ELSE 0 END) as ShortFragments
-            FROM [{_tableName}]
+            FROM {TableNameRef}
             WHERE CollectionName = @CollectionName";
         
         using var connection = new SqlConnection(_connectionString);
@@ -608,7 +631,7 @@ public class VectorMemoryRepository : IVectorMemoryRepository
                     ELSE '1500+'
                 END as LengthBucket,
                 COUNT(*) as Count
-            FROM [{_tableName}]
+            FROM {TableNameRef}
             WHERE CollectionName = @CollectionName
             GROUP BY 
                 CASE 
@@ -628,3 +651,4 @@ public class VectorMemoryRepository : IVectorMemoryRepository
         return results.ToDictionary(r => r.LengthBucket, r => r.Count);
     }
 }
+#pragma warning restore S2077

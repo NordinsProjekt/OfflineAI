@@ -15,8 +15,7 @@
         <h2 class="dropzone-title">@Title</h2>
         <p class="dropzone-prompt">@PromptText</p>
         
-        <InputFile @ref="fileInput" 
-                   id="@InputId" 
+        <InputFile id="@InputId"
                    OnChange="HandleFileSelected" 
                    class="dropzone-input" 
                    accept="@AcceptedTypes"
@@ -51,7 +50,6 @@
     [Parameter] public EventCallback<string> OnError { get; set; }
     
     private ElementReference dropZoneElement;
-    private InputFile? fileInput;
     private bool IsDragOver { get; set; }
     private string ErrorMessage { get; set; } = "";
     private string InputId { get; set; } = $"file-input-{Guid.NewGuid():N}";
@@ -120,7 +118,7 @@
         await OnFileSelected.InvokeAsync(e);
     }
     
-    private string FormatFileSize(long bytes)
+    private static string FormatFileSize(long bytes)
     {
         string[] sizes = ["B", "KB", "MB", "GB"];
         double len = bytes;

@@ -161,7 +161,7 @@ public class DashboardState
 
         if (repository != null && persistenceService != null)
         {
-            CollectionService = new CollectionManagementService(repository, persistenceService);
+            CollectionService = new CollectionManagementService(repository);
             CollectionService.OnChange += NotifyStateChanged;
         }
 
@@ -278,10 +278,10 @@ public class DashboardState
         }
 
         // Hook up domain auto-registration callback BEFORE processing files
-        // This ensures "Webhallen" gets registered when importing "Webhallen - K�pvillkor" fragments
+        // This ensures "Webhallen" gets registered when importing "Webhallen - Köpvillkor" fragments
         InboxService.OnDomainDiscovered = async (category, categoryType) =>
         {
-            // Extract domain name from category (e.g., "Webhallen" from "##Webhallen - K�pvillkor")
+            // Extract domain name from category (e.g., "Webhallen" from "##Webhallen - Köpvillkor")
             // The DomainDetector will strip the "##" prefix
             var domainDetector = _chatService?.DomainDetector;
             if (domainDetector != null)
@@ -291,7 +291,7 @@ public class DashboardState
             }
         };
 
-        var (success, message, filesProcessed, fragmentsCreated) =
+        var (success, message, filesProcessed, _) =
             await InboxService.ProcessInboxAsync(CollectionService.CurrentCollection);
 
         if (success && filesProcessed > 0)
@@ -310,12 +310,12 @@ public class DashboardState
             return;
         }
 
-        var (success, message, filesConverted) = await InboxService.ConvertPdfToTxtAsync();
+        var (success, message, _) = await InboxService.ConvertPdfToTxtAsync();
         StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
     }
 
     // Workspace operations (delegating to WorkspaceService). All agent file operations are
-    // confined to whichever workspace is active � switching here re-confines the file agent.
+    // confined to whichever workspace is active — switching here re-confines the file agent.
     public IReadOnlyList<WorkspaceInfo> GetWorkspaces() =>
         WorkspaceService?.GetWorkspaces() ?? Array.Empty<WorkspaceInfo>();
 

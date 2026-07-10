@@ -12,9 +12,9 @@
         <div class="oa-field">
             <label>Active Workspace</label>
             <select class="oa-text" @bind="selectedWorkspaceName" @bind:after="OnWorkspaceChanged">
-                @foreach (var workspace in workspaces)
+                @foreach (var workspaceName in workspaces.Select(workspace => workspace.Name))
                 {
-                    <option value="@workspace.Name">@workspace.Name</option>
+                    <option value="@workspaceName">@workspaceName</option>
                 }
             </select>
         </div>
