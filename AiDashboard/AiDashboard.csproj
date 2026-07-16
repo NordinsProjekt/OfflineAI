@@ -27,4 +27,28 @@
     <ProjectReference Include="..\Types\Types.csproj" />
   </ItemGroup>
 
+  <!-- Auto-publish to a network share after every Release build.
+       Opt-in and machine-specific (same philosophy as user secrets): set the
+       OFFLINEAI_PUBLISH_DIR environment variable to the target folder, e.g.
+       \\SERVER\share\AiDashboard, or pass -p:NetworkPublishDir=... explicitly.
+       When the variable is unset the target is skipped entirely, so CI and other
+       machines build exactly as before. An unreachable share only warns (the
+       build itself still succeeds) — TreatWarningsAsErrors applies to compiler
+       warnings, not MSBuild task warnings. Debug builds are never published, so
+       the inner dev loop stays fast. -->
+  <PropertyGroup>
+    <NetworkPublishDir Condition="'$(NetworkPublishDir)' == ''">$(OFFLINEAI_PUBLISH_DIR)</NetworkPublishDir>
+  </PropertyGroup>
+
+  <Target Name="PublishToNetworkShare"
+          AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Release' And '$(NetworkPublishDir)' != '' And '$(InnerNetworkPublish)' != 'true'">
+    <Message Importance="high" Text="→ Publicerar AiDashboard till $(NetworkPublishDir) ..." />
+    <!-- InnerNetworkPublish guards against re-entry; the no-build flag reuses the outputs
+         the triggering build just produced, so the publish step is copy-only and fast. -->
+    <Exec Command='dotnet publish "$(MSBuildProjectFullPath)" -c $(Configuration) --no-build -o "$(NetworkPublishDir)" -p:InnerNetworkPublish=true --nologo'
+          ContinueOnError="WarnAndContinue" />
+    <Message Importance="high" Text="→ Publicering klar: $(NetworkPublishDir)" Condition="'$(MSBuildLastTaskResult)' == 'true'" />
+  </Target>
+
 </Project>
