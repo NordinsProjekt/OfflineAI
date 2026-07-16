@@ -66,9 +66,12 @@ public class AgentToolsSettings
     /// <summary>
     /// Maximum number of work → verify iterations the goal agent
     /// (<c>IGoalAgentService</c>) performs before giving up with requirements still unmet.
-    /// Default: 3.
+    /// The loop already exits as soon as every requirement passes verification (see
+    /// <c>GoalAgentService.RunAsync</c>), so this is only a safety cap for the pathological
+    /// case — a higher value lets weaker models keep retrying instead of hitting the cap
+    /// while requirements are still being worked on. Default: 20.
     /// </summary>
-    public int MaxGoalIterations { get; set; } = 3;
+    public int MaxGoalIterations { get; set; } = 20;
 
     /// <summary>
     /// Named HTTP API endpoints the LLM may call by name via the <c>call_api</c> tool. Only

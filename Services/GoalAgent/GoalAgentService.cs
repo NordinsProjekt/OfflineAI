@@ -11,7 +11,7 @@ public sealed class GoalAgentService : IGoalAgentService
     /// can't loop forever. Overridable via the constructor — typically from
     /// <c>AppConfiguration.AgentTools.MaxGoalIterations</c>.
     /// </summary>
-    private const int DefaultMaxIterations = 3;
+    private const int DefaultMaxIterations = 20;
 
     /// <summary>
     /// Name of the per-run transcript file written to the active workspace (the file agent's
