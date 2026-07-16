@@ -64,6 +64,13 @@ public class AgentToolsSettings
     public int MaxToolCallRounds { get; set; } = 3;
 
     /// <summary>
+    /// Maximum number of work → verify iterations the goal agent
+    /// (<c>IGoalAgentService</c>) performs before giving up with requirements still unmet.
+    /// Default: 3.
+    /// </summary>
+    public int MaxGoalIterations { get; set; } = 3;
+
+    /// <summary>
     /// Named HTTP API endpoints the LLM may call by name via the <c>call_api</c> tool. Only
     /// endpoints listed here can be invoked — the LLM cannot supply an arbitrary URL.
     /// </summary>

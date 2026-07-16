@@ -228,16 +228,29 @@ var gemma4CliCfg = appConfig.Gemma4Cli;
 var gemma4CliExe = !string.IsNullOrWhiteSpace(gemma4CliCfg.LlamaCliPath)
     ? gemma4CliCfg.LlamaCliPath
     : appConfig.Llm?.ExecutablePath ?? string.Empty;
-if (!string.IsNullOrWhiteSpace(gemma4CliCfg.ModelPath) && !string.IsNullOrWhiteSpace(gemma4CliExe))
+// When Gemma4Cli:ModelPath is empty, fall back to the main Llm model if it is itself a Gemma
+// model (ModelType "Gemma"), inheriting its GPU/context tuning. Keeps this in sync with the
+// dashboard so image queries work from a single Llm config.
+var gemma4UsingLlmFallback = string.IsNullOrWhiteSpace(gemma4CliCfg.ModelPath)
+    && string.Equals(appConfig.Llm?.ModelType, "Gemma", StringComparison.OrdinalIgnoreCase)
+    && !string.IsNullOrWhiteSpace(appConfig.Llm?.ModelPath);
+string gemma4CliModel;
+if (!string.IsNullOrWhiteSpace(gemma4CliCfg.ModelPath))
+    gemma4CliModel = gemma4CliCfg.ModelPath;
+else if (gemma4UsingLlmFallback)
+    gemma4CliModel = appConfig.Llm!.ModelPath;
+else
+    gemma4CliModel = string.Empty;
+if (!string.IsNullOrWhiteSpace(gemma4CliModel) && !string.IsNullOrWhiteSpace(gemma4CliExe))
 {
     builder.Services.AddSingleton<IGemma4CliService>(sp =>
     {
         var opts = new Gemma4CliOptions
         {
             LlamaCliPath          = gemma4CliExe,
-            ModelPath             = gemma4CliCfg.ModelPath,
-            GpuLayers             = gemma4CliCfg.GpuLayers,
-            ContextSize           = gemma4CliCfg.ContextSize,
+            ModelPath             = gemma4CliModel,
+            GpuLayers             = gemma4UsingLlmFallback ? appConfig.Llm!.GpuLayers : gemma4CliCfg.GpuLayers,
+            ContextSize           = gemma4UsingLlmFallback ? appConfig.Llm!.ContextSize : gemma4CliCfg.ContextSize,
             MaxTokens             = gemma4CliCfg.MaxTokens,
             Temperature           = gemma4CliCfg.Temperature,
             TopP                  = gemma4CliCfg.TopP,
@@ -246,7 +259,8 @@ if (!string.IsNullOrWhiteSpace(gemma4CliCfg.ModelPath) && !string.IsNullOrWhiteS
             PauseTimeoutMs        = gemma4CliCfg.PauseTimeoutMs,
             MaxToolCallIterations = gemma4CliCfg.MaxToolCallIterations
         };
-        Console.WriteLine($"[+] Gemma 4 CLI service registered (model: {Path.GetFileName(gemma4CliCfg.ModelPath)}, image queries available)");
+        var source = gemma4UsingLlmFallback ? " (from Llm config)" : string.Empty;
+        Console.WriteLine($"[+] Gemma 4 CLI service registered (model: {Path.GetFileName(gemma4CliModel)}, image queries available){source}");
         return new Gemma4CliService(opts);
     });
 }

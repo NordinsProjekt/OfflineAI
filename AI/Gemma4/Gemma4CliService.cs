@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Factories;
@@ -151,11 +152,22 @@ public sealed class Gemma4CliService : IGemma4CliService
             // Prompt file (avoids shell-quoting issues with special characters)
             psi.Arguments += $" -f \"{tempPromptFile}\"";
 
-            // Context, tokens, sampling
+            // Force plain text-completion mode. Newer llama-cli builds default to interactive
+            // conversation mode for chat-template models (Gemma included): the process prints
+            // a startup banner and "> " prompt and waits on stdin instead of completing the -f
+            // prompt and exiting. This class hand-builds the Gemma chat template itself and
+            // extracts the reply from the echoed <start_of_turn>model marker, which only works
+            // in completion mode. Same fix as PersistentLlmProcess.QueryAsync.
+            psi.Arguments += " -no-cnv";
+
+            // Context, tokens, sampling. The floating-point flags MUST be formatted with the
+            // invariant culture: under a locale that uses a decimal comma (e.g. sv-SE) the default
+            // interpolation emits "--temp 0,30", and llama.cpp's C++ float parser stops at the
+            // comma and reads it as 0 — silently forcing temp/top-p to zero.
             psi.Arguments += $" -c {_options.ContextSize}";
             psi.Arguments += $" -n {_options.MaxTokens}";
-            psi.Arguments += $" --temp {_options.Temperature:F2}";
-            psi.Arguments += $" --top-p {_options.TopP:F2}";
+            psi.Arguments += string.Create(CultureInfo.InvariantCulture, $" --temp {_options.Temperature:F2}");
+            psi.Arguments += string.Create(CultureInfo.InvariantCulture, $" --top-p {_options.TopP:F2}");
             psi.Arguments += $" --top-k {_options.TopK}";
 
             // GPU offloading
@@ -194,8 +206,18 @@ public sealed class Gemma4CliService : IGemma4CliService
             }
         };
 
-        // Suppress informational backend noise (ggml_cuda_init, load_backend, etc.)
-        process.ErrorDataReceived += (_, _) => { };
+        // stderr carries llama-cli's model-loading/prompt-eval progress while stdout stays
+        // silent — treat it as liveness so the pause timeout doesn't kill a cold process
+        // mid-load (which would return only the startup banner). The content itself is
+        // informational noise (ggml_cuda_init, load_backend, etc.) and is not captured.
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is null) return;
+            lock (outputLock)
+            {
+                lastOutput = DateTime.UtcNow;
+            }
+        };
 
         process.Start();
         process.BeginOutputReadLine();
@@ -260,7 +282,12 @@ public sealed class Gemma4CliService : IGemma4CliService
     {
         var idx = rawOutput.LastIndexOf(ModelTurn, StringComparison.Ordinal);
         if (idx < 0)
-            return rawOutput.Trim(); // fallback: return everything if marker not found
+        {
+            // Fallback when the marker never appeared in the output: return what's left after
+            // stripping llama-cli's own startup banner/UI lines, so the CLI's banner is never
+            // handed to the caller as if the model had said it.
+            return Application.AI.Processing.LlmOutputPatterns.StripCliNoise(rawOutput);
+        }
 
         var afterMarker = rawOutput[(idx + ModelTurn.Length)..].TrimStart('\r', '\n');
 
@@ -268,7 +295,34 @@ public sealed class Gemma4CliService : IGemma4CliService
         if (endIdx >= 0)
             afterMarker = afterMarker[..endIdx];
 
-        return afterMarker.Trim();
+        return CleanModelArtifacts(afterMarker);
+    }
+
+    /// <summary>
+    /// Strips the non-content artifacts this Gemma 4 GGUF prints in completion mode: the
+    /// reasoning-channel delimiters (<c>&lt;|channel&gt;</c>/<c>&lt;channel|&gt;</c> and the bare
+    /// "thought" channel-name line) and llama.cpp's own <c>[end of text]</c> end-of-generation
+    /// notice. These would otherwise lead the reply and, for the chat UI, be shown verbatim.
+    /// The verdict/requirement/tool parsers are line-based and tolerate the noise, but a clean
+    /// reply is nicer and keeps the reviewer's "starts with RESULTAT:" contract intact.
+    /// </summary>
+    private static string CleanModelArtifacts(string text)
+    {
+        var cleaned = text
+            .Replace("<|channel>", string.Empty, StringComparison.Ordinal)
+            .Replace("<channel|>", string.Empty, StringComparison.Ordinal)
+            .Replace("[end of text]", string.Empty, StringComparison.Ordinal);
+
+        // Drop a leading, standalone "thought" channel-name line if one is left behind.
+        var lines = cleaned.Split('\n').ToList();
+        while (lines.Count > 0 &&
+               (lines[0].Trim().Length == 0 ||
+                string.Equals(lines[0].Trim(), "thought", StringComparison.OrdinalIgnoreCase)))
+        {
+            lines.RemoveAt(0);
+        }
+
+        return string.Join("\n", lines).Trim();
     }
 
     // ── Tool calling helpers ──────────────────────────────────────────────────

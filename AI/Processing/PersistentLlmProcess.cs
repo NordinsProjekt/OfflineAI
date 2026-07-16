@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using Factories;
 using Factories.Extensions;
@@ -126,6 +127,16 @@ public sealed class PersistentLlmProcess : IPersistentLlmProcess
             // Use -f (prompt file) instead of -p (inline prompt) to safely pass any content
             processInfo.Arguments += $" -f \"{tempPromptFile}\"";
 
+            // Force plain text-completion mode. Newer llama-cli builds default to interactive
+            // conversation mode whenever the model ships a chat template (e.g. Gemma/Llama
+            // instruct models): the process prints its startup banner and "> " prompt, treats
+            // the -f content as interactive input, and waits on stdin for the next turn instead
+            // of exiting. That breaks this class's whole design — the "...\nAssistant:" prompt
+            // is written for completion mode, the assistant-marker extraction needs the prompt
+            // echoed back, and the multi-line prompt would otherwise be split into one "turn"
+            // per line. With -no-cnv llama-cli evaluates the prompt, generates, and exits.
+            processInfo.Arguments += " -no-cnv";
+
             // Context window size (tokens) — must be large enough to hold the system prompt,
             // any injected tool/document content, and the user question, or llama-cli will
             // silently truncate the prompt and can return an empty completion. Configurable via
@@ -152,12 +163,15 @@ public sealed class PersistentLlmProcess : IPersistentLlmProcess
             // (empty output, or worse) rather than just truncating gracefully.
             var effectiveMaxTokens = Math.Min(maxTokens, Math.Max(1, contextSize / 2));
             processInfo.Arguments += $" -n {effectiveMaxTokens}";
-            processInfo.Arguments += $" --temp {temperature:F2}";
-            processInfo.Arguments += $" --top-p {topP:F2}";
+            // Format the floating-point flags with the invariant culture. Under a decimal-comma
+            // locale (e.g. sv-SE) "{temperature:F2}" emits "0,30", and llama.cpp's C++ float
+            // parser stops at the comma and reads 0 — silently zeroing temp/top-p/the penalties.
+            processInfo.Arguments += string.Create(CultureInfo.InvariantCulture, $" --temp {temperature:F2}");
+            processInfo.Arguments += string.Create(CultureInfo.InvariantCulture, $" --top-p {topP:F2}");
             processInfo.Arguments += $" --top-k {topK}";
-            processInfo.Arguments += $" --repeat-penalty {repeatPenalty:F2}";
-            processInfo.Arguments += $" --presence-penalty {presencePenalty:F2}";
-            processInfo.Arguments += $" --frequency-penalty {frequencyPenalty:F2}";
+            processInfo.Arguments += string.Create(CultureInfo.InvariantCulture, $" --repeat-penalty {repeatPenalty:F2}");
+            processInfo.Arguments += string.Create(CultureInfo.InvariantCulture, $" --presence-penalty {presencePenalty:F2}");
+            processInfo.Arguments += string.Create(CultureInfo.InvariantCulture, $" --frequency-penalty {frequencyPenalty:F2}");
             
             var process = processInfo.Build();
 
@@ -187,6 +201,7 @@ public sealed class PersistentLlmProcess : IPersistentLlmProcess
         var output = new StringBuilder();
         var error = new StringBuilder();
         var assistantStarted = false;
+        var anyOutputReceived = false; // Any stdout output seen (even without an assistant marker)
         var endMarkerDetected = false; // Flag to signal end of generation
         var lastOutputTime = DateTime.UtcNow;
         var processStartTime = DateTime.UtcNow;
@@ -205,7 +220,21 @@ public sealed class PersistentLlmProcess : IPersistentLlmProcess
             lock (outputLock)
             {
                 lastOutputTime = DateTime.UtcNow;
+                anyOutputReceived = true;
                 fullOutput.AppendLine(e.Data); // Keep full output for analysis
+
+                // Newer llama-cli builds default to conversation mode: the chat template is
+                // applied internally (so no assistant marker ever appears on stdout) and the
+                // process stays alive waiting for the next user turn instead of exiting. The
+                // per-turn stats line it prints right after the response is therefore treated
+                // as an end-of-generation marker so we stop immediately instead of waiting for
+                // the pause/overall timeout. It's excluded from the captured response.
+                if (LlmOutputPatterns.IsTurnStatsLine(e.Data))
+                {
+                    Console.WriteLine($"\n[Generation complete - stats line detected: {e.Data.Trim()}]");
+                    endMarkerDetected = true;
+                    return;
+                }
 
                 // Look for assistant tag - support multiple formats
                 if (!assistantStarted)
@@ -282,6 +311,13 @@ public sealed class PersistentLlmProcess : IPersistentLlmProcess
             {
                 lock (outputLock)
                 {
+                    // stderr activity is liveness too: llama-cli streams model-loading progress
+                    // and prompt-eval info on stderr while stdout stays silent. Without resetting
+                    // the pause timer here, a cold start (banner on stdout at t=0, then 10-30s of
+                    // silent-on-stdout model loading) trips the pause timeout and kills the
+                    // process before the first generated token — the response then contains only
+                    // the startup banner.
+                    lastOutputTime = DateTime.UtcNow;
                     error.AppendLine(e.Data);
 
                     // Stream stderr live too (skip the noisy, purely informational backend
@@ -305,7 +341,7 @@ public sealed class PersistentLlmProcess : IPersistentLlmProcess
         while (!process.HasExited)
         {
             await Task.Delay(1000);
-            if (!assistantStarted) Console.Write(".");
+            if (!anyOutputReceived) Console.Write(".");
             
             var timeSinceOutput = (DateTime.UtcNow - lastOutputTime).TotalMilliseconds;
             var totalTime = (DateTime.UtcNow - processStartTime).TotalMilliseconds;
@@ -325,8 +361,12 @@ public sealed class PersistentLlmProcess : IPersistentLlmProcess
                 break;
             }
             
-            // If we've started getting assistant output and there's a pause, consider done
-            if (assistantStarted && timeSinceOutput > pauseTimeoutMs)
+            // If output has started flowing and there's a pause, consider generation done.
+            // This must not require assistantStarted: llama-cli conversation mode (the default
+            // in newer builds when the model has a chat template) never prints any of the
+            // assistant markers, so gating on the marker alone made the pause timeout dead
+            // code there — every response then waited out the full overall timeout instead.
+            if ((assistantStarted || anyOutputReceived) && timeSinceOutput > pauseTimeoutMs)
             {
                 Console.WriteLine($"\n[Generation complete - {pauseTimeoutMs/1000}s pause detected]");
                 break;
@@ -354,7 +394,13 @@ public sealed class PersistentLlmProcess : IPersistentLlmProcess
         // Wait for output/error streams to finish
         await process.WaitForExitAsync();
 
-        var result = output.ToString();
+        // When no assistant marker was found, `output` holds every raw stdout line seen —
+        // including llama-cli's own startup banner and interactive-UI lines. Strip that
+        // recognizable CLI noise so the caller never receives the banner as if the model
+        // had said it (it would otherwise flow all the way into chat/agent responses).
+        var result = assistantStarted
+            ? output.ToString()
+            : LlmOutputPatterns.StripCliNoise(output.ToString());
         var errorText = error.ToString();
 
         // Debug: If result is empty but we have full output, log for analysis

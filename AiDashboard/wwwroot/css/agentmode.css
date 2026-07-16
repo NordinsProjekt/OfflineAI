@@ -1,0 +1,77 @@
+/* Agent Mode page — reuses the .oa-quick-ask-page / .oa-quick-header / .oa-quick-container /
+   .oa-quick-card shell from quickask.css and the .oa-batch-* controls/badges/rows from
+   batchprocessing.css (same light-card look). Only agent-specific bits live here. */
+
+.oa-goal-card {
+    padding: 1.5rem;
+    overflow-y: auto;
+}
+
+.oa-goal-workspace {
+    margin: 0 0 0.75rem;
+    font-size: 0.85rem;
+    color: #4a5568;
+}
+
+.oa-goal-workspace-path {
+    margin-left: 0.5rem;
+    color: #a0aec0;
+    font-size: 0.8rem;
+}
+
+.oa-goal-input {
+    width: 100%;
+}
+
+.oa-goal-input:disabled {
+    background: #f7fafc;
+    color: #a0aec0;
+}
+
+.oa-goal-phase-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+}
+
+.oa-goal-iteration {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #4a5568;
+}
+
+.oa-goal-verdict {
+    color: #c53030;
+}
+
+.oa-goal-log {
+    margin-top: 1.5rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 0.85rem 1rem;
+    background: #f7fafc;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.oa-goal-log-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #a0aec0;
+    margin-bottom: 0.5rem;
+}
+
+.oa-goal-log-line {
+    font-size: 0.85rem;
+    color: #4a5568;
+    line-height: 1.6;
+}
+
+.oa-goal-log-hint {
+    margin: 0.5rem 0 0;
+    font-size: 0.8rem;
+    color: #a0aec0;
+}

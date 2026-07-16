@@ -18,6 +18,7 @@ using Services.FileAgent;
 using Services.QuickAsk;
 using Services.Workspace;
 using Services.BatchJobs;
+using Services.GoalAgent;
 
 // Infrastructure.Data.Dapper uses WindowsIdentity to grant DB access; this app only runs on Windows.
 [assembly: System.Runtime.Versioning.SupportedOSPlatform("windows")]
@@ -118,12 +119,39 @@ public static class Program
         // survives page navigation (not persisted across an app restart).
         builder.Services.AddSingleton<IBatchJobService, BatchJobService>();
 
-        // Register Gemma 4 CLI service (optional — only when ModelPath is configured)
+        // Register the TDD-style goal agent (Agent Mode page): breaks a free-text workspace
+        // goal into checkable requirements, does file work via IAgenticChatService, verifies
+        // each requirement against the workspace, and repeats until everything passes (or the
+        // iteration cap is hit). Singleton so a run's progress survives page navigation. The
+        // file agent is passed so each run writes a full prompt/response transcript to
+        // agentlogg.txt in the active workspace for debugging.
+        builder.Services.AddSingleton<IGoalAgentService>(sp =>
+            new GoalAgentService(
+                sp.GetRequiredService<IAgenticChatService>(),
+                sp.GetRequiredService<IFileAgentService>(),
+                appConfig.AgentTools.MaxGoalIterations));
+
+        // Register Gemma 4 CLI service. Prefer an explicit Gemma4Cli section, but when its
+        // ModelPath is empty fall back to the main Llm model *if that model is itself a Gemma
+        // model* (ModelType "Gemma") — Gemma4CliService builds Gemma's chat template, so pointing
+        // it at a non-Gemma model would mis-format the prompt. This lets the templated Gemma path
+        // (chat + goal agent) work from a single Llm config, instead of silently falling back to
+        // the un-templated pooled path that returns empty output for instruct models.
         var gemma4CliCfg = appConfig.Gemma4Cli;
         var gemma4CliExe = !string.IsNullOrWhiteSpace(gemma4CliCfg.LlamaCliPath)
             ? gemma4CliCfg.LlamaCliPath
             : appConfig.Llm?.ExecutablePath ?? string.Empty;
-        if (!string.IsNullOrWhiteSpace(gemma4CliCfg.ModelPath)
+        var gemma4UsingLlmFallback = string.IsNullOrWhiteSpace(gemma4CliCfg.ModelPath)
+            && string.Equals(appConfig.Llm?.ModelType, "Gemma", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(appConfig.Llm?.ModelPath);
+        string gemma4CliModel;
+        if (!string.IsNullOrWhiteSpace(gemma4CliCfg.ModelPath))
+            gemma4CliModel = gemma4CliCfg.ModelPath;
+        else if (gemma4UsingLlmFallback)
+            gemma4CliModel = appConfig.Llm!.ModelPath;
+        else
+            gemma4CliModel = string.Empty;
+        if (!string.IsNullOrWhiteSpace(gemma4CliModel)
             && !string.IsNullOrWhiteSpace(gemma4CliExe))
         {
             builder.Services.AddSingleton<IGemma4CliService>(sp =>
@@ -131,9 +159,11 @@ public static class Program
                 var opts = new Gemma4CliOptions
                 {
                     LlamaCliPath           = gemma4CliExe,
-                    ModelPath              = gemma4CliCfg.ModelPath,
-                    GpuLayers              = gemma4CliCfg.GpuLayers,
-                    ContextSize            = gemma4CliCfg.ContextSize,
+                    ModelPath              = gemma4CliModel,
+                    // In fallback mode inherit the operator's hardware tuning from the Llm section
+                    // (they may have deliberately limited GPU layers / context for the GPU).
+                    GpuLayers              = gemma4UsingLlmFallback ? appConfig.Llm!.GpuLayers : gemma4CliCfg.GpuLayers,
+                    ContextSize            = gemma4UsingLlmFallback ? appConfig.Llm!.ContextSize : gemma4CliCfg.ContextSize,
                     MaxTokens              = gemma4CliCfg.MaxTokens,
                     Temperature            = gemma4CliCfg.Temperature,
                     TopP                   = gemma4CliCfg.TopP,
@@ -144,7 +174,8 @@ public static class Program
                 };
                 var registry = sp.GetRequiredService<IAgentToolRegistry>();
                 _ = registry; // available for future tool-call wiring
-                Console.WriteLine($"[+] Gemma 4 CLI service registered (model: {Path.GetFileName(gemma4CliCfg.ModelPath)})");
+                var source = gemma4UsingLlmFallback ? " (from Llm config)" : string.Empty;
+                Console.WriteLine($"[+] Gemma 4 CLI service registered (model: {Path.GetFileName(gemma4CliModel)}){source}");
                 return new Gemma4CliService(opts);
             });
         }
@@ -435,12 +466,16 @@ public static class Program
                     Console.WriteLine("[+] Chat service attached to dashboard");
                 }
 
-                // Attach Gemma 4 CLI service (optional)
+                // Attach Gemma 4 CLI service (optional). When it's available, make it the active
+                // backend by default: it applies Gemma's chat template, whereas the Classic pooled
+                // path sends an un-templated prompt that instruct models answer with an immediate
+                // stop token (empty reply). The user can still switch back to Classic in the UI.
                 var gemma4Cli = sp.GetService<IGemma4CliService>();
                 dashboardState.Gemma4CliService = gemma4Cli;
                 if (gemma4Cli != null)
                 {
-                    Console.WriteLine("[+] Gemma 4 CLI service attached to dashboard");
+                    dashboardState.SelectedBackend = AiDashboard.State.LlmBackend.Gemma4Cli;
+                    Console.WriteLine("[+] Gemma 4 CLI service attached to dashboard (selected as active backend)");
                 }
                 
                 // Set model switch handler

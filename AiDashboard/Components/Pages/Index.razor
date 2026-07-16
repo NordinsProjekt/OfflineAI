@@ -74,6 +74,25 @@
                 </button>
             </div>
 
+            <!-- Agent Mode -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/agent-mode"))">
+                <div class="oa-card-icon">[AGENT]</div>
+                <h2 class="oa-card-title">Agent Mode</h2>
+                <p class="oa-card-description">
+                    Describe the desired end result for your workspace. The AI derives the
+                    requirements, does the file work, verifies each requirement, and repeats
+                    until everything is green — like TDD.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">Auto Requirements</span>
+                    <span class="oa-feature-badge">Self-Verifying</span>
+                    <span class="oa-feature-badge">Iterates Until Green</span>
+                </div>
+                <button class="oa-card-button">
+                    Start Agent Mode &rarr;
+                </button>
+            </div>
+
             <!-- Quick Ask -->
             <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/quick-ask"))">
                 <div class="oa-card-icon">[Q]</div>

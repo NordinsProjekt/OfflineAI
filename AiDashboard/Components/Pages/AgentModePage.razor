@@ -1,0 +1,185 @@
+@page "/agent-mode"
+@namespace AiDashboard.Components.Pages
+@using global::Services.GoalAgent
+@using global::Services.Workspace
+@using AiDashboard.State
+
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@inject DashboardState Dashboard
+@inject IGoalAgentService GoalAgent
+@inject IWorkspaceService Workspaces
+@implements IDisposable
+
+<PageTitle>Agent Mode - OfflineAI</PageTitle>
+
+<div class="oa-quick-ask-page">
+    <div class="oa-quick-header">
+        <button class="oa-back-button" @onclick="@(() => Navigation.NavigateTo("/"))">Back to Home</button>
+        <div class="oa-quick-header-center">
+            <h1>Agent Mode</h1>
+            <p class="oa-quick-subtitle">Describe the end result — the AI derives the requirements, works, verifies, and repeats until everything is green</p>
+        </div>
+    </div>
+
+    <div class="oa-quick-container">
+        <div class="oa-quick-card oa-goal-card">
+            <p class="oa-goal-workspace">
+                Workspace: <strong>@Workspaces.GetActiveWorkspace().Name</strong>
+                <span class="oa-goal-workspace-path">@Workspaces.GetActiveWorkspace().Path</span>
+            </p>
+
+            <textarea class="oa-batch-input oa-goal-input"
+                      placeholder="e.g. The workspace should contain a pancake recipe in recept.txt with an ingredient list and numbered steps"
+                      @bind="_goalDescription" @bind:event="oninput"
+                      disabled="@GoalAgent.IsRunning"
+                      rows="3"></textarea>
+
+            <div class="oa-batch-controls">
+                <button class="oa-batch-start-btn" @onclick="StartRun" disabled="@(GoalAgent.IsRunning || string.IsNullOrWhiteSpace(_goalDescription))">
+                    @(GoalAgent.IsRunning ? "Running..." : "Run Agent")
+                </button>
+                @if (GoalAgent.IsRunning)
+                {
+                    <button class="oa-batch-stop-btn" @onclick="@(() => GoalAgent.RequestStop())">
+                        Stop after current step
+                    </button>
+                }
+                else if (GoalAgent.Phase != GoalAgentPhase.Idle)
+                {
+                    <button class="oa-batch-clear-btn" @onclick="@(() => GoalAgent.Reset())">
+                        Reset
+                    </button>
+                }
+            </div>
+
+            @if (GoalAgent.Phase != GoalAgentPhase.Idle)
+            {
+                <div class="oa-goal-phase-row">
+                    <span class="oa-batch-badge @PhaseClass(GoalAgent.Phase)">@PhaseText(GoalAgent.Phase)</span>
+                    @if (GoalAgent.CurrentIteration > 0)
+                    {
+                        <span class="oa-goal-iteration">Iteration @GoalAgent.CurrentIteration/@GoalAgent.MaxIterations</span>
+                    }
+                </div>
+            }
+
+            @if (GoalAgent.IsRunning && !string.IsNullOrWhiteSpace(Dashboard.StatusMessage))
+            {
+                <p class="oa-batch-status">@Dashboard.StatusMessage</p>
+            }
+
+            <div class="oa-batch-job-list">
+                @{
+                    var requirements = GoalAgent.Requirements;
+                }
+                @if (requirements.Count == 0)
+                {
+                    <p class="oa-batch-empty">No requirements yet. Describe the desired end result above and run the agent.</p>
+                }
+                else
+                {
+                    @for (var i = 0; i < requirements.Count; i++)
+                    {
+                        var requirement = requirements[i];
+                        var index = i;
+                        <div class="oa-batch-job-row">
+                            <div class="oa-batch-job-main">
+                                <span class="oa-batch-job-index">#@(index + 1)</span>
+                                <span class="oa-batch-job-desc">@requirement.Description</span>
+                                <span class="oa-batch-badge @StatusClass(requirement.Status)">@StatusText(requirement.Status)</span>
+                            </div>
+                            @if (requirement.Status == RequirementStatus.Failed && !string.IsNullOrWhiteSpace(requirement.LastVerdict))
+                            {
+                                <div class="oa-batch-job-result oa-goal-verdict">@requirement.LastVerdict</div>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+
+            @{
+                var log = GoalAgent.ActivityLog;
+            }
+            @if (log.Count > 0)
+            {
+                <div class="oa-goal-log">
+                    <div class="oa-goal-log-title">Activity</div>
+                    @foreach (var line in log)
+                    {
+                        <div class="oa-goal-log-line">@line</div>
+                    }
+                </div>
+                <p class="oa-goal-log-hint">
+                    Full prompt/response transcript: <code>@GoalAgentService.TranscriptFileName</code> in the workspace folder.
+                </p>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _goalDescription = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        GoalAgent.OnChange += Refresh;
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private void StartRun()
+    {
+        if (string.IsNullOrWhiteSpace(_goalDescription))
+            return;
+
+        // Fire-and-forget: the button click returns immediately and the UI updates live via
+        // GoalAgent.OnChange as the phase and requirement statuses change — same
+        // background-progress pattern as BatchProcessingPage. RunAsync itself never throws for
+        // LLM/tool failures (it ends in the Failed phase instead).
+        _ = GoalAgent.RunAsync(_goalDescription.Trim(), Dashboard.SendQuickAskActiveAsync, status => Dashboard.StatusMessage = status);
+    }
+
+    private static string PhaseText(GoalAgentPhase phase) => phase switch
+    {
+        GoalAgentPhase.GeneratingRequirements => "Generating requirements",
+        GoalAgentPhase.Working => "Working",
+        GoalAgentPhase.Verifying => "Verifying",
+        GoalAgentPhase.Completed => "All green",
+        GoalAgentPhase.MaxIterationsReached => "Iteration cap reached",
+        GoalAgentPhase.Stopped => "Stopped",
+        GoalAgentPhase.Failed => "Failed",
+        _ => "Idle"
+    };
+
+    private static string PhaseClass(GoalAgentPhase phase) => phase switch
+    {
+        GoalAgentPhase.Completed => "green",
+        GoalAgentPhase.MaxIterationsReached or GoalAgentPhase.Failed => "red",
+        GoalAgentPhase.Stopped => "gray",
+        _ => "blue"
+    };
+
+    private static string StatusText(RequirementStatus status) => status switch
+    {
+        RequirementStatus.Unverified => "Pending",
+        RequirementStatus.Working => "Working",
+        RequirementStatus.Verifying => "Checking",
+        RequirementStatus.Passed => "Passed",
+        RequirementStatus.Failed => "Failed",
+        _ => "Pending"
+    };
+
+    private static string StatusClass(RequirementStatus status) => status switch
+    {
+        RequirementStatus.Working or RequirementStatus.Verifying => "blue",
+        RequirementStatus.Passed => "green",
+        RequirementStatus.Failed => "red",
+        _ => "gray"
+    };
+
+    public void Dispose()
+    {
+        GoalAgent.OnChange -= Refresh;
+    }
+}
