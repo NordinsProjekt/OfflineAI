@@ -102,6 +102,12 @@ public static class Program
         builder.Services.AddHttpClient("AgentApiTools");
         builder.Services.AddSingleton<IUtilityToolsService, UtilityToolsService>();
 
+        // Register the external tools service: operator-configured local executables the LLM
+        // may run by slash command. Tools are resolved only from
+        // AppConfiguration.AgentTools.ExternalTools (appsettings/user secrets) — the LLM picks
+        // a tool by name and supplies argument text; it can never specify a path.
+        builder.Services.AddSingleton<IExternalToolsService, ExternalToolsService>();
+
         // Register the lightweight, text-based agentic chat service used by QuickAsk and the
         // Dashboard chat: tells the LLM about the IFileAgentService/IUtilityToolsService slash
         // commands and executes any it requests, feeding the result back for a final answer. The
@@ -111,7 +117,8 @@ public static class Program
             new AgenticChatService(
                 sp.GetRequiredService<IFileAgentService>(),
                 sp.GetRequiredService<IUtilityToolsService>(),
-                appConfig.AgentTools.MaxToolCallRounds));
+                appConfig.AgentTools.MaxToolCallRounds,
+                sp.GetRequiredService<IExternalToolsService>()));
 
         // Register the batch job queue (Batch Processing page): feeds each queued task's
         // free-text description into IAgenticChatService.SendWithToolsAsync one at a time, so

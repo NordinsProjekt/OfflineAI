@@ -75,6 +75,57 @@ public class AgentToolsSettings
     /// endpoints listed here can be invoked — the LLM cannot supply an arbitrary URL.
     /// </summary>
     public List<ApiEndpointSettings> Endpoints { get; set; } = new();
+
+    /// <summary>
+    /// Named local executables the LLM may run by slash command. Only executables listed here
+    /// (typically in user secrets or appsettings) can be started — the LLM selects a tool by
+    /// its command name and can never supply an arbitrary path; it only provides the argument
+    /// text. Stdout is captured and fed back to the LLM as the tool result.
+    /// </summary>
+    public List<ExternalToolSettings> ExternalTools { get; set; } = new();
+}
+
+/// <summary>
+/// Describes one named, pre-configured local executable the agent is allowed to run.
+/// The LLM invokes it as <c>/&lt;Command&gt; &lt;argument&gt;</c> and receives the process's
+/// stdout as the tool result. Mirrors the whitelist principle of
+/// <see cref="ApiEndpointSettings"/>: paths come only from configuration, never from the LLM.
+/// </summary>
+public class ExternalToolSettings
+{
+    /// <summary>
+    /// Slash-command name (without the leading '/') the LLM uses to invoke this tool,
+    /// e.g. "väder" → the LLM writes "/väder Stockholm".
+    /// </summary>
+    public string Command { get; set; } = string.Empty;
+
+    /// <summary>Full path to the executable, e.g. "d:\\tools\\weather.exe".</summary>
+    public string ExecutablePath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Description shown to the LLM of what the tool does and what input it expects.
+    /// This is the LLM's only documentation for the tool — describe the parameters here.
+    /// </summary>
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional usage hint appended to the command signature in the tool list shown to the
+    /// LLM, e.g. "&lt;ort&gt;" renders as "/väder &lt;ort&gt;". Empty for tools without input.
+    /// </summary>
+    public string Usage { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional arguments always passed to the executable, before any text the LLM supplies.
+    /// Useful for interpreter-hosted tools, e.g. ExecutablePath "python.exe" with
+    /// FixedArguments "d:\\scripts\\tool.py".
+    /// </summary>
+    public string FixedArguments { get; set; } = string.Empty;
+
+    /// <summary>Per-run timeout in milliseconds; the process is killed when exceeded. Default: 30000.</summary>
+    public int TimeoutMs { get; set; } = 30_000;
+
+    /// <summary>Maximum characters of process output returned to the LLM. Default: 4000.</summary>
+    public int MaxOutputLength { get; set; } = 4000;
 }
 
 /// <summary>

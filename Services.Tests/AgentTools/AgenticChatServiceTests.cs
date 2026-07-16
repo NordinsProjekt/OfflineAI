@@ -109,6 +109,66 @@ public sealed class AgenticChatServiceTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Fake <see cref="IExternalToolsService"/>: same command-detection shape as the real
+    /// service (line-scan against configured command signatures) with a caller-supplied
+    /// executor, so the loop's external-tool branch can be tested without starting processes.
+    /// </summary>
+    private sealed class FakeExternalToolsService : IExternalToolsService
+    {
+        private readonly Func<string, UtilityToolResult> _executor;
+        private readonly IReadOnlyDictionary<string, string> _descriptions;
+
+        public FakeExternalToolsService(
+            Func<string, UtilityToolResult> executor,
+            IReadOnlyDictionary<string, string>? descriptions = null)
+        {
+            _executor = executor;
+            _descriptions = descriptions ?? new Dictionary<string, string>
+            {
+                ["/väder <ort>"] = "Hämtar väderprognosen för en ort."
+            };
+        }
+
+        public List<string> ExecutedCommands { get; } = new();
+
+        public bool IsCommand(string input) =>
+            !string.IsNullOrWhiteSpace(input)
+            && _descriptions.Keys.Any(k =>
+            {
+                var cmd = k.Split(' ')[0];
+                var t = input.TrimStart();
+                return t.Equals(cmd, StringComparison.OrdinalIgnoreCase)
+                    || t.StartsWith(cmd + " ", StringComparison.OrdinalIgnoreCase);
+            });
+
+        public Task<UtilityToolResult> ExecuteAsync(string input)
+        {
+            ExecutedCommands.Add(input);
+            return Task.FromResult(_executor(input));
+        }
+
+        public IReadOnlyDictionary<string, string> GetToolDescriptions() => _descriptions;
+
+        public bool TryFindCommand(string llmResponse, out string command)
+        {
+            command = string.Empty;
+            if (string.IsNullOrWhiteSpace(llmResponse)) return false;
+
+            foreach (var rawLine in llmResponse.Split('\n'))
+            {
+                var line = rawLine.Trim().TrimEnd('\r');
+                if (IsCommand(line))
+                {
+                    command = line;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
     // ── Constructor ──────────────────────────────────────────────────────
 
     [Fact]
@@ -492,5 +552,65 @@ public sealed class AgenticChatServiceTests : IDisposable
         var act = async () => await _sut.SendWithToolsAsync("Vilka filer finns?", llm.SendAsync, onToolStatus: null);
 
         await act.Should().NotThrowAsync();
+    }
+
+    // ── External tools ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SendWithToolsAsync_ExternalCommandRequested_ExecutesAndFeedsResultBack()
+    {
+        var externalTools = new FakeExternalToolsService(
+            _ => UtilityToolResult.Success("✓ Verktyg kört: /väder", "Soligt, 22 grader i Stockholm."));
+        var sut = new AgenticChatService(_fileAgent, externalTools: externalTools);
+        var llm = new ScriptedLlm("/väder Stockholm", "Det är soligt och 22 grader i Stockholm.");
+
+        var result = await sut.SendWithToolsAsync("Hur är vädret i Stockholm?", llm.SendAsync);
+
+        externalTools.ExecutedCommands.Should().ContainSingle().Which.Should().Be("/väder Stockholm");
+        result.FinalResponse.Should().Be("Det är soligt och 22 grader i Stockholm.");
+        result.ToolInvocations.Should().ContainSingle().Which.Command.Should().Be("/väder Stockholm");
+        llm.Prompts.Should().HaveCount(2);
+        llm.Prompts[1].Should().Contain("Soligt, 22 grader i Stockholm."); // result fed back to the LLM
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_ExternalToolsConfigured_DescriptionsAppearInFirstPrompt()
+    {
+        var externalTools = new FakeExternalToolsService(_ => UtilityToolResult.Success("ok"));
+        var sut = new AgenticChatService(_fileAgent, externalTools: externalTools);
+        var llm = new ScriptedLlm("Ett vanligt svar utan verktyg.");
+
+        await sut.SendWithToolsAsync("Hej!", llm.SendAsync);
+
+        llm.Prompts[0].Should().Contain("/väder <ort>");
+        llm.Prompts[0].Should().Contain("Hämtar väderprognosen för en ort.");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_ExternalToolFails_FailureMessageFedBackToLlm()
+    {
+        var externalTools = new FakeExternalToolsService(
+            _ => UtilityToolResult.Failure("⚠ Verktyget \"/väder\" avslutades med felkod 1."));
+        var sut = new AgenticChatService(_fileAgent, externalTools: externalTools);
+        var llm = new ScriptedLlm("/väder Mars", "Jag kunde tyvärr inte hämta vädret.");
+
+        var result = await sut.SendWithToolsAsync("Hur är vädret på Mars?", llm.SendAsync);
+
+        result.FinalResponse.Should().Be("Jag kunde tyvärr inte hämta vädret.");
+        llm.Prompts[1].Should().Contain("felkod 1"); // the LLM sees why the tool failed
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_FileCommandTakesPrecedenceOverExternal()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_tempDir, "a.txt"), "x");
+        var externalTools = new FakeExternalToolsService(_ => UtilityToolResult.Success("ok"));
+        var sut = new AgenticChatService(_fileAgent, externalTools: externalTools);
+        var llm = new ScriptedLlm("/lista", "Du har en fil: a.txt");
+
+        var result = await sut.SendWithToolsAsync("Vilka filer finns?", llm.SendAsync);
+
+        externalTools.ExecutedCommands.Should().BeEmpty();
+        result.ToolInvocations.Should().ContainSingle().Which.Command.Should().Be("/lista");
     }
 }
