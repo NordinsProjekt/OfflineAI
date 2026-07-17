@@ -55,17 +55,32 @@ public interface IGoalAgentService
     /// </param>
     /// <param name="onToolStatus">Optional live status callback, forwarded to <c>SendWithToolsAsync</c>.</param>
     /// <param name="cancellationToken">Cancellation token, forwarded to <c>SendWithToolsAsync</c>.</param>
+    /// <param name="modelName">
+    /// Optional. Name of the LLM behind <paramref name="sendToLlm"/>, recorded with the run's
+    /// history so runs can be compared across models. The agent has no way to know this itself —
+    /// the backend choice lives in the caller.
+    /// </param>
+    /// <param name="conversationId">
+    /// Optional. The conversation the run's LLM turns are being saved under in the Questions
+    /// table, recorded with the run's history so its raw prompts and replies stay findable.
+    /// Callers should start a fresh conversation per run, or the run's turns will be
+    /// indistinguishable from ordinary chat.
+    /// </param>
     /// <remarks>
     /// When the service was constructed with a file agent, the complete raw transcript of the
     /// run (every prompt, every LLM reply including internal tool-call rounds, executed tool
     /// commands, and verdicts) is written to <c>GoalAgentService.TranscriptFileName</c>
     /// ("agentlogg.txt") in the active workspace, overwriting the previous run's log.
+    /// When it was constructed with an <c>IAgentRunRepository</c>, the run, its requirements, and
+    /// its activity log are additionally recorded as history that survives an app restart.
     /// </remarks>
     Task RunAsync(
         string goalDescription,
         Func<string, Task<string>> sendToLlm,
         Action<string>? onToolStatus = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string? modelName = null,
+        Guid? conversationId = null);
 
     /// <summary>
     /// Requests the run stop at the next step boundary (between work items or verifications).

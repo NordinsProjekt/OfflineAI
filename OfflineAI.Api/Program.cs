@@ -251,6 +251,9 @@ if (!string.IsNullOrWhiteSpace(gemma4CliModel) && !string.IsNullOrWhiteSpace(gem
             ModelPath             = gemma4CliModel,
             GpuLayers             = gemma4UsingLlmFallback ? appConfig.Llm!.GpuLayers : gemma4CliCfg.GpuLayers,
             ContextSize           = gemma4UsingLlmFallback ? appConfig.Llm!.ContextSize : gemma4CliCfg.ContextSize,
+            Device                = !string.IsNullOrWhiteSpace(gemma4CliCfg.Device)
+                                        ? gemma4CliCfg.Device
+                                        : appConfig.Llm?.Device ?? string.Empty,
             MaxTokens             = gemma4CliCfg.MaxTokens,
             Temperature           = gemma4CliCfg.Temperature,
             TopP                  = gemma4CliCfg.TopP,

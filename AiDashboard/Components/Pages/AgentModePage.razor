@@ -20,6 +20,7 @@
             <h1>Agent Mode</h1>
             <p class="oa-quick-subtitle">Describe the end result — the AI derives the requirements, works, verifies, and repeats until everything is green</p>
         </div>
+        <button class="oa-back-button oa-header-action" @onclick="@(() => Navigation.NavigateTo("/agent-history"))">History</button>
     </div>
 
     <div class="oa-quick-container">
@@ -111,7 +112,9 @@
                     }
                 </div>
                 <p class="oa-goal-log-hint">
-                    Full prompt/response transcript: <code>@GoalAgentService.TranscriptFileName</code> in the workspace folder.
+                    Full prompt/response transcript: <code>@GoalAgentService.TranscriptFileName</code> in the workspace folder
+                    (overwritten by the next run). Finished runs are kept under
+                    <a href="/agent-history">History</a>.
                 </p>
             }
         </div>
@@ -133,11 +136,21 @@
         if (string.IsNullOrWhiteSpace(_goalDescription))
             return;
 
+        // Give the run its own conversation, so the question/answer turns it saves are separable
+        // from ordinary chat instead of being appended to whatever conversation was open.
+        Dashboard.StartNewConversation();
+
         // Fire-and-forget: the button click returns immediately and the UI updates live via
         // GoalAgent.OnChange as the phase and requirement statuses change — same
         // background-progress pattern as BatchProcessingPage. RunAsync itself never throws for
         // LLM/tool failures (it ends in the Failed phase instead).
-        _ = GoalAgent.RunAsync(_goalDescription.Trim(), Dashboard.SendQuickAskActiveAsync, status => Dashboard.StatusMessage = status);
+        _ = GoalAgent.RunAsync(
+            _goalDescription.Trim(),
+            Dashboard.SendQuickAskActiveAsync,
+            status => Dashboard.StatusMessage = status,
+            CancellationToken.None,
+            Dashboard.ActiveModelName,
+            Dashboard.CurrentConversationId);
     }
 
     private static string PhaseText(GoalAgentPhase phase) => phase switch

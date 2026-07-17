@@ -111,6 +111,26 @@ public sealed class AgenticChatService : IAgenticChatService
                 continue;
             }
 
+            // Inline-content shortcut: the model issued /fyll or /skapa and put the file body
+            // directly in the same message (typically a Markdown code fence) instead of using the
+            // describe-then-generate round. This is a very common pattern; without it the fenced
+            // content is discarded and the write is silently lost. Only fires when the command
+            // names a valid file AND the response actually carries extractable content — otherwise
+            // it falls through to the normal /fyll (generate) or /skapa (empty file) behaviour.
+            if (_fileAgent.TryGetInlineWriteTarget(command, out var inlineTarget)
+                && _fileAgent.TryExtractFileContent(response, out var inlineContent))
+            {
+                await _fileAgent.WriteExtractedContentAsync(inlineTarget, inlineContent);
+                var inlineSummary = $"✓ Fil sparad: {inlineTarget}";
+                invocations.Add(new ToolInvocation(command, inlineSummary));
+
+                response = await sendToLlm(
+                    $"Verktyget \"{command}\" har körts. Resultat: {inlineSummary}\n\n" +
+                    $"Bekräfta kort för användaren och besvara annars den ursprungliga frågan: {userMessage}\n" +
+                    "Skriv inget nytt kommando om du inte behöver ytterligare information.");
+                continue;
+            }
+
             var result = await _fileAgent.ExecuteAsync(command);
 
             if (result.ResultType == FileAgentResultType.FillRequested && result.LlmPrompt is not null)

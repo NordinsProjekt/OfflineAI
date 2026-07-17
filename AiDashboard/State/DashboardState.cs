@@ -68,6 +68,21 @@ public class DashboardState
     /// </summary>
     public void StartNewConversation() => ChatService?.StartNewConversation();
 
+    /// <summary>
+    /// Name of the model behind whichever backend <see cref="SendQuickAskActiveAsync"/> currently
+    /// routes to, or null when it can't be determined. Lets a caller record which model served a
+    /// long-running job without having to know how backends are selected.
+    /// </summary>
+    public string? ActiveModelName => SelectedBackend == LlmBackend.Gemma4Cli && Gemma4CliService != null
+        ? Gemma4CliService.ModelName
+        : ModelService.CurrentModel;
+
+    /// <summary>
+    /// The conversation id that saved question/answer turns are currently grouped under, or null
+    /// when no chat service is available.
+    /// </summary>
+    public Guid? CurrentConversationId => ChatService?.ConversationId;
+
     // UI-specific state
     private bool _collapsed;
     public bool Collapsed

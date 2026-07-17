@@ -222,20 +222,20 @@ public class FileAgentService : IFileAgentService
 
     private async Task<FileAgentResult> ReadFileAsync(string args)
     {
-        // Format: <filename> <instruktion> — the instruction is required so the command
-        // carries an explicit task for the agent instead of forwarding the raw file as the
-        // entire prompt.
+        // The argument is a filename optionally followed by an instruction. An instruction gives
+        // the agent an explicit task; when it's omitted — models very often just write
+        // "/läs rpg2.bas" to see a file — fall back to returning the raw content instead of
+        // erroring, so a missing argument doesn't waste a tool round.
         var spaceIdx = args.IndexOf(' ');
-        if (spaceIdx < 0)
-            return FileAgentResult.Failure(
-                "Ange filnamn och en instruktion. Exempel: /läs text.txt Sammanfatta innehållet.");
+        var filename = (spaceIdx < 0 ? args : args[..spaceIdx]).Trim();
+        var instruction = spaceIdx < 0 ? string.Empty : args[(spaceIdx + 1)..].Trim();
 
-        var filename = args[..spaceIdx].Trim();
-        var instruction = args[(spaceIdx + 1)..].Trim();
+        if (string.IsNullOrWhiteSpace(filename))
+            return FileAgentResult.Failure(
+                "Ange ett filnamn. Exempel: /läs text.txt Sammanfatta innehållet.");
 
         if (string.IsNullOrWhiteSpace(instruction))
-            return FileAgentResult.Failure(
-                "Ange en instruktion efter filnamnet. Exempel: /läs text.txt Sammanfatta innehållet.");
+            return await ReadFileRawAsync(filename);
 
         var path = GetSafePath(filename);
         if (path is null)
@@ -501,19 +501,104 @@ public class FileAgentService : IFileAgentService
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// The <c>/fyll</c> prompt asks the model to wrap the file body in <c>&lt;FILE&gt;</c> …
+    /// <c>&lt;ENDFILE&gt;</c>, but models ignore that often enough that a strict marker-only parser
+    /// silently drops a large share of writes (observed ~half in one agent run). So two fallbacks
+    /// beyond the happy path:
+    /// <list type="bullet">
+    /// <item>An <em>unclosed</em> <c>&lt;FILE&gt;</c> (opener present, no <c>&lt;ENDFILE&gt;</c>) —
+    /// take everything after the opener rather than losing the whole write.</item>
+    /// <item>No markers at all — accept a Markdown code fence (```), which is the model's usual
+    /// substitute.</item>
+    /// </list>
+    /// A fence found <em>inside</em> the markers is also unwrapped, so the ``` lines never end up
+    /// written into the file itself.
+    /// </remarks>
     public bool TryExtractFileContent(string llmResponse, out string content)
     {
         content = string.Empty;
         if (string.IsNullOrWhiteSpace(llmResponse)) return false;
 
         var start = llmResponse.IndexOf(FileStartMarker, Cmp);
-        var end = llmResponse.IndexOf(FileEndMarker, Cmp);
+        if (start >= 0)
+        {
+            var contentStart = start + FileStartMarker.Length;
+            var end = llmResponse.IndexOf(FileEndMarker, contentStart, Cmp);
+            var body = end >= 0
+                ? llmResponse[contentStart..end]
+                : llmResponse[contentStart..];   // unclosed <FILE> — keep what we have
 
-        if (start < 0 || end < 0 || end <= start) return false;
+            content = StripEnclosingCodeFence(body).Trim();
+            return !string.IsNullOrWhiteSpace(content);
+        }
 
-        var contentStart = start + FileStartMarker.Length;
-        content = llmResponse[contentStart..end].Trim();
+        // No markers — the model wrapped the file in a Markdown code fence instead.
+        if (TryExtractCodeFence(llmResponse, out content))
+            return true;
+
+        content = string.Empty;
+        return false;
+    }
+
+    /// <summary>
+    /// If <paramref name="body"/> is wrapped in a single Markdown code fence, returns just the
+    /// inner text; otherwise returns <paramref name="body"/> unchanged.
+    /// </summary>
+    private static string StripEnclosingCodeFence(string body)
+        => TryExtractCodeFence(body, out var inner) ? inner : body;
+
+    /// <summary>
+    /// Extracts the contents of the first Markdown code fence (<c>```</c>, with an optional
+    /// language tag on the opening line). A fence with no closing <c>```</c> runs to end of text.
+    /// Returns false when no fence is present or the fenced block is empty/whitespace.
+    /// </summary>
+    private static bool TryExtractCodeFence(string text, out string content)
+    {
+        content = string.Empty;
+
+        const string Fence = "```";
+        var fenceStart = text.IndexOf(Fence, Cmp);
+        if (fenceStart < 0) return false;
+
+        // Skip the rest of the opening fence line (the optional language tag, e.g. ```qbasic).
+        var innerStart = text.IndexOf('\n', fenceStart);
+        if (innerStart < 0) return false;
+        innerStart++;
+
+        var fenceEnd = text.IndexOf(Fence, innerStart, Cmp);
+        var inner = fenceEnd >= 0 ? text[innerStart..fenceEnd] : text[innerStart..];
+
+        content = inner.Trim('\r', '\n');
         return !string.IsNullOrWhiteSpace(content);
+    }
+
+    /// <inheritdoc/>
+    public bool TryGetInlineWriteTarget(string command, out string filename)
+    {
+        filename = string.Empty;
+        if (string.IsNullOrWhiteSpace(command)) return false;
+
+        var trimmed = command.Trim();
+        string args;
+        if (trimmed.StartsWith("/fyll ", Cmp))
+            args = trimmed["/fyll ".Length..];
+        else if (trimmed.StartsWith("/skapa ", Cmp))
+            args = trimmed["/skapa ".Length..];
+        else
+            return false;
+
+        // The first whitespace-delimited token is the filename. Any trailing text (a description)
+        // is ignored here — the caller supplies the literal content from the response body.
+        var spaceIdx = args.IndexOf(' ');
+        var name = (spaceIdx < 0 ? args : args[..spaceIdx]).Trim();
+        if (string.IsNullOrWhiteSpace(name)) return false;
+
+        // Only a valid, in-workspace filename is a legal write target.
+        if (GetSafePath(name) is null) return false;
+
+        filename = name;
+        return true;
     }
 
     /// <inheritdoc/>
@@ -815,6 +900,12 @@ public class FileAgentService : IFileAgentService
         // Strip any directory component — only bare filenames are allowed.
         var safeName = Path.GetFileName(filename.Trim());
         if (string.IsNullOrWhiteSpace(safeName)) return null;
+
+        // Reject characters the filesystem can't represent (e.g. a stray ':' from a mangled model
+        // command like "/fyll Fil: ..."). Without this the invalid name flows through to
+        // File.WriteAllTextAsync, whose Win32 exception is unhandled and aborts the whole agent
+        // run — a single bad model token must not take down a long unattended run.
+        if (safeName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return null;
 
         var fullPath = Path.GetFullPath(Path.Combine(BaseDirectory, safeName));
 

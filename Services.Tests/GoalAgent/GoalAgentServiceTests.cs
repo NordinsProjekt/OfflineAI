@@ -1,6 +1,8 @@
+using Entities;
 using FluentAssertions;
 using Services.AgentTools;
 using Services.GoalAgent;
+using Services.Repositories;
 
 namespace Services.Tests.GoalAgent;
 
@@ -42,6 +44,77 @@ public class GoalAgentServiceTests
             ReceivedMessages.Add(userMessage);
             return await _handler(userMessage);
         }
+    }
+
+    /// <summary>
+    /// Fake run-history repository: records every write in memory. Set <see cref="WriteFailure"/>
+    /// to model a database that rejects writes, which the service must survive.
+    /// </summary>
+    private sealed class FakeAgentRunRepository : IAgentRunRepository
+    {
+        public List<AgentRunEntity> StartedRuns { get; } = new();
+        public List<AgentRunRequirementEntity> SavedRequirements { get; } = new();
+        public List<AgentRunEventEntity> SavedEvents { get; } = new();
+        public List<(Guid RunId, string Phase, int Iterations)> CompletedRuns { get; } = new();
+
+        /// <summary>When set, every write throws it.</summary>
+        public Exception? WriteFailure { get; set; }
+
+        private void FailIfConfigured()
+        {
+            if (WriteFailure is not null)
+                throw WriteFailure;
+        }
+
+        public Task InitializeDatabaseAsync() => Task.CompletedTask;
+
+        public Task StartRunAsync(AgentRunEntity run)
+        {
+            FailIfConfigured();
+            StartedRuns.Add(run);
+            return Task.CompletedTask;
+        }
+
+        public Task SaveRequirementsAsync(IReadOnlyList<AgentRunRequirementEntity> requirements)
+        {
+            FailIfConfigured();
+            SavedRequirements.AddRange(requirements);
+            return Task.CompletedTask;
+        }
+
+        public Task UpdateRequirementAsync(Guid requirementId, string status, string? lastVerdict)
+        {
+            FailIfConfigured();
+            var row = SavedRequirements.FirstOrDefault(r => r.Id == requirementId);
+            if (row is not null)
+            {
+                row.Status = status;
+                row.LastVerdict = lastVerdict;
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task AddEventsAsync(IReadOnlyList<AgentRunEventEntity> events)
+        {
+            FailIfConfigured();
+            SavedEvents.AddRange(events);
+            return Task.CompletedTask;
+        }
+
+        public Task CompleteRunAsync(Guid runId, string phase, int iterations, DateTime completedAt)
+        {
+            FailIfConfigured();
+            CompletedRuns.Add((runId, phase, iterations));
+            return Task.CompletedTask;
+        }
+
+        public Task<List<AgentRunEntity>> GetRecentRunsAsync(int count = 25) => Task.FromResult(StartedRuns.ToList());
+        public Task<AgentRunEntity?> GetRunAsync(Guid runId) => Task.FromResult(StartedRuns.FirstOrDefault(r => r.Id == runId));
+        public Task<List<AgentRunRequirementEntity>> GetRequirementsAsync(Guid runId) =>
+            Task.FromResult(SavedRequirements.Where(r => r.RunId == runId).ToList());
+        public Task<List<AgentRunEventEntity>> GetEventsAsync(Guid runId) =>
+            Task.FromResult(SavedEvents.Where(e => e.RunId == runId).ToList());
+        public Task DeleteRunAsync(Guid runId) => Task.CompletedTask;
     }
 
     private static AgenticChatResult Result(string text) => new(text, Array.Empty<ToolInvocation>());
@@ -342,6 +415,53 @@ public class GoalAgentServiceTests
         sut.Phase.Should().Be(GoalAgentPhase.MaxIterationsReached);
         sut.Requirements.Should().OnlyContain(r => r.Status == RequirementStatus.Failed);
         sut.Requirements.Should().OnlyContain(r => !string.IsNullOrWhiteSpace(r.LastVerdict));
+        sut.Requirements.Should().OnlyContain(r => r.VerdictInconclusive);
+    }
+
+    [Fact]
+    public async Task RunAsync_UnparseableVerdict_IsRetriedOnceAndCanPassOnSecondAttempt()
+    {
+        // Empty/garbled review replies are intermittent (temperature 1.0), so one immediate
+        // retry usually recovers a real verdict — here the second attempt says GODKÄNT.
+        var verifyCalls = 0;
+        var fake = new FakeAgenticChatService(msg =>
+        {
+            if (!IsVerifyPrompt(msg))
+                return Result("klart");
+            verifyCalls++;
+            return verifyCalls == 1 ? Result(string.Empty) : Result("RESULTAT: GODKÄNT");
+        });
+        var sut = new GoalAgentService(fake, maxIterations: 1);
+
+        await sut.RunAsync("Skapa filen a.txt", _ => Task.FromResult("KRAV: Filen a.txt finns i arbetsytan."));
+
+        sut.Phase.Should().Be(GoalAgentPhase.Completed);
+        sut.Requirements.Should().ContainSingle().Which.Status.Should().Be(RequirementStatus.Passed);
+        verifyCalls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task RunAsync_PersistentlyUnparseableVerdict_SkipsReworkAndOmitsMetatextFromWorkPrompts()
+    {
+        // When even the retried verification is unreadable there is no concrete defect to fix.
+        // The next iteration must NOT rework the file (blind edits have corrupted a good file in
+        // a real run) and must NOT present the parse diagnostic as a review motivation.
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("<|channel>thought") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 2);
+
+        await sut.RunAsync("Skapa filen a.txt", _ => Task.FromResult("KRAV: Filen a.txt finns i arbetsytan."));
+
+        sut.Phase.Should().Be(GoalAgentPhase.MaxIterationsReached);
+
+        // Worked once (initial Unverified state), then skipped in iteration 2.
+        fake.ReceivedMessages.Count(IsWorkPrompt).Should().Be(1);
+        // Verified with one retry per iteration: 2 iterations × 2 attempts.
+        fake.ReceivedMessages.Count(IsVerifyPrompt).Should().Be(4);
+        // The parse diagnostic must never be dressed up as a failure motivation.
+        fake.ReceivedMessages.Where(IsWorkPrompt).Should()
+            .OnlyContain(m => !m.Contains("kunde inte tolkas"));
+        sut.ActivityLog.Should().Contain(line => line.Contains("Ingen åtgärd"));
     }
 
     [Fact]
@@ -555,5 +675,143 @@ public class GoalAgentServiceTests
         await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
 
         changeCount.Should().BeGreaterThan(3, "phase changes and per-requirement status flips should all notify");
+    }
+
+    // ── Run history (IAgentRunRepository) ─────────────────────────────────
+
+    [Fact]
+    public async Task RunAsync_WithRepository_RecordsRunWithCallerSuppliedMetadata()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var repository = new FakeAgentRunRepository();
+        var conversationId = Guid.NewGuid();
+        var sut = new GoalAgentService(fake, runRepository: repository);
+
+        await sut.RunAsync(
+            "Skapa ett pannkaksrecept",
+            TwoRequirementsLlm,
+            modelName: "gemma-4.gguf",
+            conversationId: conversationId);
+
+        var run = repository.StartedRuns.Should().ContainSingle().Subject;
+        run.GoalDescription.Should().Be("Skapa ett pannkaksrecept");
+        run.ModelName.Should().Be("gemma-4.gguf");
+        run.ConversationId.Should().Be(conversationId);
+        run.MaxIterations.Should().Be(sut.MaxIterations);
+    }
+
+    [Fact]
+    public async Task RunAsync_WithRepository_RecordsRequirementsWithFinalVerdicts()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+        {
+            if (!IsVerifyPrompt(msg))
+                return Result("klart");
+            return msg.Contains("ingredienslista")
+                ? Result("RESULTAT: UNDERKÄNT - saknas")
+                : Result("RESULTAT: GODKÄNT");
+        });
+        var repository = new FakeAgentRunRepository();
+        var sut = new GoalAgentService(fake, maxIterations: 1, runRepository: repository);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        repository.SavedRequirements.Should().HaveCount(2);
+        repository.SavedRequirements.Should().OnlyContain(r => r.RunId == repository.StartedRuns[0].Id);
+        repository.SavedRequirements.Select(r => r.Ordinal).Should().Equal(1, 2);
+
+        var passed = repository.SavedRequirements.Single(r => r.Description.Contains("recept.txt finns"));
+        passed.Status.Should().Be(nameof(RequirementStatus.Passed));
+        passed.LastVerdict.Should().BeNull();
+
+        var failed = repository.SavedRequirements.Single(r => r.Description.Contains("ingredienslista"));
+        failed.Status.Should().Be(nameof(RequirementStatus.Failed));
+        failed.LastVerdict.Should().Be("saknas");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithRepository_RecordsActivityLogAsOrderedEvents()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var repository = new FakeAgentRunRepository();
+        var sut = new GoalAgentService(fake, runRepository: repository);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        // Every recorded event belongs to the run and carries a gap-free sequence, so the stored
+        // order is the order things happened rather than the order the batches were flushed.
+        repository.SavedEvents.Should().OnlyContain(e => e.RunId == repository.StartedRuns[0].Id);
+        repository.SavedEvents.Select(e => e.Sequence).Should().Equal(Enumerable.Range(1, repository.SavedEvents.Count));
+
+        // The event log is the activity log — the whole point is being able to read it back later.
+        repository.SavedEvents.Select(e => e.Message).Should().Equal(sut.ActivityLog);
+        repository.SavedEvents.Should().Contain(e => e.EventType == AgentRunEventTypes.Verdict);
+    }
+
+    [Fact]
+    public async Task RunAsync_WithRepository_RecordsTerminalPhaseAndIterationCount()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: UNDERKÄNT - fel innehåll") : Result("klart"));
+        var repository = new FakeAgentRunRepository();
+        var sut = new GoalAgentService(fake, maxIterations: 2, runRepository: repository);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        var completed = repository.CompletedRuns.Should().ContainSingle().Subject;
+        completed.RunId.Should().Be(repository.StartedRuns[0].Id);
+        completed.Phase.Should().Be(nameof(GoalAgentPhase.MaxIterationsReached));
+        completed.Iterations.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task RunAsync_RepositoryThrows_RunStillCompletesAndWarnsOnce()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var repository = new FakeAgentRunRepository { WriteFailure = new InvalidOperationException("db down") };
+        var sut = new GoalAgentService(fake, runRepository: repository);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        // Losing history must never cost the run itself — that's the expensive part.
+        sut.Phase.Should().Be(GoalAgentPhase.Completed);
+        sut.Requirements.Should().OnlyContain(r => r.Status == RequirementStatus.Passed);
+        sut.ActivityLog.Should().ContainSingle(l => l.Contains("Kunde inte spara agentkörningen"));
+    }
+
+    [Fact]
+    public async Task RunAsync_RepositoryFailsMidRun_StopsRecordingWithoutBreakingTheRun()
+    {
+        var repository = new FakeAgentRunRepository();
+        // Let the run start cleanly, then take the database away once work begins.
+        var fake = new FakeAgenticChatService(msg =>
+        {
+            repository.WriteFailure = new InvalidOperationException("db down");
+            return Result(IsVerifyPrompt(msg) ? "RESULTAT: GODKÄNT" : "klart");
+        });
+        var sut = new GoalAgentService(fake, runRepository: repository);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        sut.Phase.Should().Be(GoalAgentPhase.Completed);
+        repository.StartedRuns.Should().ContainSingle("the run row was written before the database went away");
+        repository.CompletedRuns.Should().BeEmpty("recording is disabled after the first failed write");
+        sut.ActivityLog.Should().ContainSingle(l => l.Contains("Kunde inte spara körningshistoriken"),
+            "the user should be told once, not once per log line");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithoutRepository_RunsNormally()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        sut.Phase.Should().Be(GoalAgentPhase.Completed);
     }
 }

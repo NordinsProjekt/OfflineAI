@@ -46,6 +46,17 @@ public class GoalRequirement
     /// </summary>
     public string? LastVerdict { get; internal set; }
 
+    /// <summary>
+    /// True when the most recent verification reply could not be interpreted as a
+    /// GODKÄNT/UNDERKÄNT verdict at all (empty reply, leaked template tokens, ...). The
+    /// requirement still counts as failed — never green by accident — but there is no real
+    /// defect to act on: <see cref="LastVerdict"/> holds a diagnostic for the UI, not a
+    /// motivation, so it must not be fed into the next work prompt, and no file work should be
+    /// attempted for the requirement until a verification produces a readable verdict. (In a
+    /// real run, "fixing" a parse hiccup led the model to rewrite a perfectly fine file.)
+    /// </summary>
+    public bool VerdictInconclusive { get; internal set; }
+
     public GoalRequirement(string description)
     {
         if (string.IsNullOrWhiteSpace(description))

@@ -357,6 +357,57 @@ public sealed class AgenticChatServiceTests : IDisposable
         File.Exists(Path.Combine(_tempDir, "config.txt")).Should().BeFalse();
     }
 
+    [Fact]
+    public async Task SendWithToolsAsync_FyllWithInlineCodeFence_WritesFileWithoutGenerateRound()
+    {
+        // The model issued /fyll and put the file body in a code fence in the SAME message,
+        // instead of the describe-then-generate round. The fenced content must be written
+        // directly — and there must be NO extra generate round (2 prompts, not 3).
+        var llm = new ScriptedLlm(
+            "/fyll rpg2.bas\n```qbasic\nCLS\nPRINT \"Hej\"\n```",
+            "Klart! Jag har skapat filen.");
+
+        var result = await _sut.SendWithToolsAsync("Skapa ett spel", llm.SendAsync);
+
+        result.FinalResponse.Should().Be("Klart! Jag har skapat filen.");
+        result.ToolInvocations.Should().ContainSingle();
+        result.ToolInvocations[0].ResultSummary.Should().Be("✓ Fil sparad: rpg2.bas");
+        var written = await File.ReadAllTextAsync(Path.Combine(_tempDir, "rpg2.bas"));
+        written.Should().Be("CLS\nPRINT \"Hej\"");
+        llm.Prompts.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_SkapaWithInlineContent_WritesContentInsteadOfEmptyFile()
+    {
+        var llm = new ScriptedLlm(
+            "/skapa rpg2.bas\n```\nPRINT \"Start\"\n```",
+            "Filen är skapad.");
+
+        var result = await _sut.SendWithToolsAsync("Skapa filen", llm.SendAsync);
+
+        result.ToolInvocations[0].ResultSummary.Should().Be("✓ Fil sparad: rpg2.bas");
+        var written = await File.ReadAllTextAsync(Path.Combine(_tempDir, "rpg2.bas"));
+        written.Should().Be("PRINT \"Start\"");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_FyllWithDescriptionOnly_StillUsesGenerateRound()
+    {
+        // No inline content — the shortcut must NOT fire, and the normal describe-then-generate
+        // round (3 prompts) must still run.
+        var llm = new ScriptedLlm(
+            "/fyll config.txt Skriv en enkel konfiguration",
+            "<FILE>nyckel=värde<ENDFILE>",
+            "Klart!");
+
+        var result = await _sut.SendWithToolsAsync("Skapa en konfiguration", llm.SendAsync);
+
+        result.ToolInvocations[0].ResultSummary.Should().Be("✓ Fil sparad: config.txt");
+        (await File.ReadAllTextAsync(Path.Combine(_tempDir, "config.txt"))).Should().Be("nyckel=värde");
+        llm.Prompts.Should().HaveCount(3);
+    }
+
     // ── /redigera round trip ──────────────────────────────────────────────
 
     [Fact]

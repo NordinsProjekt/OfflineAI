@@ -89,11 +89,21 @@ public interface IFileAgentService
     Task<FileAgentResult> ReadPdfFileAsync(string filename);
 
     /// <summary>
-    /// Tries to extract the file content block delimited by <c>&lt;&lt;&lt;FIL&gt;&gt;&gt;</c> /
-    /// <c>&lt;&lt;&lt;SLUT&gt;&gt;&gt;</c> from an LLM response.
-    /// Returns <c>true</c> and sets <paramref name="content"/> when the block is found.
+    /// Tries to extract a file content block from an LLM response: the <c>&lt;FILE&gt;</c> /
+    /// <c>&lt;ENDFILE&gt;</c> markers when present, otherwise a Markdown code fence (```), which
+    /// models frequently use instead. Returns <c>true</c> and sets <paramref name="content"/> when
+    /// content is found.
     /// </summary>
     bool TryExtractFileContent(string llmResponse, out string content);
+
+    /// <summary>
+    /// If <paramref name="command"/> is a <c>/fyll</c> or <c>/skapa</c> command naming a valid
+    /// in-workspace file, returns that filename as the target for an inline-content write. This
+    /// supports the common model pattern of issuing the command and putting the file body directly
+    /// in the same message (e.g. in a code fence) instead of the describe-then-generate round.
+    /// Returns <c>false</c> for any other command, a missing filename, or an invalid filename.
+    /// </summary>
+    bool TryGetInlineWriteTarget(string command, out string filename);
 
     /// <summary>
     /// Writes <paramref name="content"/> to <paramref name="filename"/> inside
@@ -102,8 +112,8 @@ public interface IFileAgentService
     Task WriteExtractedContentAsync(string filename, string content);
 
     /// <summary>
-    /// Returns the LLM response with the raw marker lines (<c>&lt;&lt;&lt;FIL&gt;&gt;&gt;</c>
-    /// and <c>&lt;&lt;&lt;SLUT&gt;&gt;&gt;</c>) removed so the content displays cleanly in chat.
+    /// Returns the LLM response with the raw marker lines (<c>&lt;FILE&gt;</c> and
+    /// <c>&lt;ENDFILE&gt;</c>) removed so the content displays cleanly in chat.
     /// </summary>
     string StripFileMarkers(string llmResponse);
 

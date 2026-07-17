@@ -93,6 +93,25 @@
                 </button>
             </div>
 
+            <!-- Agent History -->
+            <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/agent-history"))">
+                <div class="oa-card-icon">[LOG]</div>
+                <h2 class="oa-card-title">Agent History</h2>
+                <p class="oa-card-description">
+                    Review finished Agent Mode runs: the goal, the requirements it derived, which
+                    ones ended up green, and the activity log — kept in the database so long runs
+                    can be inspected long after they finished.
+                </p>
+                <div class="oa-card-features">
+                    <span class="oa-feature-badge">Past Runs</span>
+                    <span class="oa-feature-badge">Verdicts</span>
+                    <span class="oa-feature-badge">Survives Restarts</span>
+                </div>
+                <button class="oa-card-button">
+                    View History &rarr;
+                </button>
+            </div>
+
             <!-- Quick Ask -->
             <div class="oa-home-card" @onclick="@(() => Navigation.NavigateTo("/quick-ask"))">
                 <div class="oa-card-icon">[Q]</div>

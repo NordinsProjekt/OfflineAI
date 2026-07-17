@@ -46,6 +46,118 @@ public sealed class FileAgentServiceTests : IDisposable
         _sut.IsCommand(input).Should().BeTrue();
     }
 
+    // ── TryExtractFileContent ─────────────────────────────────────────────
+
+    [Fact]
+    public void TryExtractFileContent_WithMarkers_ReturnsInnerContent()
+    {
+        var response = "Här är filen:\n<FILE>\nPRINT \"Hej\"\n<ENDFILE>\nKlart!";
+
+        _sut.TryExtractFileContent(response, out var content).Should().BeTrue();
+        content.Should().Be("PRINT \"Hej\"");
+    }
+
+    [Fact]
+    public void TryExtractFileContent_MarkersWrappingCodeFence_StripsFence()
+    {
+        // The model obeyed the markers but ALSO fenced the code — the ``` lines must not be
+        // written into the file.
+        var response = "<FILE>\n```qbasic\nPRINT \"Hej\"\n```\n<ENDFILE>";
+
+        _sut.TryExtractFileContent(response, out var content).Should().BeTrue();
+        content.Should().Be("PRINT \"Hej\"");
+    }
+
+    [Fact]
+    public void TryExtractFileContent_UnclosedFileMarker_KeepsBodyToEnd()
+    {
+        // <FILE> opened but no <ENDFILE> — previously dropped the whole write.
+        var response = "<FILE>\nPRINT \"rad 1\"\nPRINT \"rad 2\"";
+
+        _sut.TryExtractFileContent(response, out var content).Should().BeTrue();
+        content.Should().Be("PRINT \"rad 1\"\nPRINT \"rad 2\"");
+    }
+
+    [Fact]
+    public void TryExtractFileContent_NoMarkersButCodeFence_ExtractsFencedBlock()
+    {
+        // The dominant real-world failure: model ignores the markers and uses a Markdown fence.
+        var response = "Visst! Här kommer koden:\n```qbasic\nCLS\nPRINT \"Start\"\n```";
+
+        _sut.TryExtractFileContent(response, out var content).Should().BeTrue();
+        content.Should().Be("CLS\nPRINT \"Start\"");
+    }
+
+    [Fact]
+    public void TryExtractFileContent_PlainProseNoMarkersNoFence_ReturnsFalse()
+    {
+        var response = "Jag kan tyvärr inte skapa filen just nu.";
+
+        _sut.TryExtractFileContent(response, out var content).Should().BeFalse();
+        content.Should().BeEmpty();
+    }
+
+    // ── GetSafePath / invalid filenames ───────────────────────────────────
+
+    [Theory]
+    [InlineData("/fyll Fil: rpg2.bas, Innehåll: SCREEN 0")]
+    [InlineData("/skapa Fil:")]
+    public async Task ExecuteAsync_InvalidFilenameCharacters_FailsInsteadOfThrowing(string command)
+    {
+        // A mangled model command produced the filename "Fil:" (colon illegal on Windows). The
+        // invalid name used to reach File.WriteAllTextAsync and abort the whole agent run.
+        var result = await _sut.ExecuteAsync(command);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("Ogiltigt filnamn");
+    }
+
+    // ── TryGetInlineWriteTarget ────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("/fyll rpg2.bas Skapa ett spel", "rpg2.bas")]
+    [InlineData("/fyll rpg2.bas", "rpg2.bas")]
+    [InlineData("/skapa notes.txt", "notes.txt")]
+    public void TryGetInlineWriteTarget_FyllOrSkapaWithFilename_ReturnsFilename(string command, string expected)
+    {
+        _sut.TryGetInlineWriteTarget(command, out var filename).Should().BeTrue();
+        filename.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("/fyll")]                 // no filename
+    [InlineData("/fyll Fil: beskrivning")] // invalid filename character
+    [InlineData("/läs rpg2.bas Sammanfatta")] // not a write command
+    [InlineData("/lista")]
+    public void TryGetInlineWriteTarget_UnsupportedOrInvalid_ReturnsFalse(string command)
+    {
+        _sut.TryGetInlineWriteTarget(command, out var filename).Should().BeFalse();
+        filename.Should().BeEmpty();
+    }
+
+    // ── /läs without an instruction ────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_ReadWithoutInstruction_ReturnsRawContent()
+    {
+        await CreateFileAsync("rpg2.bas", "CLS", "PRINT \"Hej\"");
+
+        // Bare "/läs rpg2.bas" — the shape the model kept emitting — must return content, not error.
+        var result = await _sut.ExecuteAsync("/läs rpg2.bas");
+
+        result.IsSuccess.Should().BeTrue();
+        result.InjectedContext.Should().Contain("PRINT \"Hej\"");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ReadWithNoFilenameAtAll_Fails()
+    {
+        var result = await _sut.ExecuteAsync("/läs");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("Ange ett filnamn");
+    }
+
     // ── TryExtractLineEdits ───────────────────────────────────────────────
 
     [Fact]
@@ -615,14 +727,18 @@ public sealed class FileAgentServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteAsync_LasWithoutInstruction_ReturnsFailure()
+    public async Task ExecuteAsync_LasWithoutInstruction_ReturnsRawContent()
     {
+        // Contract change: a bare "/läs <fil>" (no instruction) now returns the file's raw
+        // content instead of erroring — models emit this shape constantly and the old failure
+        // wasted a tool round. See ExecuteAsync_ReadWithoutInstruction_ReturnsRawContent.
         await CreateFileAsync("notes.txt", "Hej världen");
 
         var result = await _sut.ExecuteAsync("/läs notes.txt");
 
-        result.IsSuccess.Should().BeFalse();
-        result.ResultType.Should().Be(FileAgentResultType.Error);
+        result.IsSuccess.Should().BeTrue();
+        result.ResultType.Should().Be(FileAgentResultType.FileRead);
+        result.InjectedContext.Should().Contain("Hej världen");
     }
 
     [Fact]

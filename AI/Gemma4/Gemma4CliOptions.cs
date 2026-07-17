@@ -43,6 +43,20 @@ public sealed class Gemma4CliOptions
     public int GpuLayers { get; init; } = 0;
 
     /// <summary>
+    /// Comma-separated devices to offload to (<c>--device</c>), e.g. <c>"CUDA0"</c>.
+    /// Run <c>llama-completion --list-devices</c> on the target machine to see the names.
+    /// <para>
+    /// Set this on any machine with more than one GPU. When it is empty llama.cpp offloads
+    /// across <em>every</em> visible device (split-mode defaults to <c>layer</c>), so on a box
+    /// with a big card and a small one it will place layers on the small card too and fail to
+    /// allocate — or succeed and run at the slow card's speed. Naming the single intended
+    /// device avoids both.
+    /// </para>
+    /// Default: empty (let llama.cpp choose — correct only on single-GPU machines).
+    /// </summary>
+    public string Device { get; init; } = string.Empty;
+
+    /// <summary>
     /// KV-cache context size in tokens (<c>-c</c>).
     /// Gemma 4 models can be configured up to 256K tokens architecturally, but the KV cache for
     /// a large context adds up fast on top of the model weights themselves — a 12B model at

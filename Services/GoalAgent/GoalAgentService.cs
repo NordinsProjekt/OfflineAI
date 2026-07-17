@@ -1,5 +1,7 @@
+using Entities;
 using Services.AgentTools;
 using Services.FileAgent;
+using Services.Repositories;
 
 namespace Services.GoalAgent;
 
@@ -37,13 +39,24 @@ public sealed class GoalAgentService : IGoalAgentService
 
     private readonly IAgenticChatService _agenticChat;
     private readonly IFileAgentService? _fileAgent;
+    private readonly IAgentRunRepository? _runRepository;
     private readonly int _maxIterations;
     private readonly List<GoalRequirement> _requirements = new();
     private readonly List<string> _activityLog = new();
+    private readonly List<AgentRunEventEntity> _pendingEvents = new();
     private readonly object _lock = new();
     private volatile bool _isRunning;
     private volatile bool _stopRequested;
     private string? _transcriptPath;
+
+    /// <summary>
+    /// Id of the current run's database row, or null when history persistence is off (no
+    /// repository) or has been disabled for this run after a failed write.
+    /// </summary>
+    private Guid? _runId;
+
+    /// <summary>Ordering counter for this run's events; guarded by <see cref="_lock"/>.</summary>
+    private int _eventSequence;
 
     public event Action? OnChange;
 
@@ -57,14 +70,23 @@ public sealed class GoalAgentService : IGoalAgentService
     /// Cap on work → verify iterations. Non-positive values fall back to
     /// <see cref="DefaultMaxIterations"/>.
     /// </param>
+    /// <param name="runRepository">
+    /// Optional. When provided, each run is recorded as history (the run, its requirements, and
+    /// its activity log) so finished runs can be reviewed after the app restarts. Persistence is
+    /// best-effort: a failing write disables history for the rest of the run rather than
+    /// interrupting it. When null, a run leaves no database trace beyond the question/answer
+    /// turns its LLM calls produce.
+    /// </param>
     public GoalAgentService(
         IAgenticChatService agenticChat,
         IFileAgentService? fileAgent = null,
-        int maxIterations = DefaultMaxIterations)
+        int maxIterations = DefaultMaxIterations,
+        IAgentRunRepository? runRepository = null)
     {
         _agenticChat = agenticChat ?? throw new ArgumentNullException(nameof(agenticChat));
         _fileAgent = fileAgent;
         _maxIterations = maxIterations > 0 ? maxIterations : DefaultMaxIterations;
+        _runRepository = runRepository;
     }
 
     /// <inheritdoc/>
@@ -123,7 +145,9 @@ public sealed class GoalAgentService : IGoalAgentService
         {
             _requirements.Clear();
             _activityLog.Clear();
+            _pendingEvents.Clear();
         }
+        _runId = null;
         GoalDescription = null;
         CurrentIteration = 0;
         Phase = GoalAgentPhase.Idle;
@@ -135,7 +159,9 @@ public sealed class GoalAgentService : IGoalAgentService
         string goalDescription,
         Func<string, Task<string>> sendToLlm,
         Action<string>? onToolStatus = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? modelName = null,
+        Guid? conversationId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(goalDescription);
         ArgumentNullException.ThrowIfNull(sendToLlm);
@@ -149,10 +175,13 @@ public sealed class GoalAgentService : IGoalAgentService
         {
             _requirements.Clear();
             _activityLog.Clear();
+            _pendingEvents.Clear();
+            _eventSequence = 0;
         }
         GoalDescription = goalDescription;
         CurrentIteration = 0;
 
+        await StartRunRecordAsync(goalDescription, modelName, conversationId);
         StartTranscript(goalDescription);
 
         // Every LLM round trip — including the internal tool-call rounds AgenticChatService
@@ -203,6 +232,9 @@ public sealed class GoalAgentService : IGoalAgentService
         }
         finally
         {
+            // Runs on every exit path (including the early returns above), so the run's row always
+            // gets its terminal phase — an uncompleted row means the process itself died.
+            await CompleteRunRecordAsync();
             _isRunning = false;
             NotifyChange();
         }
@@ -236,6 +268,8 @@ public sealed class GoalAgentService : IGoalAgentService
 
         Log($"📋 {parsed.Count} krav identifierade.");
         Transcript("KRAV", string.Join("\n", parsed.Select((r, i) => $"{i + 1}. {r}")));
+        await PersistRequirementsAsync();
+        await FlushEventsAsync();
         NotifyChange();
     }
 
@@ -243,7 +277,10 @@ public sealed class GoalAgentService : IGoalAgentService
     /// Phase 2a: lets the agent do file work (via the tool-calling chat loop) for every
     /// requirement that isn't currently passed. A requirement that failed its last
     /// verification gets the failure motivation included in the prompt — the "failing test
-    /// message" that steers the next attempt. Every executed tool command is surfaced in the
+    /// message" that steers the next attempt — except when the verdict was inconclusive
+    /// (unparseable review reply), in which case the requirement is skipped entirely: there is
+    /// no defect to steer by, and blind edits have wrecked a good file before. Every executed
+    /// tool command is surfaced in the
     /// activity log, and a work step that executed no tool at all logs a warning (nothing can
     /// have changed in the workspace). Returns false if a stop was requested.
     /// </summary>
@@ -263,6 +300,16 @@ public sealed class GoalAgentService : IGoalAgentService
                 return false;
             }
 
+            // An inconclusive verdict (the review reply couldn't be parsed) names no concrete
+            // defect, so there is nothing sensible to fix — and blind rework is how a good file
+            // gets ruined. Leave the workspace alone; the next verify pass re-checks the
+            // requirement (with a retry) and real work resumes once a readable verdict exists.
+            if (requirement.VerdictInconclusive)
+            {
+                Log($"⏭ Ingen åtgärd för \"{Shorten(requirement.Description, 60)}\" — förra granskningen gav inget tolkbart utslag, så det finns ingen konkret brist att åtgärda. Kravet granskas om i nästa kontrollpass.");
+                continue;
+            }
+
             requirement.Status = RequirementStatus.Working;
             NotifyChange();
             Transcript("STEG", $"Arbete (iteration {CurrentIteration}): {requirement.Description}");
@@ -278,6 +325,7 @@ public sealed class GoalAgentService : IGoalAgentService
 
             // New work invalidates the old verdict — the upcoming verification pass decides.
             requirement.Status = RequirementStatus.Unverified;
+            await FlushEventsAsync();
             NotifyChange();
         }
 
@@ -288,9 +336,13 @@ public sealed class GoalAgentService : IGoalAgentService
     /// Phase 2b: verifies every requirement (also previously passed ones — later work can
     /// break an earlier requirement, so the whole "suite" runs each iteration) by letting the
     /// LLM inspect the workspace with the read tools and reply with a
-    /// RESULTAT: GODKÄNT / UNDERKÄNT verdict. An unparseable verdict counts as failed — never
-    /// green by accident — and the start of the reply is surfaced in the activity log so the
-    /// user can see what the model actually said. Returns false if a stop was requested.
+    /// RESULTAT: GODKÄNT / UNDERKÄNT verdict. An unparseable reply gets one immediate retry —
+    /// empty/garbled replies are intermittent at Gemma's recommended temperature 1.0, so a
+    /// second attempt usually yields a real verdict. If both attempts are unreadable the
+    /// requirement counts as failed — never green by accident — but is flagged
+    /// <see cref="GoalRequirement.VerdictInconclusive"/> so the work phase doesn't "fix" a
+    /// plumbing hiccup, and the start of the reply is surfaced in the activity log so the user
+    /// can see what the model actually said. Returns false if a stop was requested.
     /// </summary>
     private async Task<bool> VerifyAllRequirementsAsync(
         Func<string, Task<string>> sendToLlm,
@@ -320,11 +372,27 @@ public sealed class GoalAgentService : IGoalAgentService
             LogToolInvocations(result, noToolsMessage: null);
 
             var verdictParsed = TryParseVerdict(result.FinalResponse, out var passed, out var reason);
+            if (!verdictParsed)
+            {
+                Log($"🔁 Granskningssvaret gick inte att tolka (\"{Shorten(result.FinalResponse, 60)}\") — granskar kravet en gång till.");
+                Transcript("STEG", $"Granskning (iteration {CurrentIteration}, nytt försök): {requirement.Description}");
+
+                result = await _agenticChat.SendWithToolsAsync(
+                    BuildVerifyPrompt(requirement.Description),
+                    sendToLlm,
+                    cancellationToken,
+                    onToolStatus);
+
+                LogToolInvocations(result, noToolsMessage: null);
+                verdictParsed = TryParseVerdict(result.FinalResponse, out passed, out reason);
+            }
+
             if (verdictParsed && passed)
             {
                 requirement.Status = RequirementStatus.Passed;
                 requirement.LastVerdict = null;
-                Log($"✅ Godkänt: {requirement.Description}");
+                requirement.VerdictInconclusive = false;
+                Log($"✅ Godkänt: {requirement.Description}", AgentRunEventTypes.Verdict);
                 Transcript("BEDÖMNING", "GODKÄNT");
             }
             else
@@ -337,9 +405,16 @@ public sealed class GoalAgentService : IGoalAgentService
 
                 requirement.Status = RequirementStatus.Failed;
                 requirement.LastVerdict = verdict;
-                Log($"❌ Underkänt: {requirement.Description} — {verdict}");
+                requirement.VerdictInconclusive = !verdictParsed;
+                Log($"❌ Underkänt: {requirement.Description} — {verdict}", AgentRunEventTypes.Verdict);
                 Transcript("BEDÖMNING", $"UNDERKÄNT — {verdict}");
             }
+
+            // The verdict is the only requirement state worth a write: the transient
+            // Working/Verifying flickers in between would triple the traffic for a long run
+            // without telling the history view anything the event log doesn't already say.
+            await PersistRequirementStatusAsync(requirement);
+            await FlushEventsAsync();
             NotifyChange();
         }
 
@@ -358,7 +433,7 @@ public sealed class GoalAgentService : IGoalAgentService
         {
             if (noToolsMessage is not null)
             {
-                Log(noToolsMessage);
+                Log(noToolsMessage, AgentRunEventTypes.Tool);
                 Transcript("VERKTYG", "(inga verktygskommandon hittades i modellens svar)");
                 NotifyChange();
             }
@@ -367,7 +442,7 @@ public sealed class GoalAgentService : IGoalAgentService
 
         foreach (var invocation in result.ToolInvocations)
         {
-            Log($"🔧 {invocation.Command} → {invocation.ResultSummary}");
+            Log($"🔧 {invocation.Command} → {invocation.ResultSummary}", AgentRunEventTypes.Tool);
             Transcript("VERKTYG", $"{invocation.Command}\n→ {invocation.ResultSummary}");
         }
         NotifyChange();
@@ -379,6 +454,11 @@ public sealed class GoalAgentService : IGoalAgentService
         "Du agerar kravanalytiker. Användaren beskriver ett önskat slutresultat för filerna i en arbetsyta.\n" +
         "Bryt ner beskrivningen i konkreta krav (högst 7 stycken) som vart och ett kan kontrolleras genom att " +
         "titta på filerna i arbetsytan (t.ex. att en viss fil finns eller att en fil innehåller något specifikt).\n" +
+        // "Spelet får ha enbart text" once became the requirement "innehåller endast textbaserat
+        // innehåll", which a reviewer read as "must not contain code" — an unsatisfiable demand
+        // for a program file. Permissions and wishes must not harden into requirements.
+        "Ta bara med sådant som beskrivningen faktiskt kräver. Det som bara är tillåtet eller önskvärt " +
+        "(uttryck som \"får\", \"kan\", \"gärna\", \"hade varit fint\") ska INTE bli egna krav.\n" +
         "Svara ENDAST med kraven, ett per rad, där varje rad börjar med exakt \"KRAV:\". Svara på svenska.\n" +
         "Exempel på svarsformat:\n" +
         "KRAV: Filen recept.txt finns i arbetsytan.\n" +
@@ -387,7 +467,9 @@ public sealed class GoalAgentService : IGoalAgentService
 
     private static string BuildWorkPrompt(string goalDescription, GoalRequirement requirement)
     {
-        var feedback = string.IsNullOrWhiteSpace(requirement.LastVerdict)
+        // An inconclusive "verdict" is a parse diagnostic, not a review motivation — feeding it
+        // to the model as if the file were at fault provokes nonsense edits.
+        var feedback = string.IsNullOrWhiteSpace(requirement.LastVerdict) || requirement.VerdictInconclusive
             ? string.Empty
             : $"\nVid senaste kontrollen underkändes kravet med motiveringen: \"{requirement.LastVerdict}\". Åtgärda det som saknas.\n";
 
@@ -395,8 +477,14 @@ public sealed class GoalAgentService : IGoalAgentService
             $"Du arbetar med filerna i en arbetsyta. Det övergripande målet är: {goalDescription}\n\n" +
             $"Ditt uppdrag just nu är att uppfylla exakt detta krav:\n{requirement.Description}\n" +
             feedback +
-            "\nAnvänd verktygen för att skapa eller ändra filer så att kravet uppfylls. Du MÅSTE använda ett av " +
-            "verktygskommandona (t.ex. /skapa eller /fyll) — att bara beskriva innehållet i text ändrar ingenting i arbetsytan.";
+            "\nSå här arbetar du med filen:\n" +
+            "• Finns filen inte ännu? Skapa den med /fyll <filnamn> <beskrivning> — beskriv vad som ska genereras " +
+            "(skriv INTE själva koden i kommandot).\n" +
+            "• Finns filen redan och du ska LÄGGA TILL mer (t.ex. fler rader kod)? Använd /redigera <filnamn> " +
+            "<beskrivning> — det visar dig filen med radnummer och du infogar ny kod med ett <REDIGERA INFOGA_EFTER=sista_radnumret>-block.\n" +
+            "  Använd INTE /fyll för att utöka en befintlig fil — /fyll ERSÄTTER hela filen och raderar allt som redan " +
+            "finns, så filen kan aldrig växa. För att bygga upp en stor fil steg för steg måste du infoga med /redigera.\n" +
+            "\nDu MÅSTE använda ett av verktygskommandona på en egen rad — att bara beskriva innehållet i text ändrar ingenting i arbetsytan.";
     }
 
     private static string BuildVerifyPrompt(string requirementDescription) =>
@@ -600,21 +688,190 @@ public sealed class GoalAgentService : IGoalAgentService
         }
     }
 
+    // ── Run history (database) ──
+    //
+    // Best-effort throughout, on the same principle as the transcript above: a run is long and
+    // expensive, so losing its history is bad, but losing the run itself because history could
+    // not be written would be worse. The first failed write disables recording for the rest of
+    // the run and says so once in the activity log.
+
+    /// <summary>
+    /// Inserts the run row. On success <see cref="_runId"/> is set, which is what enables all
+    /// other recording — so a failure here simply means this run isn't recorded.
+    /// </summary>
+    private async Task StartRunRecordAsync(string goalDescription, string? modelName, Guid? conversationId)
+    {
+        _runId = null;
+        if (_runRepository is null)
+            return;
+
+        var run = new AgentRunEntity
+        {
+            GoalDescription = goalDescription,
+            WorkspacePath = _fileAgent?.BaseDirectory,
+            ModelName = modelName,
+            ConversationId = conversationId,
+            MaxIterations = _maxIterations,
+            Iterations = 0,
+            Phase = GoalAgentPhase.GeneratingRequirements.ToString(),
+            StartedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            await _runRepository.StartRunAsync(run);
+            _runId = run.Id;
+        }
+        catch (Exception ex)
+        {
+            Log($"⚠ Kunde inte spara agentkörningen i databasen: {ex.Message}");
+        }
+    }
+
+    private async Task PersistRequirementsAsync()
+    {
+        if (_runRepository is null || _runId is null)
+            return;
+
+        var rows = Requirements
+            .Select((requirement, index) => new AgentRunRequirementEntity
+            {
+                Id = requirement.Id,
+                RunId = _runId.Value,
+                Ordinal = index + 1,
+                Description = requirement.Description,
+                Status = requirement.Status.ToString(),
+                LastVerdict = requirement.LastVerdict,
+                UpdatedAt = DateTime.UtcNow
+            })
+            .ToList();
+
+        try
+        {
+            await _runRepository.SaveRequirementsAsync(rows);
+        }
+        catch (Exception ex)
+        {
+            DisableRunRecording(ex);
+        }
+    }
+
+    private async Task PersistRequirementStatusAsync(GoalRequirement requirement)
+    {
+        if (_runRepository is null || _runId is null)
+            return;
+
+        try
+        {
+            await _runRepository.UpdateRequirementAsync(
+                requirement.Id,
+                requirement.Status.ToString(),
+                requirement.LastVerdict);
+        }
+        catch (Exception ex)
+        {
+            DisableRunRecording(ex);
+        }
+    }
+
+    /// <summary>
+    /// Writes the events queued by <see cref="Log"/> since the last flush. Called at step
+    /// boundaries so a run costs one round trip per work/verify step instead of one per log line.
+    /// </summary>
+    private async Task FlushEventsAsync()
+    {
+        if (_runRepository is null || _runId is null)
+            return;
+
+        List<AgentRunEventEntity> batch;
+        lock (_lock)
+        {
+            if (_pendingEvents.Count == 0)
+                return;
+
+            batch = _pendingEvents.ToList();
+            _pendingEvents.Clear();
+        }
+
+        try
+        {
+            await _runRepository.AddEventsAsync(batch);
+        }
+        catch (Exception ex)
+        {
+            DisableRunRecording(ex);
+        }
+    }
+
+    private async Task CompleteRunRecordAsync()
+    {
+        if (_runRepository is null || _runId is null)
+            return;
+
+        await FlushEventsAsync();
+
+        // FlushEventsAsync may have just disabled recording.
+        if (_runId is null)
+            return;
+
+        try
+        {
+            await _runRepository.CompleteRunAsync(_runId.Value, Phase.ToString(), CurrentIteration, DateTime.UtcNow);
+        }
+        catch (Exception ex)
+        {
+            DisableRunRecording(ex);
+        }
+    }
+
+    /// <summary>
+    /// Stops recording this run after a failed write and tells the user once. Queued events are
+    /// dropped so they can't grow unbounded for the rest of a long run.
+    /// </summary>
+    private void DisableRunRecording(Exception ex)
+    {
+        _runId = null;
+        lock (_lock)
+        {
+            _pendingEvents.Clear();
+        }
+        Log($"⚠ Kunde inte spara körningshistoriken i databasen: {ex.Message}");
+    }
+
     // ── State helpers ──
 
     private void SetPhase(GoalAgentPhase phase, string logMessage)
     {
         Phase = phase;
-        Log(logMessage);
+        Log(logMessage, AgentRunEventTypes.Phase);
         Transcript("FAS", logMessage);
         NotifyChange();
     }
 
-    private void Log(string message)
+    /// <summary>
+    /// Adds a line to the activity log and, when the run is being recorded, queues the same line
+    /// as an event for the next <see cref="FlushEventsAsync"/>. Sequence numbers are assigned
+    /// here rather than at flush time so the stored order is the order things happened, not the
+    /// order the batches landed.
+    /// </summary>
+    private void Log(string message, string eventType = AgentRunEventTypes.Info)
     {
         lock (_lock)
         {
             _activityLog.Add(message);
+
+            if (_runId is null)
+                return;
+
+            _pendingEvents.Add(new AgentRunEventEntity
+            {
+                RunId = _runId.Value,
+                Sequence = ++_eventSequence,
+                EventType = eventType,
+                Iteration = CurrentIteration > 0 ? CurrentIteration : null,
+                Message = message,
+                CreatedAt = DateTime.UtcNow
+            });
         }
     }
 

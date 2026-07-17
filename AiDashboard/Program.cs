@@ -131,12 +131,15 @@ public static class Program
         // each requirement against the workspace, and repeats until everything passes (or the
         // iteration cap is hit). Singleton so a run's progress survives page navigation. The
         // file agent is passed so each run writes a full prompt/response transcript to
-        // agentlogg.txt in the active workspace for debugging.
+        // agentlogg.txt in the active workspace for debugging. The run repository (optional — only
+        // registered when a database is configured) additionally records each run as history that
+        // survives an app restart, which agentlogg.txt does not: it is overwritten per run.
         builder.Services.AddSingleton<IGoalAgentService>(sp =>
             new GoalAgentService(
                 sp.GetRequiredService<IAgenticChatService>(),
                 sp.GetRequiredService<IFileAgentService>(),
-                appConfig.AgentTools.MaxGoalIterations));
+                appConfig.AgentTools.MaxGoalIterations,
+                sp.GetService<IAgentRunRepository>()));
 
         // Register Gemma 4 CLI service. Prefer an explicit Gemma4Cli section, but when its
         // ModelPath is empty fall back to the main Llm model *if that model is itself a Gemma
@@ -171,6 +174,9 @@ public static class Program
                     // (they may have deliberately limited GPU layers / context for the GPU).
                     GpuLayers              = gemma4UsingLlmFallback ? appConfig.Llm!.GpuLayers : gemma4CliCfg.GpuLayers,
                     ContextSize            = gemma4UsingLlmFallback ? appConfig.Llm!.ContextSize : gemma4CliCfg.ContextSize,
+                    Device                 = !string.IsNullOrWhiteSpace(gemma4CliCfg.Device)
+                                                 ? gemma4CliCfg.Device
+                                                 : appConfig.Llm?.Device ?? string.Empty,
                     MaxTokens              = gemma4CliCfg.MaxTokens,
                     Temperature            = gemma4CliCfg.Temperature,
                     TopP                   = gemma4CliCfg.TopP,
@@ -281,6 +287,9 @@ public static class Program
 
                 // Register BotPersonalityRepository for personality management
                 builder.Services.AddDapperBotPersonalityRepository(dbConnectionString);
+
+                // Register AgentRunRepository for goal-agent run history (Agent History page)
+                builder.Services.AddDapperAgentRunRepository(dbConnectionString);
 
                 Console.WriteLine("[+] Database repository registered");
 
@@ -576,6 +585,28 @@ public static class Program
                 }
             });
         }
+
+        // Initialize the goal-agent run history tables on startup (non-blocking, optional).
+        // Kept out of the block above so a failure here can't stop the vector memory / LLM /
+        // Question tables from being initialized — nothing else depends on run history.
+        Task.Run(async () =>
+        {
+            using var scope = app.Services.CreateScope();
+            try
+            {
+                var agentRunRepository = scope.ServiceProvider.GetService<IAgentRunRepository>();
+                if (agentRunRepository != null)
+                {
+                    await agentRunRepository.InitializeDatabaseAsync();
+                    Console.WriteLine("[+] Agent run history tables initialized");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[!] Warning: Failed to initialize agent run history tables: {ex.Message}");
+                Console.WriteLine("   Agent Mode runs will not be recorded in the history view");
+            }
+        });
 
         // Initialize DomainDetector on startup (non-blocking, optional)
         Task.Run(async () =>

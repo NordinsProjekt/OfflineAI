@@ -45,6 +45,13 @@ public sealed class Gemma4CliService : IGemma4CliService
     private const string ThinkToken = "<|think|>";
 
     /// <summary>
+    /// Opens the reasoning channel (<c>&lt;|channel&gt;thought</c>). Sometimes doubled. Present so
+    /// an <em>unclosed</em> channel — opener emitted, generation ended before <see cref="ChannelEnd"/>
+    /// — can be stripped instead of leaking the raw special token into the answer.
+    /// </summary>
+    private const string ChannelStart = "<|channel>";
+
+    /// <summary>
     /// Closes the reasoning channel. Everything after the final occurrence is the answer.
     /// Sizes above E4B emit the channel even when thinking is off — with an empty block.
     /// </summary>
@@ -296,8 +303,11 @@ public sealed class Gemma4CliService : IGemma4CliService
             psi.Arguments += string.Create(CultureInfo.InvariantCulture, $" --top-p {_options.TopP:F2}");
             psi.Arguments += $" --top-k {_options.TopK}";
 
-            // GPU offloading
+            // GPU offloading. --device must come with -ngl: it restricts *which* devices are
+            // offload targets but doesn't offload anything by itself.
             psi.Arguments += $" -ngl {_options.GpuLayers}";
+            if (!string.IsNullOrWhiteSpace(_options.Device))
+                psi.Arguments += $" --device {_options.Device}";
 
             // Multimodal image
             if (imagePath != null)
@@ -389,7 +399,7 @@ public sealed class Gemma4CliService : IGemma4CliService
     /// on every iteration — the classic symptom being an agent that repeats itself forever.
     /// </para>
     /// </summary>
-    private static string? ExtractModelRegion(string rawOutput)
+    internal static string? ExtractModelRegion(string rawOutput)
     {
         var idx = rawOutput.LastIndexOf(ModelTurn, StringComparison.Ordinal);
         if (idx < 0)
@@ -408,16 +418,46 @@ public sealed class Gemma4CliService : IGemma4CliService
     /// Every size above E4B emits <c>&lt;|channel&gt;thought … &lt;channel|&gt;</c> even when
     /// thinking is disabled — with an empty block — so this is the normal path, not a special case.
     /// The opening marker is sometimes doubled (<c>&lt;|channel&gt;&lt;|channel&gt;thought</c>),
-    /// which is why this keys off the closing token only.
+    /// which is why the closed case keys off the closing token only.
+    /// </para>
+    /// <para>
+    /// When the channel is <em>unclosed</em> — Gemma opened <c>&lt;|channel&gt;thought</c> but
+    /// generation ended (empty/thinking-only reply, token budget, killed process) before the
+    /// closing <c>&lt;channel|&gt;</c> — there is no answer, only unterminated reasoning. The
+    /// same applies when the model closes its channel, answers, and then <em>reopens</em> a
+    /// thought channel it never closes. In both cases the text is cut at the opener rather than
+    /// leaking the raw <c>&lt;|channel&gt;</c> special token downstream, where e.g. the
+    /// goal-agent verdict parser would choke on it and log a bogus "kunde inte tolkas" verdict
+    /// instead of an honest empty reply.
+    /// </para>
+    /// <para>
+    /// Native tool tokens get the same treatment (also observed leaking into goal-agent
+    /// verdicts): in a finished tool loop the user-facing answer is whatever follows the last
+    /// serviced <c>&lt;tool_response|&gt;</c>, and a <em>dangling</em> <c>&lt;|tool_call&gt;</c>
+    /// — the model calling a tool in a flow with nothing wired to service it — is not an answer
+    /// at all, so the text is cut where it starts.
     /// </para>
     /// </summary>
-    private static string ExtractAnswer(string modelRegion)
+    internal static string ExtractAnswer(string modelRegion)
     {
         var text = modelRegion;
 
         var channelIdx = text.LastIndexOf(ChannelEnd, StringComparison.Ordinal);
         if (channelIdx >= 0)
             text = text[(channelIdx + ChannelEnd.Length)..];
+
+        var responseIdx = text.LastIndexOf(ToolResponseEnd, StringComparison.Ordinal);
+        if (responseIdx >= 0)
+            text = text[(responseIdx + ToolResponseEnd.Length)..];
+
+        // Anything from a dangling tool call, a stray tool-response opener, or a (re)opened
+        // reasoning channel onward is not part of the answer — cut at whichever comes first.
+        foreach (var marker in new[] { ToolCallStart, ToolResponseStart, ChannelStart })
+        {
+            var markerIdx = text.IndexOf(marker, StringComparison.Ordinal);
+            if (markerIdx >= 0)
+                text = text[..markerIdx];
+        }
 
         var endIdx = text.IndexOf(TurnEnd, StringComparison.Ordinal);
         if (endIdx >= 0)

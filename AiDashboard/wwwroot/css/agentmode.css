@@ -75,3 +75,72 @@
     font-size: 0.8rem;
     color: #a0aec0;
 }
+
+/* Right-hand header button, opposite the back button on the left. */
+.oa-header-action {
+    margin-left: auto;
+}
+
+.oa-header-action:hover {
+    transform: translateX(4px);
+}
+
+/* Agent History page — a run list where each row expands into its own detail. */
+
+.oa-history-summary {
+    cursor: pointer;
+}
+
+.oa-history-meta {
+    margin-left: auto;
+    font-size: 0.8rem;
+    color: #a0aec0;
+    white-space: nowrap;
+}
+
+.oa-history-detail {
+    margin-top: 0.85rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid #e2e8f0;
+}
+
+.oa-history-goal {
+    margin: 0 0 1rem;
+    font-size: 0.9rem;
+    color: #2d3748;
+    white-space: pre-wrap;
+}
+
+.oa-history-facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.35rem 1rem;
+    margin: 0 0 1rem;
+    font-size: 0.85rem;
+}
+
+.oa-history-facts dt {
+    color: #a0aec0;
+    font-weight: 600;
+}
+
+.oa-history-facts dd {
+    margin: 0;
+    color: #4a5568;
+    word-break: break-all;
+}
+
+.oa-history-section-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #a0aec0;
+    margin: 1.25rem 0 0.5rem;
+}
+
+.oa-history-event-time {
+    color: #a0aec0;
+    margin-right: 0.5rem;
+    font-variant-numeric: tabular-nums;
+}

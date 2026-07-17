@@ -196,6 +196,17 @@ public class LlmSettings
     public int GpuLayers { get; set; } = 0;
 
     /// <summary>
+    /// Device for llama backends to offload to, e.g. "CUDA0" (llama.cpp <c>--device</c>).
+    /// Discover the names with <c>llama-completion --list-devices</c> on the target machine.
+    /// <para>
+    /// Leave empty on single-GPU machines. On a multi-GPU machine this is effectively
+    /// required: llama.cpp otherwise splits the model across every visible card, including
+    /// ones far too small to hold their share.
+    /// </para>
+    /// </summary>
+    public string Device { get; set; } = string.Empty;
+
+    /// <summary>
     /// Optional context size hint for llama backends
     /// </summary>
     public int ContextSize { get; set; } = 0;
@@ -379,6 +390,13 @@ public class Gemma4CliSettings
 
     /// <summary>Number of GPU layers to offload (0 = CPU only).</summary>
     public int GpuLayers { get; set; } = 0;
+
+    /// <summary>
+    /// Device to offload to (e.g. "CUDA0"). Required on multi-GPU machines — see
+    /// <see cref="LlmSettings.Device"/>. Falls back to <see cref="LlmSettings.Device"/>
+    /// when empty and the Gemma 4 service is running off the Llm section.
+    /// </summary>
+    public string Device { get; set; } = string.Empty;
 
     /// <summary>Context window size in tokens (default: 4096).</summary>
     public int ContextSize { get; set; } = 4096;
