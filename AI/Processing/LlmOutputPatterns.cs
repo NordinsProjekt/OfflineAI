@@ -13,7 +13,8 @@ public static class LlmOutputPatterns
     public static readonly (string Pattern, string Marker)[] AssistantPatterns =
     [
         ("<|start_header_id|>assistant<|end_header_id|>", "<|start_header_id|>assistant<|end_header_id|>"),  // Llama 3.2
-        ("<start_of_turn>model", "<start_of_turn>model"),    // Gemma 4 (all sizes)
+        ("<|turn>model", "<|turn>model"),                    // Gemma 4 (requires -sp to appear in output)
+        ("<start_of_turn>model", "<start_of_turn>model"),    // Gemma 1-3
         ("<|assistant|>", "<|assistant|>"),                  // TinyLlama, Phi, etc.
         ("<|im_start|>assistant", "<|im_start|>assistant"),  // ChatML format
         ("### Assistant:", "### Assistant:"),                // Some instruction-tuned models
@@ -28,7 +29,8 @@ public static class LlmOutputPatterns
     [
         "<|eot_id|>",      // Llama 3.2 end of turn
         "<|start_header_id|>", // Llama 3.2 next turn
-        "<end_of_turn>",   // Gemma 4 end of turn
+        "<turn|>",         // Gemma 4 end of turn
+        "<end_of_turn>",   // Gemma 1-3 end of turn
         "<|",              // Generic start of special token
         "<|end|>",         // TinyLlama, Phi
         "<|im_end|>",      // ChatML format

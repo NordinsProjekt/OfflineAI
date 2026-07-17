@@ -1,7 +1,6 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
-using System.Text.Json;
 using Factories;
 using Factories.Extensions;
 using Services.AgentTools;
@@ -11,22 +10,72 @@ namespace Application.AI.Gemma4;
 /// <summary>
 /// Subprocess-based Gemma 4 service. Each public method:
 /// <list type="number">
-///   <item>Builds a Gemma 4 chat-template prompt.</item>
-///   <item>Writes it to a temp file and spawns <c>llama-cli -f &lt;file&gt;</c>.</item>
+///   <item>Builds a Gemma 4 chat-template prompt (<c>&lt;|turn&gt;</c> tokens).</item>
+///   <item>Writes it to a temp file and spawns <c>llama-completion -f &lt;file&gt;</c>.</item>
 ///   <item>Streams stdout, applying pause-timeout logic identical to
 ///         <see cref="Application.AI.Processing.PersistentLlmProcess"/>.</item>
-///   <item>Extracts the response by finding the last
-///         <c>&lt;start_of_turn&gt;model</c> marker in the collected output.</item>
+///   <item>Extracts the response by finding the last <c>&lt;|turn&gt;model</c> marker
+///         and taking the text after the final <c>&lt;channel|&gt;</c>.</item>
 /// </list>
+/// <para>
+/// <b>The <c>-sp</c> flag is load-bearing.</b> Gemma 4's turn tokens are real special tokens:
+/// they are consumed at tokenization and do <em>not</em> echo back on stdout by default, so the
+/// <c>&lt;|turn&gt;model</c> marker this class keys off would be invisible and extraction would
+/// silently fall through to <see cref="Application.AI.Processing.LlmOutputPatterns.StripCliNoise"/>.
+/// <c>-sp</c> turns special-token output on. Template and flag must change together.
+/// </para>
+/// <para>
+/// Verified against <c>gemma-4-12b-it-Q4_K_S.gguf</c> (2026-07-17). See
+/// <see href="https://ai.google.dev/gemma/docs/core/prompt-formatting-gemma4">Gemma 4 Prompt Formatting</see>.
+/// Note that <c>ai.google.dev/gemma/docs/core/prompt-structure</c> is a live page documenting the
+/// <em>older</em> <c>&lt;start_of_turn&gt;</c> format — it does not apply to Gemma 4.
+/// </para>
 /// </summary>
 public sealed class Gemma4CliService : IGemma4CliService
 {
     private readonly Gemma4CliOptions _options;
 
-    // Gemma 4 chat-template tokens
-    private const string TurnStart = "<start_of_turn>";
-    private const string TurnEnd   = "<end_of_turn>";
-    private const string ModelTurn = "<start_of_turn>model";
+    // ── Gemma 4 chat-template tokens ──────────────────────────────────────────
+    // Verified empirically; these are special tokens in the model's vocab, not literal text.
+    private const string TurnStart = "<|turn>";
+    private const string TurnEnd   = "<turn|>";
+    private const string ModelTurn = "<|turn>model";
+
+    /// <summary>Placed at the start of the system turn to enable chain-of-thought.</summary>
+    private const string ThinkToken = "<|think|>";
+
+    /// <summary>
+    /// Closes the reasoning channel. Everything after the final occurrence is the answer.
+    /// Sizes above E4B emit the channel even when thinking is off — with an empty block.
+    /// </summary>
+    private const string ChannelEnd = "<channel|>";
+
+    // Native function-calling tokens.
+    private const string ToolDefStart      = "<|tool>";
+    private const string ToolDefEnd        = "<tool|>";
+    private const string ToolCallStart     = "<|tool_call>";
+    private const string ToolCallEnd       = "<tool_call|>";
+    private const string ToolResponseStart = "<|tool_response>";
+    private const string ToolResponseEnd   = "<tool_response|>";
+
+    /// <summary>Delimits string values inside tool-call argument lists, so values may contain commas.</summary>
+    private const string StringDelim = "<|\"|>";
+
+    /// <summary>llama.cpp's own end-of-generation notice; not model output.</summary>
+    private const string EndOfTextNotice = "[end of text]";
+
+    /// <summary>
+    /// UTF-8 <b>without</b> a byte-order mark.
+    /// <para>
+    /// <see cref="Encoding.UTF8"/> emits a BOM, which lands at the head of the <c>-f</c> prompt
+    /// file — directly in front of the first <c>&lt;|turn&gt;</c> token. Plain chat survives that,
+    /// but native tool calling does not: with a BOM present the model stops emitting
+    /// <c>&lt;|tool_call&gt;</c> and <em>invents a plausible answer instead</em> (verified — it
+    /// reported a fabricated temperature rather than calling the weather tool). A silent
+    /// hallucination is the worst possible failure mode, so never hand a BOM to llama.cpp.
+    /// </para>
+    /// </summary>
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     public Gemma4CliService(Gemma4CliOptions options)
     {
@@ -46,8 +95,8 @@ public sealed class Gemma4CliService : IGemma4CliService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userMessage);
 
-        var prompt = BuildGemma4Prompt([(Role.User, userMessage)]);
-        return RunAsync(prompt, imagePath: null, cancellationToken);
+        var prompt = BuildPrompt(BuildTurns(userMessage, toolDefinitions: null));
+        return RunAndExtractAsync(prompt, imagePath: null, cancellationToken);
     }
 
     /// <inheritdoc/>
@@ -62,8 +111,8 @@ public sealed class Gemma4CliService : IGemma4CliService
         if (!File.Exists(imagePath))
             throw new FileNotFoundException("Image file not found.", imagePath);
 
-        var prompt = BuildGemma4Prompt([(Role.User, userMessage)]);
-        return RunAsync(prompt, imagePath, cancellationToken);
+        var prompt = BuildPrompt(BuildTurns(userMessage, toolDefinitions: null));
+        return RunAndExtractAsync(prompt, imagePath, cancellationToken);
     }
 
     /// <inheritdoc/>
@@ -99,43 +148,115 @@ public sealed class Gemma4CliService : IGemma4CliService
         ArgumentException.ThrowIfNullOrWhiteSpace(userMessage);
         ArgumentNullException.ThrowIfNull(toolRegistry);
 
-        var tools = toolRegistry.GetTools();
-        var toolsJson = SerializeToolDefinitions(tools);
-        var firstUserMessage = BuildToolUserMessage(userMessage, toolsJson);
+        var toolDefinitions = SerializeToolDefinitions(toolRegistry.GetTools());
 
-        var turns = new List<(string Role, string Content)>
-        {
-            (Role.User, firstUserMessage)
-        };
+        // Gemma 4's tool loop is a single growing completion, not a rebuilt turn list: the model
+        // emits <|tool_call>…<tool_call|><|tool_response> and stops there (<|tool_response> is in
+        // the model's EOG set), we append the result payload, and generation resumes from that
+        // exact point. So the prompt prefix is fixed and only the model region grows.
+        var promptPrefix = BuildPrompt(BuildTurns(userMessage, toolDefinitions));
+        var modelRegion  = string.Empty;
 
         for (var i = 0; i < _options.MaxToolCallIterations; i++)
         {
-            var prompt = BuildGemma4Prompt(turns);
-            var response = await RunAsync(prompt, imagePath: null, cancellationToken);
+            var raw = await RunAsync(promptPrefix + modelRegion, imagePath: null, cancellationToken);
 
-            var toolCalls = TryParseToolCalls(response);
-            if (toolCalls is null || toolCalls.Count == 0)
-                return response; // plain-text answer — done
+            modelRegion = ExtractModelRegion(raw);
+            if (modelRegion is null)
+                return Application.AI.Processing.LlmOutputPatterns.StripCliNoise(raw);
 
-            // Execute each requested tool
-            var results = new List<ToolCallResult>();
-            foreach (var call in toolCalls)
-            {
-                var result = await toolRegistry.InvokeAsync(call.Name, call.Arguments);
-                results.Add(new ToolCallResult(call.Id, result));
-            }
+            var call = TryParseLastToolCall(modelRegion);
+            if (call is null)
+                return ExtractAnswer(modelRegion);   // plain-text answer — done
 
-            // Append the model turn (JSON tool-call) and the tool-result turn
-            turns.Add((Role.Model, response));
-            turns.Add((Role.Tool,  SerializeToolResults(results)));
+            var result = await toolRegistry.InvokeAsync(call.Name, call.Arguments);
+            modelRegion = AppendToolResponse(modelRegion, call.Name, result);
         }
 
-        // Exhausted iterations — request a final plain-text answer
-        var finalPrompt = BuildGemma4Prompt(turns);
-        return await RunAsync(finalPrompt, imagePath: null, cancellationToken);
+        // Iteration cap reached — ask for a final plain-text answer instead of returning nothing.
+        var finalRaw = await RunAsync(promptPrefix + modelRegion, imagePath: null, cancellationToken);
+        var finalRegion = ExtractModelRegion(finalRaw);
+
+        return finalRegion is null
+            ? Application.AI.Processing.LlmOutputPatterns.StripCliNoise(finalRaw)
+            : ExtractAnswer(finalRegion);
+    }
+
+    // ── Prompt construction ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds the turn list for a single-shot exchange. A system turn is emitted when there is a
+    /// system prompt, tool definitions, or thinking to enable — Gemma 4 has a native system role
+    /// (Gemma 3 did not, which is why older code folded the system prompt into the user turn).
+    /// </summary>
+    private List<(string Role, string Content)> BuildTurns(string userMessage, string? toolDefinitions)
+    {
+        var turns = new List<(string Role, string Content)>();
+
+        var system = BuildSystemContent(toolDefinitions);
+        if (system.Length > 0)
+            turns.Add((Role.System, system));
+
+        turns.Add((Role.User, userMessage));
+        return turns;
+    }
+
+    private string BuildSystemContent(string? toolDefinitions)
+    {
+        var sb = new StringBuilder();
+
+        // Thinking is opt-in and must lead the system turn.
+        if (_options.EnableThinking)
+            sb.Append(ThinkToken);
+
+        if (!string.IsNullOrWhiteSpace(_options.SystemPrompt))
+            sb.Append(_options.SystemPrompt);
+
+        if (!string.IsNullOrWhiteSpace(toolDefinitions))
+        {
+            if (sb.Length > 0)
+                sb.Append('\n');
+            sb.Append(toolDefinitions);
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Formats a conversation using Gemma 4's chat template and appends a bare
+    /// <c>&lt;|turn&gt;model\n</c> to prime generation.
+    /// <para>
+    /// Deliberately does <b>not</b> prepend <c>&lt;bos&gt;</c>: llama.cpp adds it automatically
+    /// for <c>-f</c> prompt files, and adding it here would double it.
+    /// </para>
+    /// </summary>
+    private static string BuildPrompt(IEnumerable<(string Role, string Content)> turns)
+    {
+        var sb = new StringBuilder();
+        foreach (var (role, content) in turns)
+        {
+            sb.Append(TurnStart).Append(role).Append('\n');
+            sb.Append(content);
+            sb.Append(TurnEnd).Append('\n');
+        }
+        sb.Append(ModelTurn).Append('\n');
+        return sb.ToString();
     }
 
     // ── Core execution ───────────────────────────────────────────────────────
+
+    private async Task<string> RunAndExtractAsync(
+        string prompt,
+        string? imagePath,
+        CancellationToken cancellationToken)
+    {
+        var raw = await RunAsync(prompt, imagePath, cancellationToken);
+        var region = ExtractModelRegion(raw);
+
+        return region is null
+            ? Application.AI.Processing.LlmOutputPatterns.StripCliNoise(raw)
+            : ExtractAnswer(region);
+    }
 
     private async Task<string> RunAsync(
         string prompt,
@@ -145,20 +266,25 @@ public sealed class Gemma4CliService : IGemma4CliService
         var tempPromptFile = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
         try
         {
-            await File.WriteAllTextAsync(tempPromptFile, prompt, Encoding.UTF8, cancellationToken);
+            await File.WriteAllTextAsync(tempPromptFile, prompt, Utf8NoBom, cancellationToken);
 
             var psi = LlmFactory.CreateForLlama(_options.LlamaCliPath, _options.ModelPath);
 
             // Prompt file (avoids shell-quoting issues with special characters)
             psi.Arguments += $" -f \"{tempPromptFile}\"";
 
-            // Force plain text-completion mode. Newer llama-cli builds default to interactive
-            // conversation mode for chat-template models (Gemma included): the process prints
-            // a startup banner and "> " prompt and waits on stdin instead of completing the -f
-            // prompt and exiting. This class hand-builds the Gemma chat template itself and
-            // extracts the reply from the echoed <start_of_turn>model marker, which only works
-            // in completion mode. Same fix as PersistentLlmProcess.QueryAsync.
+            // Force plain text-completion mode. Newer builds default to interactive conversation
+            // mode for chat-template models: the process prints a banner and "> " prompt and waits
+            // on stdin instead of completing the -f prompt and exiting. This class hand-builds the
+            // chat template and extracts the reply from the echoed marker, which only works in
+            // completion mode. Requires llama-completion — llama-cli rejects -no-cnv, prints that
+            // warning to stdout, and runs in conversation mode anyway.
             psi.Arguments += " -no-cnv";
+
+            // Print special tokens. Without this, Gemma 4's <|turn> tokens are consumed at
+            // tokenization and never echo, so ExtractModelRegion finds no marker and every call
+            // degrades to the StripCliNoise fallback. See the class remarks.
+            psi.Arguments += " -sp";
 
             // Context, tokens, sampling. The floating-point flags MUST be formatted with the
             // invariant culture: under a locale that uses a decimal comma (e.g. sv-SE) the default
@@ -173,11 +299,11 @@ public sealed class Gemma4CliService : IGemma4CliService
             // GPU offloading
             psi.Arguments += $" -ngl {_options.GpuLayers}";
 
-            // Multimodal image (all Gemma 4 GGUF sizes support vision)
+            // Multimodal image
             if (imagePath != null)
                 psi.Arguments += $" --image \"{imagePath}\"";
 
-            return await ExecuteAndExtractAsync(psi.Build(), cancellationToken);
+            return await ExecuteAsync(psi.Build(), cancellationToken);
         }
         finally
         {
@@ -186,10 +312,9 @@ public sealed class Gemma4CliService : IGemma4CliService
     }
 
     /// <summary>
-    /// Streams stdout from the process, tracks the pause-timeout, then extracts
-    /// Gemma 4's response from the collected output.
+    /// Streams stdout from the process, tracking the pause-timeout, and returns the raw output.
     /// </summary>
-    private async Task<string> ExecuteAndExtractAsync(Process process, CancellationToken cancellationToken)
+    private async Task<string> ExecuteAsync(Process process, CancellationToken cancellationToken)
     {
         var fullOutput   = new StringBuilder();
         var lastOutput   = DateTime.UtcNow;
@@ -206,7 +331,7 @@ public sealed class Gemma4CliService : IGemma4CliService
             }
         };
 
-        // stderr carries llama-cli's model-loading/prompt-eval progress while stdout stays
+        // stderr carries llama.cpp's model-loading/prompt-eval progress while stdout stays
         // silent — treat it as liveness so the pause timeout doesn't kill a cold process
         // mid-load (which would return only the startup banner). The content itself is
         // informational noise (ggml_cuda_init, load_backend, etc.) and is not captured.
@@ -223,7 +348,6 @@ public sealed class Gemma4CliService : IGemma4CliService
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        // Poll with pause-timeout and hard timeout, matching PersistentLlmProcess
         while (!process.HasExited && !cancellationToken.IsCancellationRequested)
         {
             await Task.Delay(500, CancellationToken.None);
@@ -246,178 +370,215 @@ public sealed class Gemma4CliService : IGemma4CliService
         // Small delay so the last OutputDataReceived events can flush
         await Task.Delay(200, CancellationToken.None);
 
-        return ExtractGemma4Response(fullOutput.ToString());
-    }
-
-    // ── Gemma 4 prompt builder ────────────────────────────────────────────────
-
-    /// <summary>
-    /// Formats a conversation history using Gemma 4's chat template.
-    /// Appends a bare <c>&lt;start_of_turn&gt;model\n</c> to prime generation.
-    /// </summary>
-    private static string BuildGemma4Prompt(IEnumerable<(string Role, string Content)> turns)
-    {
-        var sb = new StringBuilder();
-        foreach (var (role, content) in turns)
+        lock (outputLock)
         {
-            sb.Append(TurnStart).Append(role).Append('\n');
-            sb.Append(content);
-            sb.Append(TurnEnd).Append('\n');
+            return fullOutput.ToString();
         }
-        // Prime the model to start generating
-        sb.Append(ModelTurn).Append('\n');
-        return sb.ToString();
     }
 
     // ── Response extraction ───────────────────────────────────────────────────
 
     /// <summary>
-    /// Finds the <em>last</em> <c>&lt;start_of_turn&gt;model</c> in the raw output
-    /// (the echo of the full prompt + generated continuation) and returns everything
-    /// after it, stripped of the trailing <c>&lt;end_of_turn&gt;</c>.
-    /// Using <c>LastIndexOf</c> correctly handles multi-turn tool-call conversations
-    /// where earlier model turns are part of the echoed prompt.
+    /// Returns everything the model generated after the <em>last</em> <c>&lt;|turn&gt;model</c>
+    /// marker in the raw output, with llama.cpp's <c>[end of text]</c> notice removed.
+    /// Returns <c>null</c> when the marker never appeared — which means something went wrong
+    /// (wrong binary, missing <c>-sp</c>, process killed during load), not that the model was quiet.
+    /// <para>
+    /// <c>LastIndexOf</c> is required: during a tool loop the prompt echo already contains the
+    /// model turn plus every earlier generation, and <c>IndexOf</c> would re-read the first one
+    /// on every iteration — the classic symptom being an agent that repeats itself forever.
+    /// </para>
     /// </summary>
-    private static string ExtractGemma4Response(string rawOutput)
+    private static string? ExtractModelRegion(string rawOutput)
     {
         var idx = rawOutput.LastIndexOf(ModelTurn, StringComparison.Ordinal);
         if (idx < 0)
-        {
-            // Fallback when the marker never appeared in the output: return what's left after
-            // stripping llama-cli's own startup banner/UI lines, so the CLI's banner is never
-            // handed to the caller as if the model had said it.
-            return Application.AI.Processing.LlmOutputPatterns.StripCliNoise(rawOutput);
-        }
+            return null;
 
-        var afterMarker = rawOutput[(idx + ModelTurn.Length)..].TrimStart('\r', '\n');
+        return rawOutput[(idx + ModelTurn.Length)..]
+            .Replace(EndOfTextNotice, string.Empty, StringComparison.Ordinal)
+            .TrimStart('\r', '\n');
+    }
 
-        var endIdx = afterMarker.IndexOf(TurnEnd, StringComparison.Ordinal);
+    /// <summary>
+    /// Reduces a model region to the user-facing answer: drops the reasoning channel (everything
+    /// up to and including the final <c>&lt;channel|&gt;</c>) and cuts at the closing
+    /// <c>&lt;turn|&gt;</c>.
+    /// <para>
+    /// Every size above E4B emits <c>&lt;|channel&gt;thought … &lt;channel|&gt;</c> even when
+    /// thinking is disabled — with an empty block — so this is the normal path, not a special case.
+    /// The opening marker is sometimes doubled (<c>&lt;|channel&gt;&lt;|channel&gt;thought</c>),
+    /// which is why this keys off the closing token only.
+    /// </para>
+    /// </summary>
+    private static string ExtractAnswer(string modelRegion)
+    {
+        var text = modelRegion;
+
+        var channelIdx = text.LastIndexOf(ChannelEnd, StringComparison.Ordinal);
+        if (channelIdx >= 0)
+            text = text[(channelIdx + ChannelEnd.Length)..];
+
+        var endIdx = text.IndexOf(TurnEnd, StringComparison.Ordinal);
         if (endIdx >= 0)
-            afterMarker = afterMarker[..endIdx];
+            text = text[..endIdx];
 
-        return CleanModelArtifacts(afterMarker);
+        return text.Trim();
     }
 
-    /// <summary>
-    /// Strips the non-content artifacts this Gemma 4 GGUF prints in completion mode: the
-    /// reasoning-channel delimiters (<c>&lt;|channel&gt;</c>/<c>&lt;channel|&gt;</c> and the bare
-    /// "thought" channel-name line) and llama.cpp's own <c>[end of text]</c> end-of-generation
-    /// notice. These would otherwise lead the reply and, for the chat UI, be shown verbatim.
-    /// The verdict/requirement/tool parsers are line-based and tolerate the noise, but a clean
-    /// reply is nicer and keeps the reviewer's "starts with RESULTAT:" contract intact.
-    /// </summary>
-    private static string CleanModelArtifacts(string text)
-    {
-        var cleaned = text
-            .Replace("<|channel>", string.Empty, StringComparison.Ordinal)
-            .Replace("<channel|>", string.Empty, StringComparison.Ordinal)
-            .Replace("[end of text]", string.Empty, StringComparison.Ordinal);
-
-        // Drop a leading, standalone "thought" channel-name line if one is left behind.
-        var lines = cleaned.Split('\n').ToList();
-        while (lines.Count > 0 &&
-               (lines[0].Trim().Length == 0 ||
-                string.Equals(lines[0].Trim(), "thought", StringComparison.OrdinalIgnoreCase)))
-        {
-            lines.RemoveAt(0);
-        }
-
-        return string.Join("\n", lines).Trim();
-    }
-
-    // ── Tool calling helpers ──────────────────────────────────────────────────
+    // ── Tool calling ──────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Builds the initial user message that includes tool definitions and
-    /// instructions for the JSON tool-call response format.
-    /// </summary>
-    private static string BuildToolUserMessage(string userMessage, string toolsJson)
-    {
-        const string example =
-            "[{\"id\":\"0\",\"type\":\"function\",\"function\":{\"name\":\"tool_name\",\"arguments\":{\"param\":\"value\"}}}]";
-
-        return
-            "You have access to the following tools. When you need to use one, respond " +
-            "with ONLY a JSON array in this exact format (no other text on that turn):\n" +
-            example + "\n\n" +
-            $"Available tools:\n{toolsJson}\n\n" +
-            userMessage;
-    }
-
-    /// <summary>
-    /// Serializes <see cref="AgentTool"/> definitions to the JSON Schema format
-    /// that Gemma 4's native function-calling understands.
+    /// Renders tool definitions in Gemma 4's native form, one per line:
+    /// <c>&lt;|tool&gt;name{param:type,param2:type}: description&lt;tool|&gt;</c>.
+    /// <para>
+    /// The description is not documentation — it is the only signal the model has when choosing
+    /// between tools, so it is emitted verbatim into the system turn.
+    /// </para>
     /// </summary>
     private static string SerializeToolDefinitions(IReadOnlyList<AgentTool> tools)
     {
-        var defs = tools.Select(t => new
-        {
-            name        = t.Name,
-            description = t.Description,
-            parameters  = new
-            {
-                type       = "object",
-                properties = t.Parameters.ToDictionary(
-                    kvp => kvp.Key,
-                    kvp => new { type = kvp.Value.Type, description = kvp.Value.Description }),
-                required   = t.Parameters
-                              .Where(kvp => kvp.Value.Required)
-                              .Select(kvp => kvp.Key)
-                              .ToArray()
-            }
-        });
+        var sb = new StringBuilder();
 
-        return JsonSerializer.Serialize(defs);
+        foreach (var tool in tools)
+        {
+            sb.Append(ToolDefStart).Append(tool.Name).Append('{');
+            sb.AppendJoin(',', tool.Parameters.Select(p => $"{p.Key}:{p.Value.Type}"));
+            sb.Append('}');
+
+            if (!string.IsNullOrWhiteSpace(tool.Description))
+                sb.Append(": ").Append(tool.Description.ReplaceLineEndings(" "));
+
+            sb.Append(ToolDefEnd).Append('\n');
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>
-    /// Tries to parse a Gemma 4 tool-call JSON array from the model response.
-    /// Returns <c>null</c> when the response is a plain-text answer, not a tool call.
+    /// Parses the last <c>&lt;|tool_call&gt;call:name{args}&lt;tool_call|&gt;</c> in the model
+    /// region. Returns <c>null</c> when the region holds a plain-text answer instead — which is
+    /// the loop's termination signal, not an error.
+    /// <para>
+    /// A call is only pending if the region ends at <c>&lt;|tool_response&gt;</c>: the model stops
+    /// there because that token is in its EOG set. A tool call followed by a response has already
+    /// been serviced on an earlier iteration.
+    /// </para>
     /// </summary>
-    private static List<ToolCallInfo>? TryParseToolCalls(string response)
+    private static ToolCallInfo? TryParseLastToolCall(string modelRegion)
     {
-        var trimmed = response.Trim();
-        if (!trimmed.StartsWith('['))
+        if (!modelRegion.TrimEnd().EndsWith(ToolResponseStart, StringComparison.Ordinal))
             return null;
 
-        try
+        var callIdx = modelRegion.LastIndexOf(ToolCallStart, StringComparison.Ordinal);
+        if (callIdx < 0)
+            return null;
+
+        var body = modelRegion[(callIdx + ToolCallStart.Length)..];
+
+        var endIdx = body.IndexOf(ToolCallEnd, StringComparison.Ordinal);
+        if (endIdx < 0)
+            return null;
+
+        body = body[..endIdx].Trim();
+
+        const string callPrefix = "call:";
+        if (body.StartsWith(callPrefix, StringComparison.Ordinal))
+            body = body[callPrefix.Length..];
+
+        var braceIdx = body.IndexOf('{');
+        if (braceIdx < 0)
         {
-            using var doc = JsonDocument.Parse(trimmed);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
-                return null;
-
-            var calls = new List<ToolCallInfo>();
-            foreach (var element in doc.RootElement.EnumerateArray())
-            {
-                if (!element.TryGetProperty("function", out var func)) continue;
-                if (!func.TryGetProperty("name", out var nameEl)) continue;
-
-                var id   = element.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "0" : "0";
-                var name = nameEl.GetString() ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(name)) continue;
-
-                var args = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                if (func.TryGetProperty("arguments", out var argsEl))
-                {
-                    foreach (var prop in argsEl.EnumerateObject())
-                        args[prop.Name] = prop.Value.ToString();
-                }
-
-                calls.Add(new ToolCallInfo(id, name, args));
-            }
-
-            return calls.Count > 0 ? calls : null;
+            var bareName = body.Trim();
+            return bareName.Length == 0
+                ? null
+                : new ToolCallInfo(bareName, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
         }
-        catch (JsonException)
-        {
-            return null; // response was not valid JSON — treat as plain-text answer
-        }
+
+        var name = body[..braceIdx].Trim();
+        if (name.Length == 0)
+            return null;
+
+        var args = body[(braceIdx + 1)..].TrimEnd();
+        if (args.EndsWith('}'))
+            args = args[..^1];
+
+        return new ToolCallInfo(name, ParseToolArguments(args));
     }
 
-    private static string SerializeToolResults(IReadOnlyList<ToolCallResult> results)
+    /// <summary>
+    /// Parses a tool-call argument list. Values may be delimited with <c>&lt;|"|&gt;</c> (the
+    /// documented form, which lets a value contain commas), with plain double quotes (what the
+    /// model actually emits in practice), or be bare — as numbers are. All three are accepted
+    /// because the model mixes them.
+    /// </summary>
+    private static Dictionary<string, string> ParseToolArguments(string args)
     {
-        var docs = results.Select(r => new { id = r.Id, result = r.Result });
-        return JsonSerializer.Serialize(docs);
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var i = 0;
+
+        while (i < args.Length)
+        {
+            var colonIdx = args.IndexOf(':', i);
+            if (colonIdx < 0)
+                break;
+
+            var key = args[i..colonIdx].Trim().Trim(',').Trim();
+            i = colonIdx + 1;
+
+            while (i < args.Length && args[i] == ' ')
+                i++;
+
+            string value;
+            if (i + StringDelim.Length <= args.Length &&
+                string.CompareOrdinal(args, i, StringDelim, 0, StringDelim.Length) == 0)
+            {
+                var start = i + StringDelim.Length;
+                var end   = args.IndexOf(StringDelim, start, StringComparison.Ordinal);
+                (value, i) = end < 0 ? (args[start..], args.Length) : (args[start..end], end + StringDelim.Length);
+            }
+            else if (i < args.Length && args[i] == '"')
+            {
+                var start = i + 1;
+                var end   = args.IndexOf('"', start);
+                (value, i) = end < 0 ? (args[start..], args.Length) : (args[start..end], end + 1);
+            }
+            else
+            {
+                var end = args.IndexOf(',', i);
+                (value, i) = end < 0 ? (args[i..].Trim(), args.Length) : (args[i..end].Trim(), end);
+            }
+
+            if (key.Length > 0)
+                result[key] = value;
+
+            var nextComma = args.IndexOf(',', i);
+            if (nextComma < 0)
+                break;
+            i = nextComma + 1;
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Completes the pending <c>&lt;|tool_response&gt;</c> the model already opened, so generation
+    /// resumes from exactly that point on the next call.
+    /// </summary>
+    private static string AppendToolResponse(string modelRegion, string toolName, string result)
+    {
+        var trimmed = modelRegion.TrimEnd();
+
+        // The model emits the opening <|tool_response> itself and stops; only add one if it didn't.
+        if (!trimmed.EndsWith(ToolResponseStart, StringComparison.Ordinal))
+            trimmed += ToolResponseStart;
+
+        // Strip any delimiter the tool result happens to contain, so it can't close the value early.
+        var safeResult = (result ?? string.Empty).Replace(StringDelim, string.Empty, StringComparison.Ordinal);
+
+        return trimmed
+             + "response:" + toolName + "{result:" + StringDelim + safeResult + StringDelim + "}"
+             + ToolResponseEnd;
     }
 
     // ── Utility ───────────────────────────────────────────────────────────────
@@ -435,20 +596,20 @@ public sealed class Gemma4CliService : IGemma4CliService
         try { if (File.Exists(path)) File.Delete(path); } catch { /* ignore cleanup errors */ }
     }
 
-    // ── Private record types ──────────────────────────────────────────────────
+    // ── Private types ─────────────────────────────────────────────────────────
 
     private sealed record ToolCallInfo(
-        string Id,
         string Name,
         IReadOnlyDictionary<string, string> Arguments);
 
-    private sealed record ToolCallResult(string Id, string Result);
-
-    // Role constants matching Gemma 4's chat template
+    /// <summary>
+    /// Role names in Gemma 4's chat template. Gemma 4 added the native system role — Gemma 3 had
+    /// only user and model, which is why older code folded system prompts into the first user turn.
+    /// The model role is spelled out in <see cref="ModelTurn"/>, which is also the extraction marker.
+    /// </summary>
     private static class Role
     {
-        public const string User  = "user";
-        public const string Model = "model";
-        public const string Tool  = "tool";
+        public const string System = "system";
+        public const string User   = "user";
     }
 }

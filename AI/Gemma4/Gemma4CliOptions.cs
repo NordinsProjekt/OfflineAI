@@ -1,7 +1,7 @@
 namespace Application.AI.Gemma4;
 
 /// <summary>
-/// Configuration for running Gemma 4 via a local <c>llama-cli</c> subprocess.
+/// Configuration for running Gemma 4 via a local <c>llama-completion</c> subprocess.
 /// <para>
 /// Mirrors the pattern used by <see cref="Application.AI.Processing.PersistentLlmProcess"/>
 /// but exposes Gemma 4-specific defaults (temperature 1.0, top-p 0.95, top-k 64).
@@ -11,8 +11,8 @@ namespace Application.AI.Gemma4;
 /// <code>
 /// new Gemma4CliOptions
 /// {
-///     LlamaCliPath = @"C:\llama.cpp\llama-cli.exe",
-///     ModelPath    = @"C:\models\gemma-4-26B-A4B-it.gguf",
+///     LlamaCliPath = @"C:\llama.cpp\llama-completion.exe",
+///     ModelPath    = @"C:\models\gemma-4-12b-it-Q4_K_S.gguf",
 ///     GpuLayers    = 99
 /// }
 /// </code>
@@ -21,10 +21,16 @@ namespace Application.AI.Gemma4;
 public sealed class Gemma4CliOptions
 {
     /// <summary>
-    /// Path to the <c>llama-cli</c> executable.
-    /// Default: <c>llama-cli</c> (resolved from PATH).
+    /// Path to the <c>llama-completion</c> executable.
+    /// <para>
+    /// Must be <c>llama-completion</c>, not <c>llama-cli</c>: newer llama.cpp builds split the old
+    /// all-in-one binary in two, and <c>llama-cli</c> rejects the <c>-no-cnv</c> flag this service
+    /// depends on — it prints that rejection to stdout (polluting the captured output) and then
+    /// runs in conversation mode anyway.
+    /// </para>
+    /// Default: <c>llama-completion</c> (resolved from PATH).
     /// </summary>
-    public string LlamaCliPath { get; init; } = "llama-cli";
+    public string LlamaCliPath { get; init; } = "llama-completion";
 
     /// <summary>Path to the Gemma 4 GGUF model file.</summary>
     public string ModelPath { get; init; } = string.Empty;
@@ -88,4 +94,32 @@ public sealed class Gemma4CliOptions
     /// Default: 5
     /// </summary>
     public int MaxToolCallIterations { get; init; } = 5;
+
+    /// <summary>
+    /// System instruction placed in the native <c>&lt;|turn&gt;system</c> turn. Empty means no
+    /// system turn is emitted (unless tools or thinking require one).
+    /// <para>
+    /// Gemma 4 has a real system role; Gemma 3 did not. Do not fold system prompts into the user
+    /// turn — that was a Gemma 3 workaround.
+    /// </para>
+    /// Default: empty.
+    /// </summary>
+    public string SystemPrompt { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Emits <c>&lt;|think|&gt;</c> at the start of the system turn, enabling chain-of-thought.
+    /// <para>
+    /// Off by default, and deliberately so: thinking is expensive. On a 12B it can consume the
+    /// entire <see cref="MaxTokens"/> budget reasoning about a trivial question and never reach
+    /// the answer — raise <see cref="MaxTokens"/> substantially when turning this on. The
+    /// reasoning also tends to come out in English regardless of the system prompt's language.
+    /// </para>
+    /// <para>
+    /// Note that this does not silence the reasoning channel: every size above E4B emits
+    /// <c>&lt;|channel&gt;thought … &lt;channel|&gt;</c> regardless, with an empty block when
+    /// thinking is off. <c>Gemma4CliService</c> strips it either way.
+    /// </para>
+    /// Default: <c>false</c>.
+    /// </summary>
+    public bool EnableThinking { get; init; }
 }
