@@ -9,7 +9,7 @@ namespace Application.AI.Tests.Utilities;
 /// Unit tests for DomainDetector class.
 /// Tests cover domain detection, matching, registration, caching, and management operations.
 /// </summary>
-public class DomainDetectorTests : IDisposable
+public sealed class DomainDetectorTests : IDisposable
 {
     private readonly Mock<IKnowledgeDomainRepository> _mockRepository;
     private readonly DomainDetector _domainDetector;

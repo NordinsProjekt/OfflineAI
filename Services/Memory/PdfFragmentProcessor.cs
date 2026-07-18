@@ -167,7 +167,7 @@ public class PdfFragmentProcessor
     /// <summary>
     /// Extract text from PDF using UglyToad.PdfPig
     /// </summary>
-    private async Task<string> ExtractTextFromPdfAsync(string pdfPath)
+    private static async Task<string> ExtractTextFromPdfAsync(string pdfPath)
     {
         return await Task.Run(() =>
         {
@@ -196,7 +196,7 @@ public class PdfFragmentProcessor
     /// <summary>
     /// Clean up common PDF text extraction issues
     /// </summary>
-    private string CleanPdfText(string text)
+    private static string CleanPdfText(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
             return string.Empty;
@@ -229,12 +229,10 @@ public class PdfFragmentProcessor
                 
                 // Try to parse creation date if available
                 DateTime? creationDate = null;
-                if (!string.IsNullOrWhiteSpace(info.CreationDate))
+                if (!string.IsNullOrWhiteSpace(info.CreationDate) &&
+                    DateTime.TryParse(info.CreationDate, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsedDate))
                 {
-                    if (DateTime.TryParse(info.CreationDate, out var parsedDate))
-                    {
-                        creationDate = parsedDate;
-                    }
+                    creationDate = parsedDate;
                 }
                 
                 return new PdfMetadata
@@ -263,7 +261,7 @@ public class PdfFragmentProcessor
         });
     }
 
-    private class PdfMetadata
+    private sealed class PdfMetadata
     {
         public int TotalPages { get; set; }
         public string? Title { get; set; }
@@ -279,7 +277,7 @@ public class PdfFragmentProcessor
     /// Looks for: capitalized words, bold text patterns, numbered sections, etc.
     /// Enhanced to work better with content-order extracted text.
     /// </summary>
-    private string? DetectSectionFromContent(string content)
+    private static string? DetectSectionFromContent(string content)
     {
         if (string.IsNullOrWhiteSpace(content))
             return null;
@@ -299,7 +297,7 @@ public class PdfFragmentProcessor
         foreach (var line in lines)
         {
             // Skip lines that look like metadata
-            if (line.StartsWith("[") || line.StartsWith("Page ") || line.Contains("---"))
+            if (line.StartsWith('[') || line.StartsWith("Page ") || line.Contains("---"))
                 continue;
             
             // This is a candidate for a header
@@ -347,15 +345,13 @@ public class PdfFragmentProcessor
             "overview", "introduction", "reference", "glossary"
         };
         
-        foreach (var keyword in sectionKeywords)
+        // Check if first line contains a keyword (case-insensitive)
+        var matchedKeyword = sectionKeywords.FirstOrDefault(keyword =>
+            firstLine.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0);
+        if (matchedKeyword != null)
         {
-            // Check if first line contains the keyword (case-insensitive)
-            if (firstLine.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                // Extract the section name (capitalize properly)
-                var title = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(keyword);
-                return title;
-            }
+            // Extract the section name (capitalize properly)
+            return System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(matchedKeyword);
         }
         
         // Pattern 3: Numbered sections "1. Setup", "2.3 Items"

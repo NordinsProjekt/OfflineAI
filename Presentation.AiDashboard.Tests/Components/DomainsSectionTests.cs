@@ -12,7 +12,7 @@ namespace Presentation.AiDashboard.Tests.Components;
 /// </summary>
 public class DomainsSectionTests : TestContext
 {
-    private DashboardState CreateMockDashboardState()
+    private static DashboardState CreateMockDashboardState()
     {
         var state = new DashboardState();
         // Expand the domains section for testing
@@ -29,7 +29,6 @@ public class DomainsSectionTests : TestContext
         // Arrange
         var dashboardState = CreateMockDashboardState();
         Services.AddSingleton(dashboardState);
-        var navMan = Services.GetRequiredService<NavigationManager>();
 
         // Act
         var cut = RenderComponent<DomainsSection>();

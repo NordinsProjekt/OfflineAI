@@ -1,0 +1,216 @@
+/* Batch Processing page — reuses .oa-quick-ask-page / .oa-quick-header / .oa-quick-container /
+   .oa-quick-card shell from quickask.css for the gradient-background + white-card layout. */
+
+.oa-batch-card {
+    padding: 1.5rem;
+    overflow-y: auto;
+}
+
+.oa-batch-add-row {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+}
+
+.oa-batch-input {
+    flex: 1;
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 0.85rem 1rem;
+    font-size: 0.95rem;
+    font-family: inherit;
+    resize: none;
+    transition: all 0.2s ease;
+}
+
+.oa-batch-input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.oa-batch-add-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 0 1.5rem;
+    border-radius: 12px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    align-self: stretch;
+}
+
+.oa-batch-add-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.oa-batch-add-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.oa-batch-controls {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+    flex-wrap: wrap;
+}
+
+.oa-batch-start-btn,
+.oa-batch-stop-btn,
+.oa-batch-clear-btn {
+    padding: 0.6rem 1.25rem;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s ease;
+}
+
+.oa-batch-start-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.oa-batch-start-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.oa-batch-start-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.oa-batch-stop-btn {
+    background: #fff5f5;
+    color: #c53030;
+    border: 2px solid #feb2b2;
+}
+
+.oa-batch-stop-btn:hover {
+    background: #fed7d7;
+}
+
+.oa-batch-clear-btn {
+    background: white;
+    color: #4a5568;
+    border: 2px solid #e2e8f0;
+}
+
+.oa-batch-clear-btn:hover:not(:disabled) {
+    border-color: #cbd5e0;
+}
+
+.oa-batch-clear-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.oa-batch-status {
+    margin: 0.75rem 0 0;
+    font-size: 0.85rem;
+    color: #667eea;
+    font-style: italic;
+}
+
+.oa-batch-job-list {
+    margin-top: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.oa-batch-empty {
+    text-align: center;
+    color: #a0aec0;
+    padding: 2rem 0;
+}
+
+.oa-batch-job-row {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 0.85rem 1rem;
+    background: #f7fafc;
+}
+
+.oa-batch-job-main {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.oa-batch-job-index {
+    color: #a0aec0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.oa-batch-job-desc {
+    flex: 1;
+    color: #2d3748;
+    font-size: 0.95rem;
+}
+
+.oa-batch-remove-btn {
+    background: none;
+    border: none;
+    color: #a0aec0;
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+
+.oa-batch-remove-btn:hover {
+    background: #fed7d7;
+    color: #c53030;
+}
+
+.oa-batch-job-result {
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid #e2e8f0;
+    color: #4a5568;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+/* Status badges — tuned for the light card background, unlike the dark-theme .oa-badge
+   variants used in ChatTopBar.razor. */
+.oa-batch-badge {
+    display: inline-block;
+    padding: 0.2rem 0.7rem;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
+}
+
+.oa-batch-badge.gray {
+    background: #edf2f7;
+    color: #4a5568;
+}
+
+.oa-batch-badge.blue {
+    background: #ebf4ff;
+    color: #3182ce;
+}
+
+.oa-batch-badge.green {
+    background: #f0fff4;
+    color: #2f855a;
+}
+
+.oa-batch-badge.red {
+    background: #fff5f5;
+    color: #c53030;
+}

@@ -9,7 +9,13 @@ public interface IPersistentLlmProcess : IDisposable
     bool IsHealthy { get; }
     DateTime LastUsed { get; }
     int TimeoutMs { get; set; }
-    
+
+    /// <summary>
+    /// Maximum pause between output chunks (ms) after generation has started before it's
+    /// considered complete/stalled. Default: 10 000 ms (10 seconds).
+    /// </summary>
+    int PauseTimeoutMs { get; set; }
+
     Task<string> QueryAsync(
         string systemPrompt,
         string userQuestion,
@@ -21,5 +27,6 @@ public interface IPersistentLlmProcess : IDisposable
         float presencePenalty = 0.2f,
         float frequencyPenalty = 0.2f,
         bool useGpu = false,
-        int gpuLayers = 0);
+        int gpuLayers = 0,
+        int contextSize = 2048);
 }

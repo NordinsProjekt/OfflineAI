@@ -1,4 +1,4 @@
-using Microsoft.SemanticKernel.Embeddings;
+using Microsoft.Extensions.AI;
 using System.Text;
 using Services.Interfaces;
 using Services.Repositories;
@@ -14,13 +14,13 @@ namespace Services.Memory;
 /// Uses weighted similarity with multiple embeddings for improved matching.
 /// </summary>
 public class DatabaseVectorMemory(
-    ITextEmbeddingGenerationService embeddingService,
+    IEmbeddingGenerator<string, Embedding<float>> embeddingService,
     IVectorMemoryRepository repository,
     ILanguageStopWordsService stopWordsService,
     string collectionName)
     : ISearchableMemory
 {
-    private readonly ITextEmbeddingGenerationService _embeddingService = embeddingService ?? throw new ArgumentNullException(nameof(embeddingService));
+    private readonly IEmbeddingGenerator<string, Embedding<float>> _embeddingService = embeddingService ?? throw new ArgumentNullException(nameof(embeddingService));
     private readonly IVectorMemoryRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILanguageStopWordsService _stopWordsService = stopWordsService ?? throw new ArgumentNullException(nameof(stopWordsService));
     private string _collectionName = collectionName ?? throw new ArgumentNullException(nameof(collectionName));
@@ -82,7 +82,7 @@ public class DatabaseVectorMemory(
 
         // Generate embedding for the search query
         Console.WriteLine($"[*] Searching database for: '{searchQuery}'");
-        var queryEmbedding = await _embeddingService.GenerateEmbeddingAsync(searchQuery);
+        var queryEmbedding = await _embeddingService.GenerateVectorAsync(searchQuery);
 
         // Load fragments from the collection - filter at database level if domain filter is provided
         List<MemoryFragmentEntity> allFragments;
@@ -163,15 +163,12 @@ public class DatabaseVectorMemory(
                 };
                 
                 var originalQueryLower = query.ToLowerInvariant();
-                foreach (var phrase in importantPhrases)
+                var matchedPhrase = importantPhrases.FirstOrDefault(phrase =>
+                    originalQueryLower.Contains(phrase) && categoryLower.Contains(phrase));
+                if (matchedPhrase != null)
                 {
-                    // Check if phrase appears in BOTH the original query AND the category
-                    if (originalQueryLower.Contains(phrase) && categoryLower.Contains(phrase))
-                    {
-                        score += 0.4; // Strong boost for important phrase match
-                        Console.WriteLine($"[BOOST] '{entity.Category}' phrase match '{phrase}': {originalScore:F3} ? {score:F3} (+0.4)");
-                        break; // Only apply one phrase boost
-                    }
+                    score += 0.4; // Strong boost for important phrase match
+                    Console.WriteLine($"[BOOST] '{entity.Category}' phrase match '{matchedPhrase}': {originalScore:F3} ? {score:F3} (+0.4)");
                 }
                 
                 // PHASE 2: Check for query word match in category (exact word or substring)
@@ -195,7 +192,7 @@ public class DatabaseVectorMemory(
                     {
                         if (queryWord.Length < 3) continue; // Skip very short words
                         
-                        // Check for exact word match (e.g., "leksaksbåt" in "Leksaksbåt metall")
+                        // Check for exact word match (e.g., "leksaksbÃ¥t" in "LeksaksbÃ¥t metall")
                         if (categoryWords.Contains(queryWord))
                         {
                             hasExactWordMatch = true;
@@ -203,7 +200,7 @@ public class DatabaseVectorMemory(
                             break;
                         }
                         
-                        // Check if query word is START of any category word (e.g., "leksak" matches "leksaksbåt")
+                        // Check if query word is START of any category word (e.g., "leksak" matches "leksaksbÃ¥t")
                         if (categoryWords.Any(w => w.StartsWith(queryWord) && w.Length > queryWord.Length))
                         {
                             hasExactWordMatch = true;
@@ -369,8 +366,8 @@ public class DatabaseVectorMemory(
         
         // Accept any context with at least 1 relevant fragment, even if very short
         // Short answers are often the BEST answers for recycling queries:
-        // "Adapter ? Elektronik, Småelektronik" is perfect (37 chars)!
-        // "Kulspruta ? call police" is perfect!
+        // "Adapter â†’ Elektronik, SmÃ¥elektronik" is perfect (37 chars)!
+        // "Kulspruta â†’ call police" is perfect!
         // DON'T reject short but correct answers!
         if (results.Count == 0 || string.IsNullOrWhiteSpace(resultText))
         {
@@ -477,8 +474,8 @@ public class DatabaseVectorMemory(
     /// required to change one string into another.
     /// 
     /// Examples:
-    ///   "leksaksbåt" vs "leksakbåt" = 1 (missing 's')
-    ///   "leksaksbåt" vs "leksaksbot" = 1 (å ? o)
+    ///   "leksaksbÃ¥t" vs "leksakbÃ¥t" = 1 (missing 's')
+    ///   "leksaksbÃ¥t" vs "leksaksbot" = 1 (Ã¥ â†’ o)
     ///   "adapter" vs "adaptor" = 1 (e ? o)
     /// </summary>
     private static int CalculateLevenshteinDistance(string source, string target)

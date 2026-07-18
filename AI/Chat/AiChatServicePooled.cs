@@ -39,6 +39,18 @@ public class AiChatServicePooled(
     private const int MaxFragmentChars = 400;
 
     /// <summary>
+    /// Fallback context window (tokens) used when <see cref="LlmSettings.ContextSize"/> isn't
+    /// configured (0/unset). Previously the underlying process hardcoded 2048, which was too
+    /// small once large tool-injected content (e.g. an extracted PDF's full text) was appended
+    /// to the prompt, causing llama-cli to return an empty completion. 32 768 is a safer default
+    /// than the model's architectural 256K ceiling — a large context's KV cache adds up on top of
+    /// the model weights, and asking for far more than the GPU's free VRAM can hold makes
+    /// llama-cli fail (empty output, or a hard crash) instead of degrading gracefully. See
+    /// Gemma4CliOptions.ContextSize for the same reasoning.
+    /// </summary>
+    private const int DefaultContextSize = 32_768;
+
+    /// <summary>
     /// Last performance metrics from generation
     /// </summary>
     public PerformanceMetrics? LastMetrics { get; private set; }
@@ -177,7 +189,8 @@ public class AiChatServicePooled(
             presencePenalty: _generationSettings.PresencePenalty,
             frequencyPenalty: _generationSettings.FrequencyPenalty,
             useGpu: llmSettings?.UseGpu ?? false,
-            gpuLayers: llmSettings?.GpuLayers ?? 0);
+            gpuLayers: llmSettings?.GpuLayers ?? 0,
+            contextSize: llmSettings?.ContextSize > 0 ? llmSettings.ContextSize : DefaultContextSize);
     }
 
     /// <summary>

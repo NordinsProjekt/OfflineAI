@@ -12,7 +12,7 @@ namespace Presentation.AiDashboard.Tests.Components;
 /// </summary>
 public class ChatTopBarTests : TestContext
 {
-    private DashboardState CreateMockDashboardState()
+    private static DashboardState CreateMockDashboardState()
     {
         var state = new DashboardState();
         return state;
@@ -38,7 +38,8 @@ public class ChatTopBarTests : TestContext
         Assert.NotNull(cut.Find(".oa-badge.green")); // RAG badge (when enabled)
         Assert.NotNull(cut.Find(".oa-badge.blue"));  // Model badge
         Assert.NotNull(cut.Find(".oa-badge.purple")); // Temperature badge
-        var gpuBadge = cut.FindAll(".oa-badge").Last(); // GPU badge (last one)
+        var gpuBadges = cut.FindAll(".oa-badge");
+        var gpuBadge = gpuBadges[gpuBadges.Count - 1]; // GPU badge (last one)
         Assert.True(gpuBadge.ClassList.Contains("oa-badge"));
     }
 
@@ -127,8 +128,28 @@ public class ChatTopBarTests : TestContext
         var badges = cut.FindAll(".oa-badge");
         var gpuBadge = badges.FirstOrDefault(b => b.TextContent.Contains("GPU:"));
         Assert.NotNull(gpuBadge);
-        Assert.Contains("GPU: ON (34)", gpuBadge.TextContent);
+        // Default GpuLayers is 99 — llama.cpp's "offload all layers" sentinel — shown as "Max"
+        Assert.Contains("GPU: ON (Max)", gpuBadge.TextContent);
         Assert.True(gpuBadge.ClassList.Contains("orange"));
+    }
+
+    [Fact]
+    public void ChatTopBar_Displays_GpuLayersCount_WhenBelowMax()
+    {
+        // Arrange
+        var dashboardState = CreateMockDashboardState();
+        dashboardState.SettingsService.UseGpu = true;
+        dashboardState.SettingsService.GpuLayers = 40;
+        Services.AddSingleton(dashboardState);
+
+        // Act
+        var cut = RenderComponent<ChatTopBar>();
+
+        // Assert
+        var badges = cut.FindAll(".oa-badge");
+        var gpuBadge = badges.FirstOrDefault(b => b.TextContent.Contains("GPU:"));
+        Assert.NotNull(gpuBadge);
+        Assert.Contains("GPU: ON (40)", gpuBadge.TextContent);
     }
 
     [Fact]

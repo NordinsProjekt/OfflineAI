@@ -82,10 +82,10 @@ public class MultiFormatFileWatcher
 
         return extension switch
         {
-            ".txt" => await ProcessTextFileAsync(documentName, filePath),
-            ".md" => await ProcessMarkdownFileAsync(documentName, filePath),
-            ".json" => await ProcessJsonFileAsync(documentName, filePath),
-            ".pdf" => await ProcessPdfFileAsync(documentName, filePath),
+            ".txt" => await ProcessTextFileAsync(filePath),
+            ".md" => await ProcessMarkdownFileAsync(filePath),
+            ".json" => await ProcessJsonFileAsync(filePath),
+            ".pdf" => await ProcessPdfFileAsync(filePath),
             _ => throw new NotSupportedException($"File type '{extension}' is not supported")
         };
     }
@@ -109,7 +109,7 @@ public class MultiFormatFileWatcher
     /// 
     /// CHUNK SIZE: Maximum 1500 characters per fragment, no minimum enforced
     /// </summary>
-    private async Task<List<MemoryFragment>> ProcessTextFileAsync(string _, string filePath)
+    private static async Task<List<MemoryFragment>> ProcessTextFileAsync(string filePath)
     {
         var fragments = new List<MemoryFragment>();
 
@@ -141,7 +141,7 @@ public class MultiFormatFileWatcher
     /// #Category
     /// Content
     /// </summary>
-    private async Task<List<MemoryFragment>> ProcessMarkdownStyleTextFileAsync(string[] lines, string filePath)
+    private static async Task<List<MemoryFragment>> ProcessMarkdownStyleTextFileAsync(string[] lines, string filePath)
     {
         var fragments = new List<MemoryFragment>();
         
@@ -162,7 +162,7 @@ public class MultiFormatFileWatcher
                     var contentText = string.Join(Environment.NewLine, currentContent).Trim();
                     if (!string.IsNullOrWhiteSpace(contentText))
                     {
-                        var chunkedFragments = SplitIntoChunks(contentText, domainName, currentCategory);
+                        var chunkedFragments = SplitIntoChunks(contentText, currentCategory);
                         fragments.AddRange(chunkedFragments);
                     }
                 }
@@ -175,7 +175,7 @@ public class MultiFormatFileWatcher
                 DisplayService.ShowLoadingFile(domainName, filePath);
             }
             // Check for category marker (#)
-            else if (line.StartsWith("#") && !line.StartsWith("##"))
+            else if (line.StartsWith('#') && !line.StartsWith("##"))
             {
                 // Save previous fragment if exists
                 if (domainName != null && currentCategory != null && currentContent.Count > 0)
@@ -183,7 +183,7 @@ public class MultiFormatFileWatcher
                     var contentText = string.Join(Environment.NewLine, currentContent).Trim();
                     if (!string.IsNullOrWhiteSpace(contentText))
                     {
-                        var chunkedFragments = SplitIntoChunks(contentText, domainName, currentCategory);
+                        var chunkedFragments = SplitIntoChunks(contentText, currentCategory);
                         fragments.AddRange(chunkedFragments);
                     }
                 }
@@ -218,7 +218,7 @@ public class MultiFormatFileWatcher
             var contentText = string.Join(Environment.NewLine, currentContent).Trim();
             if (!string.IsNullOrWhiteSpace(contentText))
             {
-                var chunkedFragments = SplitIntoChunks(contentText, domainName, currentCategory);
+                var chunkedFragments = SplitIntoChunks(contentText, currentCategory);
                 fragments.AddRange(chunkedFragments);
             }
         }
@@ -234,7 +234,7 @@ public class MultiFormatFileWatcher
     /// <summary>
     /// Process text file with legacy format (first line = game name).
     /// </summary>
-    private async Task<List<MemoryFragment>> ProcessLegacyTextFileAsync(string[] lines, string filePath)
+    private static async Task<List<MemoryFragment>> ProcessLegacyTextFileAsync(string[] lines, string filePath)
     {
         var fragments = new List<MemoryFragment>();
         
@@ -252,7 +252,7 @@ public class MultiFormatFileWatcher
             if (!string.IsNullOrWhiteSpace(singleFragmentContent))
             {
                 // Split into chunks if content is too large
-                var chunkedFragments = SplitIntoChunks(singleFragmentContent, gameName, gameName);
+                var chunkedFragments = SplitIntoChunks(singleFragmentContent, gameName);
                 fragments.AddRange(chunkedFragments);
                 DisplayService.ShowCollectedSections(fragments.Count, gameName);
             }
@@ -307,7 +307,7 @@ public class MultiFormatFileWatcher
                         var category = $"{gameName} - {currentHeader}";
                         
                         // Split into chunks if content is too large
-                        var chunkedFragments = SplitIntoChunks(content_text, gameName, category);
+                        var chunkedFragments = SplitIntoChunks(content_text, category);
                         fragments.AddRange(chunkedFragments);
                     }
                 }
@@ -340,7 +340,7 @@ public class MultiFormatFileWatcher
                 var category = $"{gameName} - {currentHeader}";
                 
                 // Split into chunks if content is too large
-                var chunkedFragments = SplitIntoChunks(content_text, gameName, category);
+                var chunkedFragments = SplitIntoChunks(content_text, category);
                 fragments.AddRange(chunkedFragments);
             }
         }
@@ -351,7 +351,7 @@ public class MultiFormatFileWatcher
             var allContent = string.Join(Environment.NewLine, lines.Skip(1)).Trim();
             if (!string.IsNullOrWhiteSpace(allContent))
             {
-                var chunkedFragments = SplitIntoChunks(allContent, gameName, gameName);
+                var chunkedFragments = SplitIntoChunks(allContent, gameName);
                 fragments.AddRange(chunkedFragments);
             }
         }
@@ -366,7 +366,7 @@ public class MultiFormatFileWatcher
     /// No minimum chunk size enforced - allows small fragments.
     /// Automatically cleans text to remove special tokens and control characters.
     /// </summary>
-    private List<MemoryFragment> SplitIntoChunks(string content, string gameName, string baseCategory)
+    private static List<MemoryFragment> SplitIntoChunks(string content, string baseCategory)
     {
         var fragments = new List<MemoryFragment>();
         
@@ -460,7 +460,7 @@ public class MultiFormatFileWatcher
     ///   ]
     /// }
     /// </summary>
-    private async Task<List<MemoryFragment>> ProcessJsonFileAsync(string _, string filePath)
+    private static async Task<List<MemoryFragment>> ProcessJsonFileAsync(string filePath)
     {
         var fragments = new List<MemoryFragment>();
 
@@ -535,12 +535,9 @@ public class MultiFormatFileWatcher
 
                 // Extract optional page number
                 int? pageNumber = null;
-                if (section.TryGetProperty("pageNumber", out var pageElement))
+                if (section.TryGetProperty("pageNumber", out var pageElement) && pageElement.ValueKind == System.Text.Json.JsonValueKind.Number)
                 {
-                    if (pageElement.ValueKind == System.Text.Json.JsonValueKind.Number)
-                    {
-                        pageNumber = pageElement.GetInt32();
-                    }
+                    pageNumber = pageElement.GetInt32();
                 }
 
                 // Build fragment content with source and page info
@@ -572,7 +569,7 @@ public class MultiFormatFileWatcher
     /// Process Markdown file (similar to TXT but with better heading detection).
     /// Game name is extracted from FIRST LINE.
     /// </summary>
-    private async Task<List<MemoryFragment>> ProcessMarkdownFileAsync(string _, string filePath)
+    private async Task<List<MemoryFragment>> ProcessMarkdownFileAsync(string filePath)
     {
         var content = await File.ReadAllTextAsync(filePath);
         var lines = content.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -610,7 +607,7 @@ public class MultiFormatFileWatcher
     /// Game name is extracted from FILENAME (not from PDF content).
     /// Categories format: "FileName - Chunk N" or "FileName - SectionTitle"
     /// </summary>
-    private async Task<List<MemoryFragment>> ProcessPdfFileAsync(string documentName, string filePath)
+    private async Task<List<MemoryFragment>> ProcessPdfFileAsync(string filePath)
     {
         if (_pdfProcessor == null)
         {
@@ -653,7 +650,7 @@ public class MultiFormatFileWatcher
     /// "munchkin-treasure-hunt.pdf" -> "Munchkin Treasure Hunt"
     /// "CastlePanicMunchkin.pdf" -> "Castle Panic Munchkin"
     /// </summary>
-    private string ExtractGameNameFromFileName(string fileName)
+    private static string ExtractGameNameFromFileName(string fileName)
     {
         // Remove common suffixes
         var cleanName = fileName
@@ -731,7 +728,7 @@ public class MultiFormatFileWatcher
     /// 2. For plain text:
     ///    - Must be < 60 characters
     ///    - Must NOT end with sentence punctuation (., !, ?)
-    ///    - Must NOT start with bullet points (-, *, •)
+    ///    - Must NOT start with bullet points (-, *, â€¢)
     ///    - Must NOT contain sentence indicators (: followed by space, or multiple commas)
     ///    - At least 50% of words should start with uppercase (Title Case)
     /// </summary>
@@ -741,7 +738,7 @@ public class MultiFormatFileWatcher
             return false;
         
         // Rule 1: Markdown headers
-        if (line.StartsWith("#"))
+        if (line.StartsWith('#'))
             return true;
         
         // Rule 2: Plain text header checks
@@ -756,7 +753,7 @@ public class MultiFormatFileWatcher
             return false;
         
         // Must not start with bullet points
-        if (line.StartsWith("- ") || line.StartsWith("* ") || line.StartsWith("• "))
+        if (line.StartsWith("- ") || line.StartsWith("* ") || line.StartsWith("â€¢ "))
             return false;
         
         // Must not contain colon followed by space (e.g., "Note: this is...")

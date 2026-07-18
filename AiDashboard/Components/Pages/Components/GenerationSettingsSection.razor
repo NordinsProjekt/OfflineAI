@@ -13,6 +13,11 @@
         <label>Timeout (seconds)</label>
         <input type="number" min="10" max="300" class="oa-text" @bind="Dashboard.SettingsService.TimeoutSeconds" @bind:event="oninput">
     </div>
+    <div class="oa-field">
+        <label title="How long to wait after the LLM's last output chunk before treating the response as complete. Increase this if longer or slower models get cut off mid-answer.">Pause Timeout (seconds)</label>
+        <input type="number" min="1" max="120" class="oa-text" @bind="Dashboard.SettingsService.PauseTimeoutSeconds" @bind:event="oninput">
+        <small class="oa-hint">Cuts off the response after this many seconds of silence. Raise it for slower/bigger models.</small>
+    </div>
     <div class="oa-grid2">
         <div class="oa-field">
             <label>Top-K</label>

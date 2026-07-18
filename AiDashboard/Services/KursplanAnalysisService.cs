@@ -4,8 +4,8 @@ using System.Text.RegularExpressions;
 namespace AiDashboard.Services;
 
 /// <summary>
-/// Specialized service for extracting and formatting Swedish YH (Yrkeshögskola) course objectives.
-/// Parses documents to extract Kunskaper (Knowledge), Färdigheter (Skills), and Kompetenser (Competencies).
+/// Specialized service for extracting and formatting Swedish YH (YrkeshÃ¶gskola) course objectives.
+/// Parses documents to extract Kunskaper (Knowledge), FÃ¤rdigheter (Skills), and Kompetenser (Competencies).
 /// </summary>
 public class KursplanAnalysisService : IKursplanAnalysisService
 {
@@ -70,7 +70,7 @@ public class KursplanAnalysisService : IKursplanAnalysisService
     /// <summary>
     /// Extract course metadata from document header.
     /// </summary>
-    private KursplanMetadata ExtractMetadata(string text)
+    private static KursplanMetadata ExtractMetadata(string text)
     {
         var metadata = new KursplanMetadata();
         var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -81,7 +81,7 @@ public class KursplanAnalysisService : IKursplanAnalysisService
             var firstLine = lines[0].Trim();
             
             // Check if it contains "yhp" - format: "Kursnamn XX yhp"
-            var yhpMatch = Regex.Match(firstLine, @"^(.+?)\s+[-–]\s+(.+?)$|^(.+?)\s+\((\d+)\s*yhp\)", RegexOptions.IgnoreCase);
+            var yhpMatch = Regex.Match(firstLine, @"^(.+?)\s+[-â€“]\s+(.+?)$|^(.+?)\s+\((\d+)\s*yhp\)", RegexOptions.IgnoreCase);
             if (yhpMatch.Success)
             {
                 if (!string.IsNullOrEmpty(yhpMatch.Groups[1].Value))
@@ -117,10 +117,10 @@ public class KursplanAnalysisService : IKursplanAnalysisService
     }
 
     /// <summary>
-    /// Parse document into named sections (Kunskaper, Färdigheter, Kompetenser).
+    /// Parse document into named sections (Kunskaper, FÃ¤rdigheter, Kompetenser).
     /// Excludes grading and assessment sections.
     /// </summary>
-    private Dictionary<string, string> ParseDocumentIntoSections(string text)
+    private static Dictionary<string, string> ParseDocumentIntoSections(string text)
     {
         var sections = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var lines = text.Split('\n');
@@ -132,20 +132,20 @@ public class KursplanAnalysisService : IKursplanAnalysisService
         var sectionNames = new[] 
         { 
             "Kunskaper", "Kunskap", 
-            "Färdigheter", "Färdighet", 
+            "FÃ¤rdigheter", "FÃ¤rdighet", 
             "Kompetenser", "Kompetens" 
         };
 
         // Sections to EXCLUDE (grading, assessment, etc.)
         var excludedSections = new[]
         {
-            "Former för kunskapskontroll",
-            "Principer för bedömning",
+            "Former fÃ¶r kunskapskontroll",
+            "Principer fÃ¶r bedÃ¶mning",
             "Betyg",
             "Betygskriterier",
-            "Icke godkänt",
-            "Godkänt",
-            "Väl godkänt"
+            "Icke godkÃ¤nt",
+            "GodkÃ¤nt",
+            "VÃ¤l godkÃ¤nt"
         };
 
         foreach (var line in lines)
@@ -196,41 +196,30 @@ public class KursplanAnalysisService : IKursplanAnalysisService
     /// <summary>
     /// Detect if a line is a section header.
     /// </summary>
-    private string? DetectSectionHeader(string line, string[] sectionNames)
+    private static string? DetectSectionHeader(string line, string[] sectionNames)
     {
         var trimmed = line.Trim();
 
-        // Handle #SectionName format (e.g., #Kunskap, #Färdigheter)
+        // Handle #SectionName format (e.g., #Kunskap, #FÃ¤rdigheter)
         if (trimmed.StartsWith('#') && !trimmed.StartsWith("##"))
         {
             var afterHash = trimmed.TrimStart('#').Trim();
-            foreach (var sectionName in sectionNames)
-            {
-                if (afterHash.Equals(sectionName, StringComparison.OrdinalIgnoreCase))
-                {
-                    return sectionName;
-                }
-            }
+            var matched = sectionNames.FirstOrDefault(s => afterHash.Equals(s, StringComparison.OrdinalIgnoreCase));
+            if (matched != null)
+                return matched;
         }
 
         // Handle plain section names
-        foreach (var sectionName in sectionNames)
-        {
-            if (trimmed.Equals(sectionName, StringComparison.OrdinalIgnoreCase) ||
-                trimmed.Equals(sectionName + ":", StringComparison.OrdinalIgnoreCase))
-            {
-                return sectionName;
-            }
-        }
-
-        return null;
+        return sectionNames.FirstOrDefault(s =>
+            trimmed.Equals(s, StringComparison.OrdinalIgnoreCase) ||
+            trimmed.Equals(s + ":", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
     /// Extract individual items from section text.
     /// Excludes assessment and grading content.
     /// </summary>
-    private List<string> ExtractItemsFromText(string text)
+    private static List<string> ExtractItemsFromText(string text)
     {
         var items = new List<string>();
         var lines = text.Split('\n');
@@ -238,13 +227,13 @@ public class KursplanAnalysisService : IKursplanAnalysisService
         // Phrases that indicate assessment/grading content (not learning objectives)
         var excludedPhrases = new[]
         {
-            "former för kunskapskontroll",
-            "principer för bedömning",
-            "betyg sätts",
-            "icke godkänt",
-            "godkänt (g)",
-            "väl godkänt",
-            "kunskapskontroller görs"
+            "former fÃ¶r kunskapskontroll",
+            "principer fÃ¶r bedÃ¶mning",
+            "betyg sÃ¤tts",
+            "icke godkÃ¤nt",
+            "godkÃ¤nt (g)",
+            "vÃ¤l godkÃ¤nt",
+            "kunskapskontroller gÃ¶rs"
         };
 
         foreach (var line in lines)
@@ -262,10 +251,10 @@ public class KursplanAnalysisService : IKursplanAnalysisService
 
             // Skip lines that look like headers
             if (trimmedLine.StartsWith('#') || 
-                trimmedLine.Equals("Efter genomgången kurs ska den studerande ha följande:", StringComparison.OrdinalIgnoreCase) ||
-                trimmedLine.Equals("Efter genomgången kurs ska den studerande kunna", StringComparison.OrdinalIgnoreCase) ||
-                trimmedLine.Equals("Efter genomgången kurs ska den studerande ha färdigheter i att", StringComparison.OrdinalIgnoreCase) ||
-                trimmedLine.Equals("Efter genomgången kurs ska den studerande ha kompetens att", StringComparison.OrdinalIgnoreCase))
+                trimmedLine.Equals("Efter genomgÃ¥ngen kurs ska den studerande ha fÃ¶ljande:", StringComparison.OrdinalIgnoreCase) ||
+                trimmedLine.Equals("Efter genomgÃ¥ngen kurs ska den studerande kunna", StringComparison.OrdinalIgnoreCase) ||
+                trimmedLine.Equals("Efter genomgÃ¥ngen kurs ska den studerande ha fÃ¤rdigheter i att", StringComparison.OrdinalIgnoreCase) ||
+                trimmedLine.Equals("Efter genomgÃ¥ngen kurs ska den studerande ha kompetens att", StringComparison.OrdinalIgnoreCase))
                 continue;
 
             // Remove bullet points and numbering
@@ -285,12 +274,12 @@ public class KursplanAnalysisService : IKursplanAnalysisService
     /// <summary>
     /// Remove list prefix from item text (bullets, numbers, etc.).
     /// </summary>
-    private string RemoveListPrefix(string text)
+    private static string RemoveListPrefix(string text)
     {
         var trimmed = text.TrimStart();
 
         // Remove bullet points
-        trimmed = Regex.Replace(trimmed, @"^[?•\-\*??]\s*", "");
+        trimmed = Regex.Replace(trimmed, @"^[â€¢â—¦\-\*â–ªâ€£]\s*", "");
 
         // Remove numbered lists
         trimmed = Regex.Replace(trimmed, @"^\d+[\.\)]\s*", "");
@@ -304,7 +293,7 @@ public class KursplanAnalysisService : IKursplanAnalysisService
     /// <summary>
     /// Clean item text for output.
     /// </summary>
-    private string CleanItemText(string text)
+    private static string CleanItemText(string text)
     {
         // Remove multiple spaces
         var cleaned = Regex.Replace(text, @"\s+", " ").Trim();
@@ -321,12 +310,12 @@ public class KursplanAnalysisService : IKursplanAnalysisService
     /// <summary>
     /// Get section code for numbering (K, F, Ko).
     /// </summary>
-    private string GetSectionCode(string sectionName)
+    private static string GetSectionCode(string sectionName)
     {
         return sectionName.ToLowerInvariant() switch
         {
             "kunskaper" or "kunskap" => "K",
-            "färdigheter" or "färdighet" => "F",
+            "fÃ¤rdigheter" or "fÃ¤rdighet" => "F",
             "kompetenser" or "kompetens" => "Ko",
             _ => "X"
         };
@@ -335,14 +324,14 @@ public class KursplanAnalysisService : IKursplanAnalysisService
     /// <summary>
     /// Normalize section name to standard form.
     /// </summary>
-    private string NormalizeSectionName(string sectionName)
+    private static string NormalizeSectionName(string sectionName)
     {
         return sectionName.ToLowerInvariant() switch
         {
             "kunskap" => "Kunskaper",
             "kunskaper" => "Kunskaper",
-            "färdighet" => "Färdigheter",
-            "färdigheter" => "Färdigheter",
+            "fÃ¤rdighet" => "FÃ¤rdigheter",
+            "fÃ¤rdigheter" => "FÃ¤rdigheter",
             "kompetens" => "Kompetenser",
             "kompetenser" => "Kompetenser",
             _ => sectionName
@@ -432,26 +421,26 @@ public class KursplanAnalysisService : IKursplanAnalysisService
     {
         var sb = new StringBuilder();
 
-        sb.AppendLine("Du är en expert på svenska YH-kursplaner.");
-        sb.AppendLine("Extrahera ALLA kursmål från följande dokument.");
+        sb.AppendLine("Du Ã¤r en expert pÃ¥ svenska YH-kursplaner.");
+        sb.AppendLine("Extrahera ALLA kursmÃ¥l frÃ¥n fÃ¶ljande dokument.");
         sb.AppendLine();
         sb.AppendLine("STRUKTUR:");
         sb.AppendLine("- Kunskaper (K) - vad den studerande ska kunna");
-        sb.AppendLine("- Färdigheter (F) - praktiska färdigheter");
-        sb.AppendLine("- Kompetenser (Ko) - övergripande kompetenser");
+        sb.AppendLine("- FÃ¤rdigheter (F) - praktiska fÃ¤rdigheter");
+        sb.AppendLine("- Kompetenser (Ko) - Ã¶vergripande kompetenser");
         sb.AppendLine();
         sb.AppendLine("FORMAT:");
         sb.AppendLine("## [Kursnamn]");
         sb.AppendLine();
         sb.AppendLine("#Kunskaper");
-        sb.AppendLine("[Mål 1]");
-        sb.AppendLine("[Mål 2]");
+        sb.AppendLine("[MÃ¥l 1]");
+        sb.AppendLine("[MÃ¥l 2]");
         sb.AppendLine();
-        sb.AppendLine("#Färdigheter");
-        sb.AppendLine("[Mål 1]");
+        sb.AppendLine("#FÃ¤rdigheter");
+        sb.AppendLine("[MÃ¥l 1]");
         sb.AppendLine();
         sb.AppendLine("#Kompetenser");
-        sb.AppendLine("[Mål 1]");
+        sb.AppendLine("[MÃ¥l 1]");
         sb.AppendLine();
         sb.AppendLine("DOKUMENT:");
         sb.AppendLine("---");
@@ -486,7 +475,7 @@ public class KursplanResult
 }
 
 /// <summary>
-/// A section of course objectives (Kunskaper, Färdigheter, or Kompetenser).
+/// A section of course objectives (Kunskaper, FÃ¤rdigheter, or Kompetenser).
 /// </summary>
 public class KursmalSection
 {

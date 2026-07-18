@@ -6,7 +6,7 @@ namespace Application.AI.Pooling;
 /// Wrapper that automatically returns the instance to the pool when disposed.
 /// Use with 'using' statement for automatic resource management.
 /// </summary>
-public class PooledInstance(IPersistentLlmProcess process, IModelInstancePool pool) : IDisposable
+public sealed class PooledInstance(IPersistentLlmProcess process, IModelInstancePool pool) : IDisposable
 {
     public IPersistentLlmProcess Process { get; } = process ?? throw new ArgumentNullException(nameof(process));
     private readonly IModelInstancePool _pool = pool ?? throw new ArgumentNullException(nameof(pool));
@@ -22,5 +22,6 @@ public class PooledInstance(IPersistentLlmProcess process, IModelInstancePool po
             }
             _disposed = true;
         }
+        GC.SuppressFinalize(this);
     }
 }

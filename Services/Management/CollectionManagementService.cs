@@ -12,17 +12,14 @@ namespace Services.Management;
 /// Service for managing vector memory collections.
 /// Handles CRUD operations for collections in the vector database.
 /// </summary>
-public class CollectionManagementService(
-    IVectorMemoryRepository repository,
-    VectorMemoryPersistenceService persistenceService)
+public class CollectionManagementService(IVectorMemoryRepository repository)
 {
     // Change notification for UI components
     public event Action? OnChange;
 
     private readonly IVectorMemoryRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-    private readonly VectorMemoryPersistenceService _persistenceService = persistenceService ?? throw new ArgumentNullException(nameof(persistenceService));
 
-    private List<string> _availableCollections = new();
+    private readonly List<string> _availableCollections = new();
     public IReadOnlyList<string> AvailableCollections => _availableCollections.AsReadOnly();
 
     private string _currentCollection = "game-rules-mpnet";

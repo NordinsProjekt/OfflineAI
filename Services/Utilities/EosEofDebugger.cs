@@ -176,14 +176,11 @@ public static class EosEofDebugger
         
         // Remove control characters except whitespace
         var sb = new StringBuilder(cleaned.Length);
-        foreach (char c in cleaned)
+        foreach (var c in cleaned.Where(c => c >= 32 || c == '\r' || c == '\n' || c == '\t'))
         {
-            if (c >= 32 || c == '\r' || c == '\n' || c == '\t')
-            {
-                sb.Append(c);
-            }
+            sb.Append(c);
         }
-        
+
         return sb.ToString();
     }
     

@@ -1,5 +1,4 @@
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.Embeddings;
+using Microsoft.Extensions.AI;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using Microsoft.ML.Tokenizers;
@@ -16,7 +15,7 @@ namespace Application.AI.Embeddings;
 /// Supports both BERT-style (3 inputs) and MPNet-style (2 inputs) models.
 /// NOTE: Uses Microsoft.ML.Tokenizers with proper BERT vocabulary for accurate semantic search.
 /// </summary>
-public class SemanticEmbeddingService : ITextEmbeddingGenerationService
+public sealed class SemanticEmbeddingService : IEmbeddingGenerator<string, Embedding<float>>
 {
     private readonly Tokenizer _tokenizer;
     private readonly InferenceSession _session;
@@ -25,8 +24,6 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
     private readonly bool _isGpuEnabled;
     private readonly bool _requiresTokenTypeIds;
     private readonly bool _debugMode;
-    
-    public IReadOnlyDictionary<string, object?> Attributes => new Dictionary<string, object?>();
 
     /// <summary>
     /// Creates a REAL BERT-based semantic embedding service using ONNX Runtime.
@@ -190,25 +187,27 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
         DisplayService.WriteLine($"Tokenizer: Microsoft.ML.Tokenizers (BERT vocabulary)");
     }
     
-    public async Task<IList<ReadOnlyMemory<float>>> GenerateEmbeddingsAsync(
-        IList<string> data,
-        Kernel? kernel = null,
+    public async Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
+        IEnumerable<string> values,
+        EmbeddingGenerationOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        var results = new List<ReadOnlyMemory<float>>();
-        
+        var data = values as IList<string> ?? values.ToList();
+        var results = new GeneratedEmbeddings<Embedding<float>>();
+
         for (int i = 0; i < data.Count; i++)
         {
             if (_debugMode)
             {
                 Console.WriteLine($"[DEBUG] Generating embedding {i + 1}/{data.Count}...");
             }
-            
+
             try
             {
-                var embedding = await GenerateEmbeddingAsync(data[i], kernel, cancellationToken);
-                results.Add(embedding);
-                
+                // Generate REAL BERT embedding
+                var vector = GenerateBertEmbedding(data[i]);
+                results.Add(new Embedding<float>(vector));
+
                 if (_debugMode)
                 {
                     Console.WriteLine($"[DEBUG] Successfully generated embedding {i + 1}/{data.Count}");
@@ -219,38 +218,20 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
                 Console.WriteLine($"[ERROR] Failed to generate embedding {i + 1}/{data.Count}: {ex.Message}");
                 throw;
             }
-            
-            // Aggressive garbage collection on CPU to keep memory < 2GB
-            if (!_isGpuEnabled && i % 3 == 0)
-            {
-                if (_debugMode)
-                {
-                    Console.WriteLine($"[DEBUG] Running GC after embedding {i + 1}...");
-                }
-                GC.Collect(0, GCCollectionMode.Forced, blocking: true, compacting: true);
-            }
         }
-        
-        return results;
+
+        return await Task.FromResult(results);
     }
 
-    public Task<ReadOnlyMemory<float>> GenerateEmbeddingAsync(
-        string data,
-        Kernel? kernel = null,
-        CancellationToken cancellationToken = default)
+    public object? GetService(Type serviceType, object? serviceKey = null)
     {
-        // Generate REAL BERT embedding
-        var embedding = GenerateBertEmbedding(data);
-        
-        // VERY aggressive memory cleanup on CPU every single embedding
-        if (!_isGpuEnabled)
-        {
-            // Full Gen 2 collection to reclaim all memory
-            GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-            GC.WaitForPendingFinalizers();
-        }
-        
-        return Task.FromResult(embedding);
+        ArgumentNullException.ThrowIfNull(serviceType);
+        return serviceKey is null && serviceType.IsInstanceOfType(this) ? this : null;
+    }
+
+    public void Dispose()
+    {
+        _session.Dispose();
     }
 
     /// <summary>
@@ -290,7 +271,7 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
             }
             
             // Step 2: Tokenize text using Microsoft.ML.Tokenizers with real BERT vocabulary
-            var result = _tokenizer.EncodeToTokens(text, out string? normalizedText);
+            var result = _tokenizer.EncodeToTokens(text, out _);
             
             // Extract token IDs and truncate to max sequence length (minus 2 for [CLS] and [SEP])
             var tokens = result
@@ -372,7 +353,7 @@ public class SemanticEmbeddingService : ITextEmbeddingGenerationService
                 Console.WriteLine($"[DEBUG] Step 6: Extracting output tensor...");
             }
             
-            var outputTensor = results.First().AsEnumerable<float>().ToArray();
+            var outputTensor = results[0].AsEnumerable<float>().ToArray();
             
             if (_debugMode)
             {

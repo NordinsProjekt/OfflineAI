@@ -1,11 +1,11 @@
-using System;
-using System.Threading.Tasks;
 using AiDashboard.Services;
 using Application.AI.Management;
+using Application.AI.Gemma4;
 using Services.Configuration;
 using Services.Management;
 using Services.Memory;
 using Services.Repositories;
+using Services.Workspace;
 
 namespace AiDashboard.State;
 
@@ -17,10 +17,10 @@ public class DashboardState
 {
     // Change notification for Blazor components
     public event Action? OnChange;
-    
+
     // Blazor dispatcher callback for thread-safe UI updates
     private Func<Action, Task>? _invokeAsync;
-    
+
     /// <summary>
     /// Set the InvokeAsync callback from a Blazor component to enable thread-safe UI updates.
     /// This should be called once during initialization from a ComponentBase.
@@ -36,15 +36,16 @@ public class DashboardState
     public CollectionManagementService? CollectionService { get; private set; }
     public InboxProcessingService? InboxService { get; private set; }
     public BotPersonalityService? PersonalityService { get; private set; }
-    
+    public IWorkspaceService? WorkspaceService { get; private set; }
+
     private DashboardChatService? _chatService;
-    public DashboardChatService? ChatService 
-    { 
+    public DashboardChatService? ChatService
+    {
         get => _chatService;
         set
         {
             _chatService = value;
-            
+
             // If we have a chat service, inject the model name provider
             if (_chatService != null)
             {
@@ -52,6 +53,35 @@ public class DashboardState
             }
         }
     }
+
+    public IGemma4CliService? Gemma4CliService { get; set; }
+
+    public bool IsGemma4Available => Gemma4CliService != null;
+
+    /// <summary>Which backend to use for chat. Defaults to Classic (pooled subprocess).</summary>
+    public LlmBackend SelectedBackend { get; set; } = LlmBackend.Classic;
+
+    /// <summary>
+    /// Starts a new conversation/session so subsequently saved question/answer turns
+    /// (from either backend) are grouped under a new conversation id instead of being
+    /// appended to the previous one. Call this when the user clears the chat.
+    /// </summary>
+    public void StartNewConversation() => ChatService?.StartNewConversation();
+
+    /// <summary>
+    /// Name of the model behind whichever backend <see cref="SendQuickAskActiveAsync"/> currently
+    /// routes to, or null when it can't be determined. Lets a caller record which model served a
+    /// long-running job without having to know how backends are selected.
+    /// </summary>
+    public string? ActiveModelName => SelectedBackend == LlmBackend.Gemma4Cli && Gemma4CliService != null
+        ? Gemma4CliService.ModelName
+        : ModelService.CurrentModel;
+
+    /// <summary>
+    /// The conversation id that saved question/answer turns are currently grouped under, or null
+    /// when no chat service is available.
+    /// </summary>
+    public Guid? CurrentConversationId => ChatService?.ConversationId;
 
     // UI-specific state
     private bool _collapsed;
@@ -77,6 +107,7 @@ public class DashboardState
         { "collection", false },    // Expanded by default (needed for bot selection)
         { "domains", true },        // Collapsed by default
         { "files", true },          // Collapsed by default
+        { "workspace", false },     // Expanded by default (safety-relevant, should be visible)
         { "knowledge", true },      // Collapsed by default
         { "table", true }           // Collapsed by default
     };
@@ -138,13 +169,14 @@ public class DashboardState
         IVectorMemoryRepository? repository,
         VectorMemoryPersistenceService? persistenceService,
         AppConfiguration? appConfig,
-        BotPersonalityService? personalityService = null)
+        BotPersonalityService? personalityService = null,
+        IWorkspaceService? workspaceService = null)
     {
         VectorRepository = repository;
 
         if (repository != null && persistenceService != null)
         {
-            CollectionService = new CollectionManagementService(repository, persistenceService);
+            CollectionService = new CollectionManagementService(repository);
             CollectionService.OnChange += NotifyStateChanged;
         }
 
@@ -157,11 +189,21 @@ public class DashboardState
             };
             InboxService.OnProcessingComplete += NotifyStateChanged;
         }
-        
+
         if (personalityService != null)
         {
             PersonalityService = personalityService;
             PersonalityService.OnChange += NotifyStateChanged;
+        }
+
+        if (workspaceService != null)
+        {
+            WorkspaceService = workspaceService;
+            WorkspaceService.ActiveWorkspaceChanged += workspace =>
+            {
+                StatusMessage = $"[INFO] Arbetsyta bytt till \"{workspace.Name}\" ({workspace.Path})";
+                NotifyStateChanged();
+            };
         }
     }
 
@@ -229,15 +271,15 @@ public class DashboardState
         }
 
         var (success, message) = await CollectionService.ValidateCollectionAsync(collectionName);
-        
+
         // IMPORTANT: Update the DatabaseVectorMemory to use the new collection
         if (success && ChatService != null)
         {
             ChatService.UpdateCollectionName(collectionName);
         }
-        
+
         StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
-        
+
         // Note: DatabaseVectorMemory queries collections on-demand, no need to load into memory
     }
 
@@ -251,19 +293,20 @@ public class DashboardState
         }
 
         // Hook up domain auto-registration callback BEFORE processing files
-        // This ensures "Webhallen" gets registered when importing "Webhallen - Köpvillkor" fragments
+        // This ensures "Webhallen" gets registered when importing "Webhallen - KÃ¶pvillkor" fragments
         InboxService.OnDomainDiscovered = async (category, categoryType) =>
         {
-            // Extract domain name from category (e.g., "Webhallen" from "##Webhallen - Köpvillkor")
+            // Extract domain name from category (e.g., "Webhallen" from "##Webhallen - KÃ¶pvillkor")
             // The DomainDetector will strip the "##" prefix
             var domainDetector = _chatService?.DomainDetector;
             if (domainDetector != null)
             {
+                Console.WriteLine("Found Domain");
                 await domainDetector.RegisterDomainFromCategoryAsync(category, categoryType);
             }
         };
 
-        var (success, message, filesProcessed, fragmentsCreated) = 
+        var (success, message, filesProcessed, _) =
             await InboxService.ProcessInboxAsync(CollectionService.CurrentCollection);
 
         if (success && filesProcessed > 0)
@@ -282,10 +325,68 @@ public class DashboardState
             return;
         }
 
-        var (success, message, filesConverted) = await InboxService.ConvertPdfToTxtAsync();
+        var (success, message, _) = await InboxService.ConvertPdfToTxtAsync();
         StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
     }
-    
+
+    // Workspace operations (delegating to WorkspaceService). All agent file operations are
+    // confined to whichever workspace is active â€” switching here re-confines the file agent.
+    public IReadOnlyList<WorkspaceInfo> GetWorkspaces() =>
+        WorkspaceService?.GetWorkspaces() ?? Array.Empty<WorkspaceInfo>();
+
+    public WorkspaceInfo? GetActiveWorkspace() => WorkspaceService?.GetActiveWorkspace();
+
+    public async Task SetActiveWorkspaceAsync(string name)
+    {
+        if (WorkspaceService == null)
+        {
+            StatusMessage = "[ERROR] Workspace service not available";
+            return;
+        }
+
+        try
+        {
+            await WorkspaceService.SetActiveWorkspaceAsync(name);
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"[ERROR] {ex.Message}";
+        }
+    }
+
+    public async Task AddWorkspaceAsync(string name, string path)
+    {
+        if (WorkspaceService == null)
+        {
+            StatusMessage = "[ERROR] Workspace service not available";
+            return;
+        }
+
+        try
+        {
+            var workspace = await WorkspaceService.AddWorkspaceAsync(name, path);
+            StatusMessage = $"[OK] Arbetsyta \"{workspace.Name}\" tillagd ({workspace.Path})";
+            NotifyStateChanged();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"[ERROR] {ex.Message}";
+        }
+    }
+
+    public async Task RemoveWorkspaceAsync(string name)
+    {
+        if (WorkspaceService == null)
+        {
+            StatusMessage = "[ERROR] Workspace service not available";
+            return;
+        }
+
+        await WorkspaceService.RemoveWorkspaceAsync(name);
+        StatusMessage = $"[OK] Arbetsyta \"{name}\" borttagen";
+        NotifyStateChanged();
+    }
+
     // Personality operations
     public async Task RefreshPersonalitiesAsync()
     {
@@ -301,7 +402,6 @@ public class DashboardState
             StatusMessage = $"[ERROR] {message}";
         }
     }
-    
     public async Task SelectPersonalityAsync(string personalityId)
     {
         if (PersonalityService == null)
@@ -311,7 +411,7 @@ public class DashboardState
         }
 
         var (success, message) = await PersonalityService.SelectPersonalityAsync(personalityId);
-        
+
         // If a personality with a default collection is selected, switch to that collection
         if (success && PersonalityService.CurrentPersonality?.DefaultCollection != null && CollectionService != null)
         {
@@ -319,7 +419,7 @@ public class DashboardState
             CollectionService.CurrentCollection = collectionName;
             await LoadCollectionAsync(collectionName);
         }
-        
+
         StatusMessage = success ? $"[OK] {message}" : $"[ERROR] {message}";
     }
 
@@ -344,7 +444,8 @@ public class DashboardState
                 PersonalityService?.CurrentPersonality,
                 SettingsService.UseGpu,
                 SettingsService.GpuLayers,
-                SettingsService.TimeoutSeconds);
+                SettingsService.TimeoutSeconds,
+                SettingsService.PauseTimeoutSeconds);
         }
         catch (Exception ex)
         {
@@ -373,11 +474,80 @@ public class DashboardState
                 PersonalityService?.CurrentPersonality,
                 SettingsService.UseGpu,
                 SettingsService.GpuLayers,
-                SettingsService.TimeoutSeconds);  // Use global timeout setting
+                SettingsService.TimeoutSeconds,
+                SettingsService.PauseTimeoutSeconds);  // Use global timeout setting
         }
         catch (Exception ex)
         {
             return $"[ERROR] Failed to send message: {ex.Message}";
+        }
+    }
+
+    public async Task<string> SendQuickAskAsync(List<string> message)
+    {
+        if (ChatService == null)
+        {
+            return "[ERROR] Chat service not initialized. Please check application configuration.";
+        }
+
+        try
+        {
+            var genSettings = SettingsService.ToGenerationSettings();
+
+            return await ChatService.SendMessageAsync(
+                string.Concat(message.Select(t => t + "\n")),
+                ragMode: false,  // Always disable RAG for QuickAsk
+                SettingsService.DebugMode,
+                SettingsService.PerformanceMetrics,
+                genSettings,
+                PersonalityService?.CurrentPersonality,
+                SettingsService.UseGpu,
+                SettingsService.GpuLayers,
+                SettingsService.TimeoutSeconds,
+                SettingsService.PauseTimeoutSeconds);  // Use global timeout setting
+        }
+        catch (Exception ex)
+        {
+            return $"[ERROR] Failed to send message: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Sends a message via the currently selected backend.
+    /// Uses Gemma 4 CLI when <see cref="SelectedBackend"/> is <see cref="LlmBackend.Gemma4Cli"/>
+    /// and <see cref="Gemma4CliService"/> is available; falls back to <see cref="SendMessageAsync"/> otherwise.
+    /// </summary>
+    public Task<string> SendActiveAsync(string message)
+        => SelectedBackend == LlmBackend.Gemma4Cli && Gemma4CliService != null
+            ? SendViaGemma4Async(message)
+            : SendMessageAsync(message);
+
+    /// <summary>
+    /// QuickAsk variant: routes through Gemma 4 CLI or <see cref="SendQuickAskAsync(string)"/> depending on selected backend.
+    /// </summary>
+    public Task<string> SendQuickAskActiveAsync(string message)
+        => SelectedBackend == LlmBackend.Gemma4Cli && Gemma4CliService != null
+            ? SendViaGemma4Async(message)
+            : SendQuickAskAsync(message);
+
+    private async Task<string> SendViaGemma4Async(string message)
+    {
+        try
+        {
+            var response = await Gemma4CliService!.ChatAsync(message);
+
+            // Persist the turn (grouped under the current conversation/session) so
+            // Gemma 4 responses are saved just like the classic backend's.
+            if (ChatService != null)
+            {
+                await ChatService.SaveExternalQuestionAnswerAsync(message, response, Gemma4CliService.ModelName);
+            }
+
+            return response;
+        }
+        catch (Exception ex)
+        {
+            return $"[ERROR] Gemma 4 CLI failed: {ex.Message}";
         }
     }
 

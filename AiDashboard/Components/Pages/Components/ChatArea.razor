@@ -8,13 +8,14 @@
     }
 
     <ChatTopBar />
-    <ActiveContextBar />
-    <ChatMessages Messages="@Messages" IsProcessing="@IsProcessing" MessagesContainerRef="@MessagesContainerRef" />
-    <ChatComposer ComposerText="@ComposerText" 
+    <ChatMessages Messages="@Messages" IsProcessing="@IsProcessing" />
+    <ChatComposer ComposerText="@ComposerText"
                   IsProcessing="@IsProcessing"
                   OnComposerTextChanged="@OnComposerTextChanged"
                   OnKeyDown="@OnKeyDown"
-                  OnSendMessage="@OnSendMessage" />
+                  OnSendMessage="@OnSendMessage"
+                  OnFileUploaded="@OnFileUploaded"
+                  OnFileUploadError="@OnFileUploadError" />
 </main>
 
 @code {
@@ -28,9 +29,6 @@
     public string ComposerText { get; set; } = string.Empty;
 
     [Parameter]
-    public ElementReference MessagesContainerRef { get; set; }
-
-    [Parameter]
     public EventCallback<string> OnComposerTextChanged { get; set; }
 
     [Parameter]
@@ -38,4 +36,10 @@
 
     [Parameter]
     public EventCallback OnSendMessage { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnFileUploaded { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnFileUploadError { get; set; }
 }

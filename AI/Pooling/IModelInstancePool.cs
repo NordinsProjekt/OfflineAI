@@ -27,6 +27,13 @@ public interface IModelInstancePool : IDisposable
     int TimeoutMs { get; set; }
 
     /// <summary>
+    /// Maximum pause (ms) between output chunks, after generation has started, before a
+    /// response is considered complete/stalled. Independent of <see cref="TimeoutMs"/>.
+    /// Default: 10 000 ms (10 seconds).
+    /// </summary>
+    int PauseTimeoutMs { get; set; }
+
+    /// <summary>
     /// Pre-warm the pool by loading all instances.
     /// Call this at application startup to avoid cold-start delays.
     /// </summary>

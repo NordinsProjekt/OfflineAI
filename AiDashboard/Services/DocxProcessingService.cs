@@ -9,7 +9,7 @@ namespace AiDashboard.Services;
 /// Service for processing Microsoft Word DOCX files.
 /// Extracts text, tables, headers, footers, and formatting information.
 /// </summary>
-public class DocxProcessingService
+public static class DocxProcessingService
 {
     /// <summary>
     /// Extract all text from a DOCX file uploaded via Blazor InputFile.
@@ -20,8 +20,8 @@ public class DocxProcessingService
     /// <param name="includeFooters">Include footer text in output</param>
     /// <param name="includeTables">Include table text in output</param>
     /// <returns>Success status, extracted text, and any error message</returns>
-    public async Task<(bool Success, string Text, string Error)> ExtractTextAsync(
-        IBrowserFile file, 
+    public static async Task<(bool Success, string Text, string Error)> ExtractTextAsync(
+        IBrowserFile file,
         long maxFileSize = 10485760,
         bool includeHeaders = true,
         bool includeFooters = true,
@@ -86,9 +86,9 @@ public class DocxProcessingService
     /// <summary>
     /// Extract text from the main document body.
     /// </summary>
-    private void ExtractBodyText(MainDocumentPart mainPart, StringBuilder textBuilder, bool includeTables)
+    private static void ExtractBodyText(MainDocumentPart mainPart, StringBuilder textBuilder, bool includeTables)
     {
-        var body = mainPart.Document.Body;
+        var body = mainPart.Document?.Body;
         if (body == null) return;
 
         foreach (var element in body.Elements())
@@ -109,7 +109,7 @@ public class DocxProcessingService
     /// <summary>
     /// Extract text from a paragraph element.
     /// </summary>
-    private void ExtractParagraphText(Paragraph paragraph, StringBuilder textBuilder)
+    private static void ExtractParagraphText(Paragraph paragraph, StringBuilder textBuilder)
     {
         var paragraphText = GetParagraphText(paragraph);
         
@@ -122,7 +122,7 @@ public class DocxProcessingService
     /// <summary>
     /// Get text from a paragraph including formatting.
     /// </summary>
-    private string GetParagraphText(Paragraph paragraph)
+    private static string GetParagraphText(Paragraph paragraph)
     {
         var textBuilder = new StringBuilder();
 
@@ -140,7 +140,7 @@ public class DocxProcessingService
     /// <summary>
     /// Extract text from a table.
     /// </summary>
-    private void ExtractTableText(Table table, StringBuilder textBuilder)
+    private static void ExtractTableText(Table table, StringBuilder textBuilder)
     {
         textBuilder.AppendLine("\n--- Table ---");
 
@@ -171,7 +171,7 @@ public class DocxProcessingService
     /// <summary>
     /// Get text from a table cell.
     /// </summary>
-    private string GetCellText(TableCell cell)
+    private static string GetCellText(TableCell cell)
     {
         var textBuilder = new StringBuilder();
 
@@ -191,17 +191,15 @@ public class DocxProcessingService
     /// <summary>
     /// Extract text from document headers.
     /// </summary>
-    private void ExtractHeaderText(WordprocessingDocument doc, StringBuilder textBuilder)
+    private static void ExtractHeaderText(WordprocessingDocument doc, StringBuilder textBuilder)
     {
         if (doc.MainDocumentPart?.HeaderParts == null) return;
 
-        foreach (var headerPart in doc.MainDocumentPart.HeaderParts)
+        foreach (var header in doc.MainDocumentPart.HeaderParts.Select(headerPart => headerPart.Header).OfType<Header>())
         {
-            if (headerPart.Header == null) continue;
-
             textBuilder.AppendLine("--- Header ---");
-            
-            foreach (var paragraph in headerPart.Header.Elements<Paragraph>())
+
+            foreach (var paragraph in header.Elements<Paragraph>())
             {
                 var paragraphText = GetParagraphText(paragraph);
                 if (!string.IsNullOrWhiteSpace(paragraphText))
@@ -217,17 +215,15 @@ public class DocxProcessingService
     /// <summary>
     /// Extract text from document footers.
     /// </summary>
-    private void ExtractFooterText(WordprocessingDocument doc, StringBuilder textBuilder)
+    private static void ExtractFooterText(WordprocessingDocument doc, StringBuilder textBuilder)
     {
         if (doc.MainDocumentPart?.FooterParts == null) return;
 
-        foreach (var footerPart in doc.MainDocumentPart.FooterParts)
+        foreach (var footer in doc.MainDocumentPart.FooterParts.Select(footerPart => footerPart.Footer).OfType<Footer>())
         {
-            if (footerPart.Footer == null) continue;
-
             textBuilder.AppendLine("\n--- Footer ---");
-            
-            foreach (var paragraph in footerPart.Footer.Elements<Paragraph>())
+
+            foreach (var paragraph in footer.Elements<Paragraph>())
             {
                 var paragraphText = GetParagraphText(paragraph);
                 if (!string.IsNullOrWhiteSpace(paragraphText))
@@ -243,7 +239,7 @@ public class DocxProcessingService
     /// <summary>
     /// Extract document metadata (properties).
     /// </summary>
-    public async Task<DocxMetadata> ExtractMetadataAsync(IBrowserFile file, long maxFileSize = 10485760)
+    public static async Task<DocxMetadata> ExtractMetadataAsync(IBrowserFile file, long maxFileSize = 10485760)
     {
         var metadata = new DocxMetadata();
 
@@ -267,10 +263,11 @@ public class DocxProcessingService
             metadata.Modified = coreProps.Modified;
             
             // Count pages, paragraphs, etc.
-            if (doc.MainDocumentPart?.Document.Body != null)
+            var body = doc.MainDocumentPart?.Document?.Body;
+            if (body != null)
             {
-                metadata.ParagraphCount = doc.MainDocumentPart.Document.Body.Elements<Paragraph>().Count();
-                metadata.TableCount = doc.MainDocumentPart.Document.Body.Elements<Table>().Count();
+                metadata.ParagraphCount = body.Elements<Paragraph>().Count();
+                metadata.TableCount = body.Elements<Table>().Count();
             }
         }
         catch (Exception ex)
@@ -284,7 +281,7 @@ public class DocxProcessingService
     /// <summary>
     /// Check if a file is a valid DOCX file without fully parsing it.
     /// </summary>
-    public async Task<bool> IsValidDocxAsync(IBrowserFile file, long maxFileSize = 10485760)
+    public static async Task<bool> IsValidDocxAsync(IBrowserFile file, long maxFileSize = 10485760)
     {
         try
         {

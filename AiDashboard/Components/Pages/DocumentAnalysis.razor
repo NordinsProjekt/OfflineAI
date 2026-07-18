@@ -8,6 +8,7 @@
 @inject IJSRuntime JSRuntime
 
 @using System.IO
+@using UglyToad.PdfPig
 
 <PageTitle>Document Analysis - OfflineAI</PageTitle>
 
@@ -17,7 +18,7 @@
             &larr; Back to Home
         </button>
         <h1>Document Analysis</h1>
-        <p class="oa-workflow-subtitle">Upload a Swedish YH course plan and extract structured objectives</p>
+        <p class="oa-workflow-subtitle">Upload any document and choose how you want to analyze it</p>
     </div>
 
     <div class="oa-workflow-content">
@@ -32,10 +33,10 @@
                 {
                     <div class="oa-upload-prompt">
                         <div class="oa-upload-icon">[+]</div>
-                        <h2>Drop your YH course plan here</h2>
+                        <h2>Drop your document here</h2>
                         <p>or click to browse</p>
-                        <InputFile @ref="fileInput" id="file-input" OnChange="HandleFileSelected" class="oa-file-input" accept=".txt,.doc,.docx" />
-                        <p class="oa-upload-hint">Supports: TXT, DOCX (Max 10MB)</p>
+                        <InputFile id="file-input" OnChange="HandleFileSelected" class="oa-file-input" accept=".txt,.doc,.docx,.pdf" />
+                        <p class="oa-upload-hint">Supports: TXT, DOCX, PDF (Max 10MB)</p>
                     </div>
                 }
                 else
@@ -78,8 +79,24 @@
             @if (uploadedFile != null && !isAnalyzing && string.IsNullOrEmpty(errorMessage))
             {
                 <div class="oa-analysis-options">
-                    <h3>Vad vill du göra?</h3>
+                    <h3>What would you like to do with this document?</h3>
+                    <p class="oa-options-subtitle">Choose an analysis type below</p>
+                    
                     <div class="oa-option-grid">
+                        @* Generic Options - Always Shown *@
+                        <button class="oa-option-button" @onclick='@(() => AnalyzeDocument("summarize"))'>
+                            <span class="oa-option-icon">[SUM]</span>
+                            <span class="oa-option-text">Summarize</span>
+                            <span class="oa-option-description">Get a concise summary</span>
+                        </button>
+
+                        <button class="oa-option-button" @onclick='@(() => AnalyzeDocument("qa"))'>
+                            <span class="oa-option-icon">[Q&A]</span>
+                            <span class="oa-option-text">Ask Questions</span>
+                            <span class="oa-option-description">Interactive Q&A mode</span>
+                        </button>
+
+                        @* Recommended Actions from TypeDetector *@
                         @foreach (var action in recommendedActions)
                         {
                             <button class="oa-option-button @(action.IsRecommended ? "oa-featured" : "")" 
@@ -109,7 +126,7 @@
                 @if (showAbortButton)
                 {
                     <p style="margin-top: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">
-                        Analysering pågår... Du kan avbryta om det tar för lång tid.
+                        Analysering pÃ¥gÃ¥r sedan @((int)(DateTime.UtcNow - analysisStartTime).TotalSeconds)s... Du kan avbryta om det tar fÃ¶r lÃ¥ng tid.
                     </p>
                     <button class="oa-abort-button" @onclick="AbortAnalysis">
                         Avbryt analys
@@ -127,7 +144,7 @@
                     <div class="oa-kursplan-summary">
                         <div class="oa-summary-stat">
                             <span class="oa-stat-number">@kursplanResult.TotalItems</span>
-                            <span class="oa-stat-label">KURSMÅL TOTALT</span>
+                            <span class="oa-stat-label">KURSMÃ…L TOTALT</span>
                         </div>
                         <div class="oa-summary-stat">
                             <span class="oa-stat-number">@kursplanResult.Sections.Count</span>
@@ -135,20 +152,83 @@
                         </div>
                     </div>
                 }
-                <div class="oa-result-box">
-                    <pre>@analysisResult</pre>
-                </div>
-                <div class="oa-result-actions">
-                    <button class="oa-action-button" @onclick="CopyResults">
-                        Kopiera
-                    </button>
-                    <button class="oa-action-button" @onclick="DownloadResults">
-                        Ladda ner
-                    </button>
-                    <button class="oa-action-button" @onclick="AnalyzeAnother">
-                        Analysera annat
-                    </button>
-                </div>
+                
+                @if (isQAMode)
+                {
+                    @* Q&A Interactive Mode *@
+                    <div class="oa-qa-container">
+                        @* Q&A History *@
+                        @if (qaHistory.Count > 0)
+                        {
+                            <div class="oa-qa-history">
+                                @foreach (var (question, answer) in qaHistory)
+                                {
+                                    <div class="oa-qa-exchange">
+                                        <div class="oa-qa-question">
+                                            <span class="oa-qa-label">Q:</span>
+                                            <span class="oa-qa-text">@question</span>
+                                        </div>
+                                        <div class="oa-qa-answer">
+                                            <span class="oa-qa-label">A:</span>
+                                            <span class="oa-qa-text">@answer</span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+
+                        @* Q&A Input *@
+                        <div class="oa-qa-input-section">
+                            <h3>Ask a question about the document</h3>
+                            <div class="oa-qa-input-box">
+                                <input type="text" 
+                                       class="oa-qa-input" 
+                                       placeholder="Type your question here..."
+                                       @bind="currentQuestion"
+                                       @bind:event="oninput"
+                                       @onkeypress="HandleQuestionKeyPress"
+                                       disabled="@isAnalyzing" />
+                                <button class="oa-qa-send-btn" 
+                                        @onclick="AskQuestion"
+                                        disabled="@(isAnalyzing || string.IsNullOrWhiteSpace(currentQuestion))">
+                                    Ask
+                                </button>
+                            </div>
+                        </div>
+
+                        @* Exit Q&A Mode *@
+                        <div class="oa-qa-actions">
+                            <button class="oa-action-button" @onclick="ExitQAMode">
+                                Exit Q&A Mode
+                            </button>
+                            <button class="oa-action-button" @onclick="ClearQAHistory">
+                                Clear History
+                            </button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    @* Regular Result Display *@
+                    <div class="oa-result-box">
+                        <pre>@analysisResult</pre>
+                    </div>
+                }
+                
+                @if (!isQAMode)
+                {
+                    <div class="oa-result-actions">
+                        <button class="oa-action-button" @onclick="CopyResults">
+                            Kopiera
+                        </button>
+                        <button class="oa-action-button" @onclick="DownloadResults">
+                            Ladda ner
+                        </button>
+                        <button class="oa-action-button" @onclick="AnalyzeAnother">
+                            Analysera annat
+                        </button>
+                    </div>
+                }
             </div>
         }
     </div>
@@ -156,7 +236,6 @@
 
 @code {
     private IBrowserFile? uploadedFile;
-    private InputFile? fileInput;
     private bool isDragOver;
     private bool isAnalyzing;
     private string analysisStatus = "";
@@ -174,6 +253,12 @@
     private DateTime analysisStartTime;
     private bool showAbortButton = false;
     private const int MaxAnalysisTimeMs = 300000; // 5 minutes
+    private const long MaxUploadSizeBytes = 10 * 1024 * 1024; // 10 MB
+
+    // Q&A mode state
+    private bool isQAMode = false;
+    private string currentQuestion = "";
+    private readonly List<(string Question, string Answer)> qaHistory = [];
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -217,25 +302,42 @@
     {
         if (file == null) return;
 
-        analysisStatus = $"Läser {file.Name}...";
+        analysisStatus = $"LÃ¤ser {file.Name}...";
         
         try
         {
             var extension = Path.GetExtension(file.Name).ToLowerInvariant();
-            
+
+            // MaxUploadSizeBytes (10 MB) below is the reviewed, intentional cap for all three
+            // branches (S5693 severity for *.razor is set to none in .editorconfig â€” see comment there).
             if (extension == ".txt")
             {
-                using var stream = file.OpenReadStream(maxAllowedSize: 10485760);
+                using var stream = file.OpenReadStream(MaxUploadSizeBytes);
                 using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
                 fullDocumentText = await reader.ReadToEndAsync();
             }
             else if (extension == ".docx" || extension == ".doc")
             {
                 using var memoryStream = new MemoryStream();
-                await file.OpenReadStream(maxAllowedSize: 10485760).CopyToAsync(memoryStream);
+                await file.OpenReadStream(MaxUploadSizeBytes).CopyToAsync(memoryStream);
                 memoryStream.Position = 0;
-                
+
                 var (success, text, error) = ExtractTextFromDocxStream(memoryStream);
+                if (!success)
+                {
+                    errorMessage = error;
+                    fullDocumentText = "";
+                    return;
+                }
+                fullDocumentText = text;
+            }
+            else if (extension == ".pdf")
+            {
+                using var memoryStream = new MemoryStream();
+                await file.OpenReadStream(MaxUploadSizeBytes).CopyToAsync(memoryStream);
+                memoryStream.Position = 0;
+
+                var (success, text, error) = ExtractTextFromPdfStream(memoryStream);
                 if (!success)
                 {
                     errorMessage = error;
@@ -246,14 +348,14 @@
             }
             else
             {
-                errorMessage = $"Filtypen {extension} stöds inte. Använd .txt eller .docx";
+                errorMessage = $"File type {extension} is not supported. Use .txt, .docx, or .pdf";
                 fullDocumentText = "";
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(fullDocumentText))
             {
-                errorMessage = "Kunde inte extrahera text från filen.";
+                errorMessage = "Kunde inte extrahera text frÃ¥n filen.";
                 return;
             }
 
@@ -263,12 +365,12 @@
         }
         catch (Exception ex)
         {
-            errorMessage = $"Fel vid läsning av fil: {ex.Message}";
+            errorMessage = $"Fel vid lÃ¤sning av fil: {ex.Message}";
             fullDocumentText = "";
         }
     }
 
-    private (bool Success, string Text, string Error) ExtractTextFromDocxStream(MemoryStream stream)
+    private static (bool Success, string Text, string Error) ExtractTextFromDocxStream(MemoryStream stream)
     {
         try
         {
@@ -280,17 +382,15 @@
             }
 
             var textBuilder = new System.Text.StringBuilder();
-            var body = doc.MainDocumentPart.Document.Body;
+            var body = doc.MainDocumentPart.Document?.Body;
             
             if (body != null)
             {
-                foreach (var paragraph in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>())
+                foreach (var text in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Paragraph>()
+                             .Select(paragraph => paragraph.InnerText)
+                             .Where(text => !string.IsNullOrWhiteSpace(text)))
                 {
-                    var text = paragraph.InnerText;
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        textBuilder.AppendLine(text);
-                    }
+                    textBuilder.AppendLine(text);
                 }
 
                 foreach (var table in body.Elements<DocumentFormat.OpenXml.Wordprocessing.Table>())
@@ -315,14 +415,41 @@
             
             if (string.IsNullOrWhiteSpace(extractedText))
             {
-                return (false, "", "Ingen textinnehåll hittades i DOCX-filen");
+                return (false, "", "Ingen textinnehÃ¤ll hittades i DOCX-filen");
             }
 
             return (true, extractedText, "");
         }
         catch (Exception ex)
         {
-            return (false, "", $"Fel vid läsning av DOCX: {ex.Message}");
+            return (false, "", $"Fel vid lÃ¤sning av DOCX: {ex.Message}");
+        }
+    }
+
+    private static (bool Success, string Text, string Error) ExtractTextFromPdfStream(MemoryStream stream)
+    {
+        try
+        {
+            using var pdf = PdfDocument.Open(stream);
+            var textBuilder = new System.Text.StringBuilder();
+
+            foreach (var page in pdf.GetPages())
+            {
+                textBuilder.AppendLine(page.Text);
+            }
+
+            var extractedText = textBuilder.ToString().Trim();
+
+            if (string.IsNullOrWhiteSpace(extractedText))
+            {
+                return (false, "", "Ingen textinnehÃ¤ll hittades i PDF-filen");
+            }
+
+            return (true, extractedText, "");
+        }
+        catch (Exception ex)
+        {
+            return (false, "", $"Fel vid lÃ¤sning av PDF: {ex.Message}");
         }
     }
 
@@ -342,7 +469,7 @@
     {
         if (string.IsNullOrEmpty(fullDocumentText))
         {
-            errorMessage = "Ingen dokumenttext tillgänglig. Ladda upp en fil.";
+            errorMessage = "Ingen dokumenttext tillgÃ¤nglig. Ladda upp en fil.";
             return;
         }
 
@@ -369,11 +496,25 @@
 
         try
         {
-            await AnalyzeKursmal();
+            switch (analysisType)
+            {
+                case "summarize":
+                    await AnalyzeSummarize();
+                    break;
+                    
+                case "qa":
+                    await AnalyzeQA();
+                    break;
+                    
+                default:
+                    // Handle Swedish kursplan actions (kunskapsmal, etc.)
+                    await AnalyzeKursmal();
+                    break;
+            }
         }
         catch (OperationCanceledException)
         {
-            analysisResult = "Analys avbruten av användaren.";
+            analysisResult = "Analys avbruten av anvÃ¤ndaren.";
             analysisStatus = "Avbryten";
             analysisSubStatus = "";
         }
@@ -401,9 +542,169 @@
         StateHasChanged();
     }
 
+    private async Task AnalyzeSummarize()
+    {
+        analysisStatus = "Generating summary...";
+        analysisSubStatus = "Processing document with AI";
+        StateHasChanged();
+        await Task.Delay(300);
+
+        // Check if chat service is available
+        if (Dashboard.ChatService == null)
+        {
+            analysisResult = "ERROR\n\nAI Chat Service is not initialized. Please ensure the LLM is loaded.";
+            return;
+        }
+
+        try
+        {
+            // Create a summarization prompt
+            var prompt = $@"Please provide a concise summary of the following document. Focus on the main points, key information, and overall purpose.
+
+Document to summarize:
+
+{fullDocumentText}
+
+Provide a clear, well-structured summary in 3-5 paragraphs.";
+
+            // Update status
+            analysisStatus = "AI is analyzing the document...";
+            StateHasChanged();
+
+            // Get current generation settings
+            var settings = Dashboard.SettingsService.ToGenerationSettings();
+
+            // Get summary from LLM
+            var summary = await Dashboard.ChatService.SendMessageAsync(
+                message: prompt,
+                ragMode: false,  // Don't use RAG for summarization
+                debugMode: false,
+                showPerformanceMetrics: false,
+                generationSettings: settings,
+                personality: null,
+                useGpu: true,
+                gpuLayers: 35
+            );
+
+            // Format the result
+            analysisResult = $"DOCUMENT SUMMARY\n\n{summary}";
+            
+            analysisStatus = "Summary complete!";
+            analysisSubStatus = "";
+        }
+        catch (Exception ex)
+        {
+            analysisResult = $"ERROR\n\nFailed to generate summary: {ex.Message}";
+            analysisStatus = "Summary failed";
+        }
+    }
+
+    private async Task AnalyzeQA()
+    {
+        analysisStatus = "Initializing Q&A mode...";
+        StateHasChanged();
+        await Task.Delay(300);
+
+        // Check if chat service is available
+        if (Dashboard.ChatService == null)
+        {
+            analysisResult = "ERROR\n\nAI Chat Service is not initialized. Please ensure the LLM is loaded.";
+            return;
+        }
+
+        // Enable Q&A mode
+        isQAMode = true;
+        qaHistory.Clear();
+        currentQuestion = "";
+        analysisResult = "Q&A_MODE_ACTIVE"; // Marker to show results section
+
+        analysisStatus = "Q&A mode ready";
+        analysisSubStatus = "Ask questions about your document";
+    }
+
+    private async Task AskQuestion()
+    {
+        if (string.IsNullOrWhiteSpace(currentQuestion) || Dashboard.ChatService == null)
+            return;
+
+        var question = currentQuestion.Trim();
+        currentQuestion = ""; // Clear input
+
+        isAnalyzing = true;
+        analysisStatus = $"Processing question...";
+        StateHasChanged();
+
+        try
+        {
+            // Create Q&A prompt with document context
+            var prompt = $@"Based on the following document, please answer this question:
+
+Question: {question}
+
+Document content:
+{fullDocumentText}
+
+Provide a clear, accurate answer based only on the information in the document. If the answer is not in the document, please say so.";
+
+            // Get current generation settings
+            var settings = Dashboard.SettingsService.ToGenerationSettings();
+
+            // Get answer from LLM
+            var answer = await Dashboard.ChatService.SendMessageAsync(
+                message: prompt,
+                ragMode: false,
+                debugMode: false,
+                showPerformanceMetrics: false,
+                generationSettings: settings,
+                personality: null,
+                useGpu: true,
+                gpuLayers: 35
+            );
+
+            // Add to history
+            qaHistory.Add((question, answer));
+
+            analysisStatus = $"Ready for next question ({qaHistory.Count} asked)";
+            analysisSubStatus = "";
+        }
+        catch (Exception ex)
+        {
+            qaHistory.Add((question, $"ERROR: {ex.Message}"));
+            analysisStatus = "Error processing question";
+        }
+        finally
+        {
+            isAnalyzing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleQuestionKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(currentQuestion) && !isAnalyzing)
+        {
+            await AskQuestion();
+        }
+    }
+
+    private void ExitQAMode()
+    {
+        isQAMode = false;
+        analysisResult = ""; // Clear results
+        qaHistory.Clear();
+        currentQuestion = "";
+    }
+
+    private void ClearQAHistory()
+    {
+        qaHistory.Clear();
+        analysisStatus = "Q&A mode ready";
+        analysisSubStatus = "Ask questions about your document";
+    }
+
     private async Task AnalyzeKursmal()
     {
-        analysisStatus = "Extraherar kursmål...";
+        analysisStatus = "Extraherar kursmÃ¥l...";
         StateHasChanged();
         await Task.Delay(300);
 
@@ -412,7 +713,7 @@
 
         if (kursplanResult.TotalItems > 0)
         {
-            analysisStatus = $"Hittade {kursplanResult.TotalItems} kursmål i {kursplanResult.Sections.Count} sektioner";
+            analysisStatus = $"Hittade {kursplanResult.TotalItems} kursmÃ¥l i {kursplanResult.Sections.Count} sektioner";
             analysisSubStatus = "";
             StateHasChanged();
             await Task.Delay(200);
@@ -422,17 +723,17 @@
         }
         else
         {
-            analysisStatus = "Inga strukturerade mål hittades";
-            analysisResult = "Kunde inte hitta Kunskaper, Färdigheter eller Kompetenser i dokumentet.\n\n";
-            analysisResult += "Förväntad struktur:\n#Kunskaper\n#Färdigheter\n#Kompetenser\n\n";
-            analysisResult += "Råtext (första 1000 tecken):\n\n";
+            analysisStatus = "Inga strukturerade mÃ¥l hittades";
+            analysisResult = "Kunde inte hitta Kunskaper, FÃ¤rdigheter eller Kompetenser i dokumentet.\n\n";
+            analysisResult += "FÃ¶rvÃ¤ntad struktur:\n#Kunskaper\n#FÃ¤rdigheter\n#Kompetenser\n\n";
+            analysisResult += "RÃ¥text (fÃ¶rsta 1000 tecken):\n\n";
             analysisResult += fullDocumentText.Length > 1000 
                 ? fullDocumentText.Substring(0, 1000) + "..." 
                 : fullDocumentText;
         }
     }
 
-    private string GetTypeClass(DocumentTypeDetector.DocumentType type)
+    private static string GetTypeClass(DocumentTypeDetector.DocumentType type)
     {
         return type switch
         {
@@ -443,7 +744,7 @@
         };
     }
 
-    private string GetActionIcon(string actionId)
+    private static string GetActionIcon(string actionId)
     {
         return actionId switch
         {
@@ -459,7 +760,7 @@
     {
         if (string.IsNullOrEmpty(analysisResult))
         {
-            errorMessage = "Ingen innehåll att kopiera.";
+            errorMessage = "Ingen innehÃ¤ll att kopiera.";
             return;
         }
 
@@ -483,7 +784,7 @@
     {
         if (string.IsNullOrEmpty(analysisResult))
         {
-            errorMessage = "Ingen innehåll att ladda ner.";
+            errorMessage = "Ingen innehÃ¤ll att ladda ner.";
             return;
         }
 
@@ -511,7 +812,7 @@
         kursplanResult = null;
     }
 
-    private string FormatFileSize(long bytes)
+    private static string FormatFileSize(long bytes)
     {
         string[] sizes = ["B", "KB", "MB", "GB"];
         double len = bytes;

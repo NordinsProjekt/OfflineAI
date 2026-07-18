@@ -11,7 +11,7 @@ namespace Presentation.AiDashboard.Tests.Components;
 /// </summary>
 public class ModelControlsSectionTests : TestContext
 {
-    private DashboardState CreateMockDashboardState()
+    private static DashboardState CreateMockDashboardState()
     {
         var state = new DashboardState();
         // The "model" section is expanded by default, but let's ensure it

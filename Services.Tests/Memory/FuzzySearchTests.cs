@@ -12,7 +12,7 @@ public class FuzzySearchTests
     /// Calculates Levenshtein distance between two strings.
     /// Identical to the production implementation in DatabaseVectorMemory.
     /// </summary>
-    private static int CalculateLevenshteinDistance(string source, string target)
+    private static int CalculateLevenshteinDistance(string? source, string? target)
     {
         if (string.IsNullOrEmpty(source))
             return target?.Length ?? 0;
@@ -84,8 +84,8 @@ public class FuzzySearchTests
     public void LevenshteinDistance_IdenticalSwedishWords_ReturnsZero()
     {
         // Arrange
-        var str1 = "återvinning";
-        var str2 = "återvinning";
+        var str1 = "Ã¥tervinning";
+        var str2 = "Ã¥tervinning";
 
         // Act
         var distance = CalculateLevenshteinDistance(str1, str2);
@@ -161,8 +161,8 @@ public class FuzzySearchTests
     [Fact]
     public void LevenshteinDistance_SwedishTypo_Atervinning_Returns1()
     {
-        // Arrange - Common typo: 'Å' -> 'A'
-        var correct = "Återvinning";
+        // Arrange - Common typo: 'Ã…' -> 'A'
+        var correct = "Ã…tervinning";
         var typo = "Atervinning";
 
         // Act
@@ -410,8 +410,8 @@ public class FuzzySearchTests
             .ToList();
 
         // Assert
-        distances.First().Word.Should().Be("adapter");
-        distances.First().Distance.Should().Be(0);
+        distances[0].Word.Should().Be("adapter");
+        distances[0].Distance.Should().Be(0);
     }
 
     [Fact]
@@ -493,7 +493,7 @@ public class FuzzySearchTests
         {
             new { Query = "batteri", Target = "batterier", Expected = 2 },
             new { Query = "adaper", Target = "adapter", Expected = 1 },
-            new { Query = "återvining", Target = "återvinning", Expected = 1 },
+            new { Query = "Ã¥tervining", Target = "Ã¥tervinning", Expected = 1 },
             new { Query = "elektronk", Target = "elektronik", Expected = 1 } // Just insert 'i'
         };
 
@@ -601,8 +601,8 @@ public class FuzzySearchTests
     public void LevenshteinDistance_LongStrings_ShouldCompleteQuickly()
     {
         // Arrange
-        var str1 = "Sopsortering för elektronisk utrustning och batterier i återvinningscentraler";
-        var str2 = "Sopsortering för elektronik utrustning och batteri i återvinningscentralen";
+        var str1 = "Sopsortering fÃ¶r elektronisk utrustning och batterier i Ã¥tervinningscentraler";
+        var str2 = "Sopsortering fÃ¶r elektronik utrustning och batteri i Ã¥tervinningscentralen";
         
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
@@ -698,14 +698,14 @@ public class FuzzySearchTests
     public void LevenshteinDistance_SwedishCharacters_Works()
     {
         // Arrange
-        var str1 = "återvinning";
+        var str1 = "Ã¥tervinning";
         var str2 = "atervinning";
 
         // Act
         var distance = CalculateLevenshteinDistance(str1, str2);
 
         // Assert
-        distance.Should().Be(1); // å -> a
+        distance.Should().Be(1); // Ã¥ -> a
     }
 
     #endregion

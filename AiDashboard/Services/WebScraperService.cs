@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
@@ -14,7 +15,9 @@ public class WebScraperService : IWebScraperService
     private readonly ILogger<WebScraperService>? _logger;
 
     private static readonly string[] ExcludedTags = { "script", "style", "nav", "footer", "header", "aside", "iframe", "noscript" };
-    private static readonly int DefaultMaxLength = 10000;
+
+    // Cap redirect hops so a chain can't be used to stall the request or evade the per-hop check.
+    private const int MaxRedirects = 5;
 
     public WebScraperService(IHttpClientFactory httpClientFactory, ILogger<WebScraperService>? logger = null)
     {
@@ -35,6 +38,120 @@ public class WebScraperService : IWebScraperService
         return uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps;
     }
 
+    /// <summary>
+    /// Issues the GET while defending against SSRF: it re-checks the scheme and resolves the host
+    /// on every hop, blocking any URL that resolves to a loopback/private/link-local/reserved
+    /// address, and follows redirects manually so a public URL can't 3xx-redirect the request to
+    /// an internal target. The named "WebScraper" HttpClient must be configured with
+    /// AllowAutoRedirect = false (see Program.cs) for the manual, validated redirect handling here
+    /// to take effect.
+    /// </summary>
+    private async Task<(HttpResponseMessage? Response, string? Error)> FetchWithSsrfGuardAsync(
+        string url, CancellationToken cancellationToken)
+    {
+        var currentUrl = url;
+
+        for (var hop = 0; hop <= MaxRedirects; hop++)
+        {
+            if (!Uri.TryCreate(currentUrl, UriKind.Absolute, out var uri)
+                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                return (null, "Invalid or non-HTTP(S) URL in the redirect chain.");
+            }
+
+            if (!await IsHostAllowedAsync(uri, cancellationToken))
+            {
+                return (null, "The URL resolves to a private, loopback, or otherwise non-public address and was blocked.");
+            }
+
+            var response = await _httpClient.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+            if (IsRedirect(response.StatusCode) && response.Headers.Location is not null)
+            {
+                var location = response.Headers.Location;
+                var next = location.IsAbsoluteUri ? location : new Uri(uri, location);
+                response.Dispose();
+                currentUrl = next.ToString();
+                continue;
+            }
+
+            return (response, null);
+        }
+
+        return (null, $"Too many redirects (more than {MaxRedirects}).");
+    }
+
+    private static bool IsRedirect(HttpStatusCode code) =>
+        code is HttpStatusCode.MovedPermanently or HttpStatusCode.Found
+            or HttpStatusCode.SeeOther or HttpStatusCode.TemporaryRedirect
+            or HttpStatusCode.PermanentRedirect;
+
+    /// <summary>
+    /// Resolves the host (or parses it as an IP literal) and returns false if any resolved address
+    /// is in a range that must not be reachable via the scraper.
+    /// </summary>
+    private static async Task<bool> IsHostAllowedAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        IPAddress[] addresses;
+        if (IPAddress.TryParse(uri.Host, out var literal))
+        {
+            addresses = new[] { literal };
+        }
+        else
+        {
+            try
+            {
+                addresses = await Dns.GetHostAddressesAsync(uri.Host, cancellationToken);
+            }
+            catch (SocketException)
+            {
+                return false;
+            }
+        }
+
+        return addresses.Length > 0 && addresses.All(a => !IsBlockedAddress(a));
+    }
+
+    /// <summary>
+    /// True for loopback, private (RFC1918), link-local, CGNAT, multicast/reserved, and IPv6
+    /// unique-local/link-local addresses — i.e. anything that shouldn't be reachable through a
+    /// user-supplied scrape URL.
+    /// </summary>
+    private static bool IsBlockedAddress(IPAddress ip)
+    {
+        if (IPAddress.IsLoopback(ip))
+            return true;
+
+        if (ip.IsIPv4MappedToIPv6)
+            ip = ip.MapToIPv4();
+
+        if (ip.AddressFamily == AddressFamily.InterNetwork)
+        {
+            var b = ip.GetAddressBytes();
+            return b[0] == 0                                    // 0.0.0.0/8 ("this network")
+                || b[0] == 10                                   // 10.0.0.0/8 private
+                || b[0] == 127                                  // 127.0.0.0/8 loopback
+                || (b[0] == 169 && b[1] == 254)                 // 169.254.0.0/16 link-local (incl. cloud metadata)
+                || (b[0] == 172 && b[1] >= 16 && b[1] <= 31)    // 172.16.0.0/12 private
+                || (b[0] == 192 && b[1] == 168)                 // 192.168.0.0/16 private
+                || (b[0] == 100 && b[1] >= 64 && b[1] <= 127)   // 100.64.0.0/10 CGNAT
+                || b[0] >= 224;                                 // 224.0.0.0/4 multicast + 240/4 reserved
+        }
+
+        if (ip.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            if (ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || ip.IsIPv6Multicast)
+                return true;
+            if (IPAddress.IPv6Loopback.Equals(ip))
+                return true;
+
+            var b = ip.GetAddressBytes();
+            return (b[0] & 0xFE) == 0xFC; // fc00::/7 unique local
+        }
+
+        return true; // unknown address family — block by default
+    }
+
     public async Task<WebScraperResult> ScrapeAsync(string url, CancellationToken cancellationToken = default)
     {
         var result = new WebScraperResult { Url = url };
@@ -50,7 +167,16 @@ public class WebScraperService : IWebScraperService
 
             _logger?.LogInformation("Scraping URL: {Url}", url);
 
-            var response = await _httpClient.GetAsync(url, cancellationToken);
+            var (response, fetchError) = await FetchWithSsrfGuardAsync(url, cancellationToken);
+            if (response is null)
+            {
+                result.Success = false;
+                result.ErrorMessage = fetchError ?? "Request blocked";
+                _logger?.LogWarning("Blocked or failed scrape of {Url}: {Error}", url, fetchError);
+                return result;
+            }
+
+            using var _ = response;
             result.StatusCode = (int)response.StatusCode;
 
             if (!response.IsSuccessStatusCode)
@@ -157,7 +283,7 @@ public class WebScraperService : IWebScraperService
         return context;
     }
 
-    private string ExtractTitle(HtmlDocument doc)
+    private static string ExtractTitle(HtmlDocument doc)
     {
         var titleNode = doc.DocumentNode.SelectSingleNode("//title");
         if (titleNode != null)
@@ -170,7 +296,7 @@ public class WebScraperService : IWebScraperService
         return "Untitled Page";
     }
 
-    private Dictionary<string, string> ExtractMetadata(HtmlDocument doc)
+    private static Dictionary<string, string> ExtractMetadata(HtmlDocument doc)
     {
         var metadata = new Dictionary<string, string>();
 
@@ -179,8 +305,10 @@ public class WebScraperService : IWebScraperService
         {
             foreach (var meta in metaTags)
             {
-                var name = meta.GetAttributeValue("name", null) ?? meta.GetAttributeValue("property", null);
-                var content = meta.GetAttributeValue("content", null);
+                var name = meta.GetAttributeValue("name", string.Empty);
+                if (string.IsNullOrEmpty(name))
+                    name = meta.GetAttributeValue("property", string.Empty);
+                var content = meta.GetAttributeValue("content", string.Empty);
 
                 if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(content))
                 {
@@ -196,7 +324,7 @@ public class WebScraperService : IWebScraperService
         return metadata;
     }
 
-    private List<string> ExtractHeaders(HtmlDocument doc)
+    private static List<string> ExtractHeaders(HtmlDocument doc)
     {
         var headers = new List<string>();
         var headerTags = new[] { "h1", "h2", "h3", "h4", "h5", "h6" };
@@ -220,7 +348,7 @@ public class WebScraperService : IWebScraperService
         return headers;
     }
 
-    private List<string> ExtractLinks(HtmlDocument doc, string baseUrl)
+    private static List<string> ExtractLinks(HtmlDocument doc, string baseUrl)
     {
         var links = new List<string>();
         var linkNodes = doc.DocumentNode.SelectNodes("//a[@href]");
@@ -229,7 +357,7 @@ public class WebScraperService : IWebScraperService
         {
             foreach (var link in linkNodes)
             {
-                var href = link.GetAttributeValue("href", null);
+                var href = link.GetAttributeValue("href", string.Empty);
                 if (!string.IsNullOrEmpty(href))
                 {
                     try
@@ -251,7 +379,7 @@ public class WebScraperService : IWebScraperService
         return links;
     }
 
-    private string ExtractTextContent(HtmlDocument doc)
+    private static string ExtractTextContent(HtmlDocument doc)
     {
         var body = doc.DocumentNode.SelectSingleNode("//body") ?? doc.DocumentNode;
 

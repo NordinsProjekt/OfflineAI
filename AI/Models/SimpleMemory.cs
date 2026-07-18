@@ -6,7 +6,7 @@ namespace Application.AI.Models;
 
 public class SimpleMemory : ILlmMemory
 {
-    private List<IMemoryFragment> _memory = new List<IMemoryFragment>();
+    private readonly List<IMemoryFragment> _memory = new List<IMemoryFragment>();
     
     public void ImportMemory(IMemoryFragment section)
     {

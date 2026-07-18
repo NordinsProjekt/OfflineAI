@@ -91,7 +91,8 @@ public static class DatabaseConnectionTester
             command.CommandText = "SELECT COUNT(1) FROM sys.databases WHERE name = @DatabaseName";
             command.Parameters.AddWithValue("@DatabaseName", databaseName);
             
-            var exists = (int)await command.ExecuteScalarAsync() > 0;
+            var scalarResult = await command.ExecuteScalarAsync();
+            var exists = scalarResult is int count && count > 0;
             
             if (exists)
             {

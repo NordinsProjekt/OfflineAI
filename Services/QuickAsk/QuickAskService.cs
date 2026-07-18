@@ -60,8 +60,12 @@ public class QuickAskService : IQuickAskService
     /// </summary>
     public QuickAskMessage CreateAiMessage(string text, DateTime startTime)
     {
-        // Calculate tokens per second (rough estimate based on response length)
+        // Calculate tokens per second (rough estimate based on response length).
+        // startTime is a DateTime on the public IQuickAskService contract (set by the Razor page
+        // caller); this is a soft display metric, not worth a Stopwatch-based interface change.
+#pragma warning disable S6561
         var elapsed = (DateTime.Now - startTime).TotalSeconds;
+#pragma warning restore S6561
         var estimatedTokens = text.Length / 4; // Rough estimate: 1 token per 4 characters
         var tokensPerSecond = elapsed > 0 ? estimatedTokens / elapsed : 0;
 
@@ -107,7 +111,9 @@ public class QuickAskService : IQuickAskService
         {
             // Try to keep the important parts (model name and quantization)
             // Example: "Mistral-14b-Merge-Base-Q5_K_M" -> "Mistral-14b...Q5_K_M"
-            var parts = name.Split('-', '_');
+            // Regex.Split avoids Split('-', '_') binding to the (char, int count) overload via an
+            // implicit char->int conversion instead of splitting on both characters.
+            var parts = System.Text.RegularExpressions.Regex.Split(name, "[-_]");
             if (parts.Length > 3)
             {
                 // Keep first 2 parts and last part
@@ -121,5 +127,43 @@ public class QuickAskService : IQuickAskService
         }
 
         return name;
+    }
+
+    /// <summary>
+    /// Strips common LLM artifacts from a raw response before display or further processing.
+    /// Removes instruction tokens ([/INST]), metadata headers/footers, and other model-specific markers
+    /// that are emitted by models such as Llama, Mistral, and Qwen.
+    /// </summary>
+    public string SanitizeLlmResponse(string response)
+    {
+        if (string.IsNullOrWhiteSpace(response))
+            return response;
+
+        // Strip Llama / Mistral / Qwen instruction tokens: [INST], [/INST], <<SYS>> ... <</SYS>>
+        response = Regex.Replace(response, @"\[/?INST\]", string.Empty, RegexOptions.IgnoreCase);
+        response = Regex.Replace(response, @"<<SYS>>.*?<</SYS>>", string.Empty,
+            RegexOptions.Singleline | RegexOptions.IgnoreCase);
+
+        // Strip ChatML-style tokens: <|im_start|>, <|im_end|>, <|endoftext|>, etc.
+        response = Regex.Replace(response, @"<\|[^|]*\|>", string.Empty);
+
+        // Strip metadata header lines emitted by some wrappers:
+        //   [Detected format: Assistant:]   [System:]   [User:]
+        response = Regex.Replace(response,
+            @"^\[(?:Detected format|System|User|Assistant)[^\]]*\]\s*",
+            string.Empty,
+            RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        // Strip generation-complete footers:
+        //   [Generation complete - 10s pause detected]
+        response = Regex.Replace(response,
+            @"\[Generation complete[^\]]*\]\s*$",
+            string.Empty,
+            RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+        // Collapse runs of blank lines left after stripping
+        response = Regex.Replace(response, @"\n{3,}", "\n\n");
+
+        return response.Trim();
     }
 }

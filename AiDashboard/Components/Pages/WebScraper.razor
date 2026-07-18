@@ -2,6 +2,7 @@
 @using AiDashboard.Services
 @inject IWebScraperService WebScraperService
 @rendermode InteractiveServer
+@implements IDisposable
 
 <PageTitle>Web Scraper Tool</PageTitle>
 
@@ -195,8 +196,8 @@
         stopwatch = System.Diagnostics.Stopwatch.StartNew();
         cancellationTokenSource = new CancellationTokenSource();
         
-        // Start progress updater
-        var progressTask = UpdateProgressAsync(cancellationTokenSource.Token);
+        // Start progress updater (intentionally fire-and-forget)
+        _ = UpdateProgressAsync(cancellationTokenSource.Token);
 
         try
         {
@@ -230,7 +231,12 @@
         }
         finally
         {
-            cancellationTokenSource?.Cancel();
+            if (cancellationTokenSource != null)
+            {
+                await cancellationTokenSource.CancelAsync();
+                cancellationTokenSource.Dispose();
+                cancellationTokenSource = null;
+            }
             stopwatch?.Stop();
             isLoading = false;
             StateHasChanged();
@@ -263,6 +269,11 @@
         isLoading = false;
         errorMessage = "Scraping cancelled by user";
         StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        cancellationTokenSource?.Dispose();
     }
 
     private void ClearResult()

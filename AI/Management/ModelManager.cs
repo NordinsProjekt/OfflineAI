@@ -2,7 +2,7 @@ using Application.AI.Pooling;
 
 namespace Application.AI.Management
 {
-    public class ModelManager(IModelInstancePool pool, string llmExecutablePath) : IModelManager, IDisposable
+    public sealed class ModelManager(IModelInstancePool pool, string llmExecutablePath) : IModelManager, IDisposable
     {
         private readonly IModelInstancePool _pool = pool ?? throw new ArgumentNullException(nameof(pool));
         private readonly string _llmExecutablePath = llmExecutablePath ?? throw new ArgumentNullException(nameof(llmExecutablePath));
@@ -23,9 +23,12 @@ namespace Application.AI.Management
 
         public void Dispose()
         {
-            if (_disposed) return;
-            _disposed = true;
-            _pool?.Dispose();
+            if (!_disposed)
+            {
+                _pool?.Dispose();
+                _disposed = true;
+            }
+            GC.SuppressFinalize(this);
         }
     }
 }

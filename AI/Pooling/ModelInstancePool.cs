@@ -14,7 +14,7 @@ namespace Application.AI.Pooling;
 /// 
 /// Memory usage: ~1-1.5 GB per instance for TinyLlama 1.1B Q5_K_M
 /// </summary>
-public class ModelInstancePool : IModelInstancePool
+public sealed class ModelInstancePool : IModelInstancePool
 {
     private readonly ConcurrentBag<PersistentLlmProcess> _availableInstances = new();
     private readonly SemaphoreSlim _semaphore;
@@ -22,6 +22,7 @@ public class ModelInstancePool : IModelInstancePool
     private string _modelPath;
     private readonly int _maxInstances;
     private int _timeoutMs;
+    private int _pauseTimeoutMs = 10000;
     private bool _disposed;
     private int _totalInstancesCreated = 0;
     private readonly object _lock = new object();
@@ -38,7 +39,7 @@ public class ModelInstancePool : IModelInstancePool
                 throw new ArgumentOutOfRangeException(nameof(value), "Timeout must be between 1 and 300 seconds (1000-300000ms)");
             
             _timeoutMs = value;
-            
+
             // Update timeout on all existing instances in the pool
             lock (_lock)
             {
@@ -47,8 +48,31 @@ public class ModelInstancePool : IModelInstancePool
                     instance.TimeoutMs = value;
                 }
             }
-            
+
             Console.WriteLine($"[*] Pool timeout updated to {value}ms ({value/1000}s)");
+        }
+    }
+
+    public int PauseTimeoutMs
+    {
+        get => _pauseTimeoutMs;
+        set
+        {
+            if (value < 1000 || value > 120000)
+                throw new ArgumentOutOfRangeException(nameof(value), "Pause timeout must be between 1 and 120 seconds (1000-120000ms)");
+
+            _pauseTimeoutMs = value;
+
+            // Update pause timeout on all existing instances in the pool
+            lock (_lock)
+            {
+                foreach (var instance in _availableInstances)
+                {
+                    instance.PauseTimeoutMs = value;
+                }
+            }
+
+            Console.WriteLine($"[*] Pool pause timeout updated to {value}ms ({value/1000}s)");
         }
     }
 
@@ -86,10 +110,11 @@ public class ModelInstancePool : IModelInstancePool
                     progressCallback?.Invoke(instanceNumber, _maxInstances);
                     
                     var instance = await PersistentLlmProcess.CreateAsync(
-                        _llmPath, 
-                        _modelPath, 
+                        _llmPath,
+                        _modelPath,
                         _timeoutMs);
-                    
+                    instance.PauseTimeoutMs = _pauseTimeoutMs;
+
                     lock (_lock)
                     {
                         _availableInstances.Add(instance);
@@ -108,6 +133,14 @@ public class ModelInstancePool : IModelInstancePool
         if (_availableInstances.Count == 0)
         {
             throw new InvalidOperationException("Failed to initialize any LLM instances");
+        }
+
+        // Drain the semaphore for any instances that failed to start so that
+        // the number of available permits always matches the actual instance count.
+        int missing = _maxInstances - _availableInstances.Count;
+        for (int i = 0; i < missing; i++)
+        {
+            await _semaphore.WaitAsync();
         }
 
         Console.WriteLine($"? Pool initialized: {_availableInstances.Count}/{_maxInstances} instances");
@@ -200,7 +233,8 @@ public class ModelInstancePool : IModelInstancePool
                 {
                     Console.WriteLine($"[*] Creating replacement instance...");
                     instance = await PersistentLlmProcess.CreateAsync(_llmPath, _modelPath, _timeoutMs);
-                    
+                    instance.PauseTimeoutMs = _pauseTimeoutMs;
+
                     lock (_lock)
                     {
                         _totalInstancesCreated++;
@@ -263,13 +297,16 @@ public class ModelInstancePool : IModelInstancePool
                 try
                 {
                     var replacement = await PersistentLlmProcess.CreateAsync(_llmPath, _modelPath, _timeoutMs);
-                    
+                    replacement.PauseTimeoutMs = _pauseTimeoutMs;
+
+                    bool added = false;
                     lock (_lock)
                     {
                         if (!_disposed && _totalInstancesCreated < _maxInstances)
                         {
                             _availableInstances.Add(replacement);
                             _totalInstancesCreated++;
+                            added = true;
                             Console.WriteLine($"[+] Replacement instance created and added to pool");
                         }
                         else
@@ -277,12 +314,23 @@ public class ModelInstancePool : IModelInstancePool
                             replacement.Dispose();
                         }
                     }
+
+                    // Only release the semaphore when the replacement was successfully
+                    // added to the pool. If it was not added (disposed branch), the
+                    // permit is already accounted for by the pool reaching capacity.
+                    if (added)
+                        _semaphore.Release();
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[!] Failed to create replacement instance: {ex.Message}");
+                    // Do NOT release the semaphore here. The unhealthy instance has been
+                    // removed but no replacement was added, so the pool has shrunk by one.
+                    // Releasing the semaphore without a corresponding instance would let a
+                    // caller acquire a slot that has no backing instance, causing
+                    // "No healthy instances available in pool".
                 }
-            }).ContinueWith(_ => _semaphore.Release()); // Release semaphore after replacement attempt
+            });
         }
     }
 
@@ -306,8 +354,9 @@ public class ModelInstancePool : IModelInstancePool
         }
 
         _semaphore?.Dispose();
-        
+
         Console.WriteLine($"[+] Pool disposed");
+        GC.SuppressFinalize(this);
     }
 }
 

@@ -1,0 +1,309 @@
+@page "/agent-history"
+@namespace AiDashboard.Components.Pages
+@using global::Entities
+@using global::Services.Repositories
+@using Microsoft.Extensions.DependencyInjection
+
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@inject IServiceProvider ServiceProvider
+
+<PageTitle>Agent History - OfflineAI</PageTitle>
+
+<div class="oa-quick-ask-page">
+    <div class="oa-quick-header">
+        <button class="oa-back-button" @onclick="@(() => Navigation.NavigateTo("/agent-mode"))">Back to Agent Mode</button>
+        <div class="oa-quick-header-center">
+            <h1>Agent History</h1>
+            <p class="oa-quick-subtitle">Every goal-agent run that has been recorded — what it was asked to do, and how it went</p>
+        </div>
+        <button class="oa-back-button oa-header-action" @onclick="LoadRunsAsync" disabled="@_loading">Refresh</button>
+    </div>
+
+    <div class="oa-quick-container">
+        <div class="oa-quick-card oa-goal-card">
+            @if (_repository is null)
+            {
+                <p class="oa-batch-empty">
+                    Run history needs a configured database. Set <code>DatabaseConfig:ConnectionString</code>
+                    and restart — until then, runs are only visible live on the Agent Mode page and in
+                    <code>agentlogg.txt</code> in the workspace.
+                </p>
+            }
+            else if (_error is not null)
+            {
+                <p class="oa-batch-empty oa-goal-verdict">@_error</p>
+            }
+            else if (_loading && _runs is null)
+            {
+                <p class="oa-batch-empty">Loading runs...</p>
+            }
+            else if (_runs is null || _runs.Count == 0)
+            {
+                <p class="oa-batch-empty">No runs recorded yet. Start one from the Agent Mode page.</p>
+            }
+            else
+            {
+                <div class="oa-batch-job-list">
+                    @foreach (var run in _runs)
+                    {
+                        var isSelected = _selectedRunId == run.Id;
+                        <div class="oa-batch-job-row oa-history-row">
+                            <div class="oa-batch-job-main oa-history-summary" @onclick="@(() => SelectRunAsync(run.Id))">
+                                <span class="oa-batch-badge @PhaseClass(run.Phase)">@PhaseText(run.Phase)</span>
+                                <span class="oa-batch-job-desc">@Shorten(run.GoalDescription, 90)</span>
+                                <span class="oa-history-meta">@FormatStarted(run.StartedAt) · @FormatDuration(run)</span>
+                            </div>
+
+                            @if (isSelected)
+                            {
+                                <div class="oa-history-detail">
+                                    <p class="oa-history-goal">@run.GoalDescription</p>
+
+                                    <dl class="oa-history-facts">
+                                        <dt>Model</dt>
+                                        <dd>@(run.ModelName ?? "unknown")</dd>
+                                        <dt>Workspace</dt>
+                                        <dd>@(run.WorkspacePath ?? "—")</dd>
+                                        <dt>Iterations</dt>
+                                        <dd>@run.Iterations of @run.MaxIterations</dd>
+                                        <dt>Started</dt>
+                                        <dd>@FormatFull(run.StartedAt)</dd>
+                                        <dt>Finished</dt>
+                                        <dd>@(run.CompletedAt is null ? "never — the app stopped mid-run" : FormatFull(run.CompletedAt.Value))</dd>
+                                        <dt>Conversation</dt>
+                                        <dd>@(run.ConversationId?.ToString() ?? "—")</dd>
+                                    </dl>
+
+                                    @if (_detailLoading)
+                                    {
+                                        <p class="oa-batch-empty">Loading details...</p>
+                                    }
+                                    else
+                                    {
+                                        <div class="oa-history-section-title">Requirements (@PassedCount of @_requirements.Count passed)</div>
+                                        @if (_requirements.Count == 0)
+                                        {
+                                            <p class="oa-batch-empty">No requirements were recorded — the run ended before deriving any.</p>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var requirement in _requirements)
+                                            {
+                                                <div class="oa-batch-job-row">
+                                                    <div class="oa-batch-job-main">
+                                                        <span class="oa-batch-job-index">#@requirement.Ordinal</span>
+                                                        <span class="oa-batch-job-desc">@requirement.Description</span>
+                                                        <span class="oa-batch-badge @StatusClass(requirement.Status)">@StatusText(requirement.Status)</span>
+                                                    </div>
+                                                    @if (!string.IsNullOrWhiteSpace(requirement.LastVerdict))
+                                                    {
+                                                        <div class="oa-batch-job-result oa-goal-verdict">@requirement.LastVerdict</div>
+                                                    }
+                                                </div>
+                                            }
+                                        }
+
+                                        <div class="oa-history-section-title">Activity</div>
+                                        @if (_events.Count == 0)
+                                        {
+                                            <p class="oa-batch-empty">No activity was recorded for this run.</p>
+                                        }
+                                        else
+                                        {
+                                            <div class="oa-goal-log">
+                                                @foreach (var entry in _events)
+                                                {
+                                                    <div class="oa-goal-log-line">
+                                                        <span class="oa-history-event-time">@FormatTime(entry.CreatedAt)</span>
+                                                        @entry.Message
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                    }
+
+                                    <div class="oa-batch-controls">
+                                        <button class="oa-batch-stop-btn" @onclick="@(() => DeleteRunAsync(run.Id))">Delete this run</button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    // Resolved rather than injected: the repository is only registered when a database is
+    // configured, and @inject would throw on a machine running without one.
+    private IAgentRunRepository? _repository;
+
+    private List<AgentRunEntity>? _runs;
+    private Guid? _selectedRunId;
+    private List<AgentRunRequirementEntity> _requirements = new();
+    private List<AgentRunEventEntity> _events = new();
+    private bool _loading;
+    private bool _detailLoading;
+    private string? _error;
+
+    private int PassedCount => _requirements.Count(r => r.Status == "Passed");
+
+    protected override async Task OnInitializedAsync()
+    {
+        _repository = ServiceProvider.GetService<IAgentRunRepository>();
+        if (_repository is not null)
+            await LoadRunsAsync();
+    }
+
+    private async Task LoadRunsAsync()
+    {
+        if (_repository is null)
+            return;
+
+        _loading = true;
+        _error = null;
+        try
+        {
+            _runs = await _repository.GetRecentRunsAsync(50);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not load run history: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SelectRunAsync(Guid runId)
+    {
+        if (_selectedRunId == runId)
+        {
+            _selectedRunId = null;
+            return;
+        }
+
+        _selectedRunId = runId;
+        _requirements = new List<AgentRunRequirementEntity>();
+        _events = new List<AgentRunEventEntity>();
+
+        if (_repository is null)
+            return;
+
+        _detailLoading = true;
+        try
+        {
+            _requirements = await _repository.GetRequirementsAsync(runId);
+            _events = await _repository.GetEventsAsync(runId);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not load run details: {ex.Message}";
+        }
+        finally
+        {
+            _detailLoading = false;
+        }
+    }
+
+    private async Task DeleteRunAsync(Guid runId)
+    {
+        if (_repository is null)
+            return;
+
+        try
+        {
+            await _repository.DeleteRunAsync(runId);
+            _selectedRunId = null;
+            await LoadRunsAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not delete the run: {ex.Message}";
+        }
+    }
+
+    // ── Formatting ──
+
+    /// <summary>
+    /// Timestamps are stored as UTC but come back from SQL Server with an unspecified kind, which
+    /// ToLocalTime() would otherwise treat as already-local and leave untouched.
+    /// </summary>
+    private static DateTime ToLocal(DateTime utc) =>
+        DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime();
+
+    private static string FormatStarted(DateTime startedAt) => ToLocal(startedAt).ToString("yyyy-MM-dd HH:mm");
+
+    private static string FormatFull(DateTime value) => ToLocal(value).ToString("yyyy-MM-dd HH:mm:ss");
+
+    private static string FormatTime(DateTime value) => ToLocal(value).ToString("HH:mm:ss");
+
+    private static string FormatDuration(AgentRunEntity run)
+    {
+        if (run.CompletedAt is null)
+            return "unfinished";
+
+        var duration = run.CompletedAt.Value - run.StartedAt;
+        if (duration < TimeSpan.Zero)
+            return "unfinished";
+
+        if (duration.TotalHours >= 1)
+            return $"{(int)duration.TotalHours}h {duration.Minutes}m";
+
+        if (duration.TotalMinutes >= 1)
+            return $"{(int)duration.TotalMinutes}m {duration.Seconds}s";
+
+        return $"{duration.Seconds}s";
+    }
+
+    private static string Shorten(string text, int maxLength)
+    {
+        var flattened = text.Replace('\n', ' ').Replace("\r", string.Empty).Trim();
+        return flattened.Length <= maxLength ? flattened : flattened[..maxLength] + "…";
+    }
+
+    // Phase/status values are stored as enum names; unknown values fall through to a neutral look
+    // rather than throwing, so a row written by a newer version still renders.
+
+    private static string PhaseText(string phase) => phase switch
+    {
+        "GeneratingRequirements" => "Generating requirements",
+        "Working" => "Working",
+        "Verifying" => "Verifying",
+        "Completed" => "All green",
+        "MaxIterationsReached" => "Iteration cap reached",
+        "Stopped" => "Stopped",
+        "Failed" => "Failed",
+        _ => phase
+    };
+
+    private static string PhaseClass(string phase) => phase switch
+    {
+        "Completed" => "green",
+        "MaxIterationsReached" or "Failed" => "red",
+        "Stopped" => "gray",
+        _ => "blue"
+    };
+
+    private static string StatusText(string status) => status switch
+    {
+        "Unverified" => "Pending",
+        "Working" => "Working",
+        "Verifying" => "Checking",
+        "Passed" => "Passed",
+        "Failed" => "Failed",
+        _ => status
+    };
+
+    private static string StatusClass(string status) => status switch
+    {
+        "Working" or "Verifying" => "blue",
+        "Passed" => "green",
+        "Failed" => "red",
+        _ => "gray"
+    };
+}

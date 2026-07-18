@@ -115,7 +115,7 @@ public static class StringExtensions
     private static string RemoveIncompleteTokens(string response)
     {
         // Remove incomplete sentence markers
-        if (response.EndsWith(">") && !response.EndsWith(">>"))
+        if (response.EndsWith('>') && !response.EndsWith(">>"))
         {
             var lastCompleteStop = Math.Max(
                 response.LastIndexOf('.'),
