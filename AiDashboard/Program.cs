@@ -108,6 +108,13 @@ public static class Program
         // a tool by name and supplies argument text; it can never specify a path.
         builder.Services.AddSingleton<IExternalToolsService, ExternalToolsService>();
 
+        // Register the QB64 compiler tool: lets the LLM compile and run QBasic (.bas) files from
+        // the active workspace via /qb64 and /qb64-kompilera, feeding compiler errors and program
+        // output back into the tool-call loop so the model can fix its own code. The compiler
+        // path comes only from AppConfiguration.AgentTools.Qb64 (empty = the commands are never
+        // offered); the LLM supplies a bare filename that is confined to the active workspace.
+        builder.Services.AddSingleton<IQb64ToolService, Qb64ToolService>();
+
         // Register the lightweight, text-based agentic chat service used by QuickAsk and the
         // Dashboard chat: tells the LLM about the IFileAgentService/IUtilityToolsService slash
         // commands and executes any it requests, feeding the result back for a final answer. The
@@ -118,7 +125,8 @@ public static class Program
                 sp.GetRequiredService<IFileAgentService>(),
                 sp.GetRequiredService<IUtilityToolsService>(),
                 appConfig.AgentTools.MaxToolCallRounds,
-                sp.GetRequiredService<IExternalToolsService>()));
+                sp.GetRequiredService<IExternalToolsService>(),
+                sp.GetRequiredService<IQb64ToolService>()));
 
         // Register the batch job queue (Batch Processing page): feeds each queued task's
         // free-text description into IAgenticChatService.SendWithToolsAsync one at a time, so

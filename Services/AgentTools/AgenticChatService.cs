@@ -15,6 +15,7 @@ public sealed class AgenticChatService : IAgenticChatService
     private readonly IFileAgentService _fileAgent;
     private readonly IUtilityToolsService? _utilityTools;
     private readonly IExternalToolsService? _externalTools;
+    private readonly IQb64ToolService? _qb64Tools;
     private readonly int _maxToolCallRounds;
 
     /// <param name="fileAgent">Executes file-agent slash commands (/skapa, /fyll, /läs, /redigera, /lista).</param>
@@ -31,15 +32,22 @@ public sealed class AgenticChatService : IAgenticChatService
     /// <c>AppConfiguration.AgentTools.ExternalTools</c>). When <c>null</c> or when no tools are
     /// configured, no external commands are offered to the LLM.
     /// </param>
+    /// <param name="qb64Tools">
+    /// Optional. Compiles and runs QBasic files via the QB64 compiler (/qb64,
+    /// /qb64-kompilera — see <c>AppConfiguration.AgentTools.Qb64</c>). When <c>null</c> or when
+    /// no compiler is configured, the QB64 commands are not offered to the LLM.
+    /// </param>
     public AgenticChatService(
         IFileAgentService fileAgent,
         IUtilityToolsService? utilityTools = null,
         int maxToolCallRounds = DefaultMaxToolCallRounds,
-        IExternalToolsService? externalTools = null)
+        IExternalToolsService? externalTools = null,
+        IQb64ToolService? qb64Tools = null)
     {
         _fileAgent = fileAgent ?? throw new ArgumentNullException(nameof(fileAgent));
         _utilityTools = utilityTools;
         _externalTools = externalTools;
+        _qb64Tools = qb64Tools;
         _maxToolCallRounds = maxToolCallRounds > 0 ? maxToolCallRounds : DefaultMaxToolCallRounds;
     }
 
@@ -64,6 +72,8 @@ public sealed class AgenticChatService : IAgenticChatService
             toolsPrompt = AppendToolDescriptions(toolsPrompt, _utilityTools.GetToolDescriptions());
         if (_externalTools is not null)
             toolsPrompt = AppendToolDescriptions(toolsPrompt, _externalTools.GetToolDescriptions());
+        if (_qb64Tools is not null)
+            toolsPrompt = AppendToolDescriptions(toolsPrompt, _qb64Tools.GetToolDescriptions());
 
         if (!string.IsNullOrWhiteSpace(recentlyUploadedFilename))
             toolsPrompt +=
@@ -81,26 +91,33 @@ public sealed class AgenticChatService : IAgenticChatService
             cancellationToken.ThrowIfCancellationRequested();
 
             // Parse the LLM's reply using plain string search for a known slash command — file
-            // agent commands first, then utility commands (time/date/api), then operator-
-            // configured external executables.
+            // agent commands first, then utility commands (time/date/api), then the QB64
+            // compiler commands, then operator-configured external executables.
             var isFileCommand = _fileAgent.TryFindAgentCommand(response, out var command);
             var isUtilityCommand = !isFileCommand
                 && _utilityTools is not null
                 && _utilityTools.TryFindCommand(response, out command);
-            var isExternalCommand = !isFileCommand && !isUtilityCommand
+            var isQb64Command = !isFileCommand && !isUtilityCommand
+                && _qb64Tools is not null
+                && _qb64Tools.TryFindCommand(response, out command);
+            var isExternalCommand = !isFileCommand && !isUtilityCommand && !isQb64Command
                 && _externalTools is not null
                 && _externalTools.TryFindCommand(response, out command);
 
-            if (!isFileCommand && !isUtilityCommand && !isExternalCommand)
+            if (!isFileCommand && !isUtilityCommand && !isQb64Command && !isExternalCommand)
                 break; // No tool requested — treat this reply as the final answer.
 
             onToolStatus?.Invoke($"🔧 Kör: {command}");
 
-            if (isUtilityCommand || isExternalCommand)
+            if (isUtilityCommand || isQb64Command || isExternalCommand)
             {
-                var toolResult = isUtilityCommand
-                    ? await _utilityTools!.ExecuteAsync(command)
-                    : await _externalTools!.ExecuteAsync(command);
+                UtilityToolResult toolResult;
+                if (isUtilityCommand)
+                    toolResult = await _utilityTools!.ExecuteAsync(command);
+                else if (isQb64Command)
+                    toolResult = await _qb64Tools!.ExecuteAsync(command);
+                else
+                    toolResult = await _externalTools!.ExecuteAsync(command);
                 var toolText = toolResult.InjectedContext ?? toolResult.Message;
                 invocations.Add(new ToolInvocation(command, toolResult.Message));
 

@@ -664,4 +664,109 @@ public sealed class AgenticChatServiceTests : IDisposable
         externalTools.ExecutedCommands.Should().BeEmpty();
         result.ToolInvocations.Should().ContainSingle().Which.Command.Should().Be("/lista");
     }
+
+    // ── QB64 tools ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Fake <see cref="IQb64ToolService"/>: same command-detection shape as the real service
+    /// (line-scan for /qb64 and /qb64-kompilera) with a caller-supplied executor, so the loop's
+    /// QB64 branch can be tested without a compiler installed.
+    /// </summary>
+    private sealed class FakeQb64ToolService : IQb64ToolService
+    {
+        private readonly Func<string, UtilityToolResult> _executor;
+
+        public FakeQb64ToolService(Func<string, UtilityToolResult> executor) => _executor = executor;
+
+        public List<string> ExecutedCommands { get; } = new();
+
+        public bool IsCommand(string input)
+        {
+            var t = input.TrimStart();
+            return t.StartsWith("/qb64 ", StringComparison.OrdinalIgnoreCase)
+                || t.Equals("/qb64", StringComparison.OrdinalIgnoreCase)
+                || t.StartsWith("/qb64-kompilera ", StringComparison.OrdinalIgnoreCase)
+                || t.Equals("/qb64-kompilera", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public Task<UtilityToolResult> ExecuteAsync(string input)
+        {
+            ExecutedCommands.Add(input);
+            return Task.FromResult(_executor(input));
+        }
+
+        public IReadOnlyDictionary<string, string> GetToolDescriptions() => new Dictionary<string, string>
+        {
+            ["/qb64 <fil.bas>"] = "Kompilerar och kör en QBasic-fil."
+        };
+
+        public bool TryFindCommand(string llmResponse, out string command)
+        {
+            command = string.Empty;
+            if (string.IsNullOrWhiteSpace(llmResponse)) return false;
+
+            foreach (var rawLine in llmResponse.Split('\n'))
+            {
+                var line = rawLine.Trim().TrimEnd('\r');
+                if (IsCommand(line))
+                {
+                    command = line;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_Qb64CommandRequested_ExecutesAndFeedsOutputBack()
+    {
+        var qb64 = new FakeQb64ToolService(
+            _ => UtilityToolResult.Success("✓ QB64: spel.bas kompilerade och kördes.", "Programmets utdata:\nHEJ VÄRLDEN"));
+        var sut = new AgenticChatService(_fileAgent, qb64Tools: qb64);
+        var llm = new ScriptedLlm("/qb64 spel.bas", "Programmet skrev ut HEJ VÄRLDEN.");
+
+        var result = await sut.SendWithToolsAsync("Kör spel.bas och visa resultatet.", llm.SendAsync);
+
+        qb64.ExecutedCommands.Should().ContainSingle().Which.Should().Be("/qb64 spel.bas");
+        result.FinalResponse.Should().Be("Programmet skrev ut HEJ VÄRLDEN.");
+        result.ToolInvocations.Should().ContainSingle().Which.Command.Should().Be("/qb64 spel.bas");
+        llm.Prompts.Should().HaveCount(2);
+        llm.Prompts[1].Should().Contain("HEJ VÄRLDEN"); // program output fed back to the LLM
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_Qb64CompileErrorFedBackSoLlmCanFixAndRetry()
+    {
+        var attempts = 0;
+        var qb64 = new FakeQb64ToolService(_ =>
+            ++attempts == 1
+                ? UtilityToolResult.Failure("⚠ QB64 kunde inte kompilera spel.bas. Kompilatorns utdata:\nSyntax error on line 2")
+                : UtilityToolResult.Success("✓ QB64: spel.bas kompilerade och kördes.", "Programmets utdata:\n42"));
+        var sut = new AgenticChatService(_fileAgent, qb64Tools: qb64);
+        var llm = new ScriptedLlm(
+            "/qb64 spel.bas",   // first attempt — compile error comes back
+            "/qb64 spel.bas",   // model retries after "fixing" the code
+            "Nu fungerar programmet och skriver ut 42.");
+
+        var result = await sut.SendWithToolsAsync("Kör spel.bas.", llm.SendAsync);
+
+        qb64.ExecutedCommands.Should().HaveCount(2);
+        llm.Prompts[1].Should().Contain("Syntax error on line 2"); // the LLM sees the compile error
+        result.FinalResponse.Should().Be("Nu fungerar programmet och skriver ut 42.");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_Qb64Configured_DescriptionsAppearInFirstPrompt()
+    {
+        var qb64 = new FakeQb64ToolService(_ => UtilityToolResult.Success("ok"));
+        var sut = new AgenticChatService(_fileAgent, qb64Tools: qb64);
+        var llm = new ScriptedLlm("Ett vanligt svar utan verktyg.");
+
+        await sut.SendWithToolsAsync("Hej!", llm.SendAsync);
+
+        llm.Prompts[0].Should().Contain("/qb64 <fil.bas>");
+        llm.Prompts[0].Should().Contain("Kompilerar och kör en QBasic-fil.");
+    }
 }
