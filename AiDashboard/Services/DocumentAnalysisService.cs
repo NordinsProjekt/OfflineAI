@@ -11,8 +11,6 @@ public class DocumentAnalysisService : IDocumentAnalysisService
 {
     private const int MaxChunkSize = 4000; // Characters per chunk
     private const int ChunkOverlap = 200; // Overlap between chunks for context
-    
-    private readonly DocxProcessingService _docxService = new();
 
     /// <summary>
     /// Extract text from uploaded file based on file type.
@@ -27,11 +25,11 @@ public class DocumentAnalysisService : IDocumentAnalysisService
         try
         {
             var extension = Path.GetExtension(file.Name).ToLowerInvariant();
-            
+
             return extension switch
             {
-                ".txt" => await ExtractFromTxtAsync(file),
-                ".pdf" => await ExtractFromPdfAsync(file),
+                ".txt" => await ExtractFromTxtAsync(file, maxFileSize),
+                ".pdf" => await ExtractFromPdfAsync(file, maxFileSize),
                 ".doc" or ".docx" => await ExtractFromDocxAsync(file),
                 _ => (false, "", $"Unsupported file type: {extension}")
             };
@@ -45,11 +43,11 @@ public class DocumentAnalysisService : IDocumentAnalysisService
     /// <summary>
     /// Extract text from TXT file.
     /// </summary>
-    private async Task<(bool Success, string Text, string Error)> ExtractFromTxtAsync(IBrowserFile file)
+    private static async Task<(bool Success, string Text, string Error)> ExtractFromTxtAsync(IBrowserFile file, long maxFileSize)
     {
         try
         {
-            using var stream = file.OpenReadStream(maxAllowedSize: 10485760);
+            using var stream = file.OpenReadStream(maxAllowedSize: maxFileSize);
             using var reader = new StreamReader(stream, Encoding.UTF8);
             var text = await reader.ReadToEndAsync();
             return (true, text, "");
@@ -61,23 +59,45 @@ public class DocumentAnalysisService : IDocumentAnalysisService
     }
 
     /// <summary>
-    /// Extract text from PDF file.
-    /// Note: This requires a PDF library like iTextSharp or PdfPig.
-    /// For now, returns a placeholder message.
+    /// Extract text from PDF file using UglyToad.PdfPig.
     /// </summary>
-    private async Task<(bool Success, string Text, string Error)> ExtractFromPdfAsync(IBrowserFile file)
+    private static async Task<(bool Success, string Text, string Error)> ExtractFromPdfAsync(IBrowserFile file, long maxFileSize)
     {
-        // TODO: Implement PDF parsing with PdfPig or iTextSharp
-        await Task.CompletedTask;
-        return (false, "", "PDF parsing not yet implemented. Please install PdfPig NuGet package and implement ExtractFromPdfAsync method.");
+        try
+        {
+            using var memoryStream = new MemoryStream();
+            await file.OpenReadStream(maxAllowedSize: maxFileSize).CopyToAsync(memoryStream);
+            memoryStream.Position = 0;
+
+            using var pdf = UglyToad.PdfPig.PdfDocument.Open(memoryStream);
+            var textBuilder = new StringBuilder();
+
+            foreach (var page in pdf.GetPages())
+            {
+                textBuilder.AppendLine(page.Text);
+            }
+
+            var extractedText = textBuilder.ToString().Trim();
+
+            if (string.IsNullOrWhiteSpace(extractedText))
+            {
+                return (false, "", "No text content found in the PDF file.");
+            }
+
+            return (true, extractedText, "");
+        }
+        catch (Exception ex)
+        {
+            return (false, "", $"Error reading PDF file: {ex.Message}");
+        }
     }
 
     /// <summary>
     /// Extract text from DOCX file using DocxProcessingService.
     /// </summary>
-    private async Task<(bool Success, string Text, string Error)> ExtractFromDocxAsync(IBrowserFile file)
+    private static async Task<(bool Success, string Text, string Error)> ExtractFromDocxAsync(IBrowserFile file)
     {
-        return await _docxService.ExtractTextAsync(
+        return await DocxProcessingService.ExtractTextAsync(
             file, 
             includeHeaders: true, 
             includeFooters: true, 
@@ -87,9 +107,9 @@ public class DocumentAnalysisService : IDocumentAnalysisService
     /// <summary>
     /// Extract metadata from DOCX file.
     /// </summary>
-    public async Task<DocxMetadata> ExtractDocxMetadataAsync(IBrowserFile file)
+    public static async Task<DocxMetadata> ExtractDocxMetadataAsync(IBrowserFile file)
     {
-        return await _docxService.ExtractMetadataAsync(file);
+        return await DocxProcessingService.ExtractMetadataAsync(file);
     }
 
     /// <summary>
@@ -158,7 +178,7 @@ public class DocumentAnalysisService : IDocumentAnalysisService
     /// Search for specific terms in chunks using simple text search.
     /// For semantic search, integrate with your embedding service.
     /// </summary>
-    public List<DocumentChunk> SearchChunks(List<DocumentChunk> chunks, string searchTerm, bool caseSensitive = false)
+    public static List<DocumentChunk> SearchChunks(List<DocumentChunk> chunks, string searchTerm, bool caseSensitive = false)
     {
         var comparison = caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
         
@@ -176,7 +196,7 @@ public class DocumentAnalysisService : IDocumentAnalysisService
     }
 
     /// <summary>
-    /// Search for multiple terms (e.g., "Kunskapsmål", "Learning Objectives", etc.)
+    /// Search for multiple terms (e.g., "KunskapsmÃ¥l", "Learning Objectives", etc.)
     /// </summary>
     public List<DocumentChunk> SearchMultipleTerms(List<DocumentChunk> chunks, string[] searchTerms, bool caseSensitive = false)
     {
@@ -222,7 +242,7 @@ public class DocumentAnalysisService : IDocumentAnalysisService
     /// <summary>
     /// Count occurrences of a term in text.
     /// </summary>
-    private int CountOccurrences(string text, string term, StringComparison comparison)
+    private static int CountOccurrences(string text, string term, StringComparison comparison)
     {
         if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(term))
             return 0;

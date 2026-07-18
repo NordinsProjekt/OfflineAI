@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using Factories;
 using Factories.Extensions;
@@ -12,25 +13,42 @@ namespace Application.AI.Processing;
 /// NOTE: This is a simplified implementation. For production use with llama-cli interactive mode,
 /// you may need to use llama.cpp server mode instead (--server flag) with HTTP API.
 /// </summary>
-public class PersistentLlmProcess : IPersistentLlmProcess
+public sealed class PersistentLlmProcess : IPersistentLlmProcess
 {
     private readonly string _llmPath;
     private readonly string _modelPath;
     private int _timeoutMs;
+    private int _pauseTimeoutMs = 10000;
     private readonly SemaphoreSlim _requestLock = new(1, 1);
     private bool _disposed;
 
     public bool IsHealthy { get; private set; } = true;
     public DateTime LastUsed { get; private set; } = DateTime.UtcNow;
-    
-    public int TimeoutMs 
-    { 
+
+    public int TimeoutMs
+    {
         get => _timeoutMs;
         set
         {
             if (value < 1000 || value > 300000)
                 throw new ArgumentOutOfRangeException(nameof(value), "Timeout must be between 1 and 300 seconds (1000-300000ms)");
             _timeoutMs = value;
+        }
+    }
+
+    /// <summary>
+    /// Maximum pause between output chunks (ms) after generation has started before it's
+    /// considered complete/stalled. Independent of <see cref="TimeoutMs"/>, which bounds the
+    /// overall call. Default: 10 000 ms (10 seconds).
+    /// </summary>
+    public int PauseTimeoutMs
+    {
+        get => _pauseTimeoutMs;
+        set
+        {
+            if (value < 1000 || value > 120000)
+                throw new ArgumentOutOfRangeException(nameof(value), "Pause timeout must be between 1 and 120 seconds (1000-120000ms)");
+            _pauseTimeoutMs = value;
         }
     }
 
@@ -77,7 +95,8 @@ public class PersistentLlmProcess : IPersistentLlmProcess
         float presencePenalty = 0.2f,
         float frequencyPenalty = 0.2f,
         bool useGpu = false,
-        int gpuLayers = 0)
+        int gpuLayers = 0,
+        int contextSize = 2048)
     {
         if (_disposed)
             throw new ObjectDisposedException(nameof(PersistentLlmProcess));
@@ -86,6 +105,7 @@ public class PersistentLlmProcess : IPersistentLlmProcess
             throw new InvalidOperationException("Process manager is not healthy");
 
         await _requestLock.WaitAsync();
+        string? tempPromptFile = null;
         try
         {
             LastUsed = DateTime.UtcNow;
@@ -93,14 +113,35 @@ public class PersistentLlmProcess : IPersistentLlmProcess
             // Build the full prompt
             var fullPrompt = $"{systemPrompt}\n\nUser: {userQuestion}\nAssistant:";
 
+            // Write the prompt to a temp file instead of embedding it inline with -p "...".
+            // Passing the prompt via -p "..." breaks on Windows whenever the content contains
+            // double-quote characters (code samples, SQL strings, etc.) or real newlines,
+            // because CreateProcess argument parsing terminates the quoted token at the first
+            // unescaped " it encounters.  Using -f <file> bypasses all of that entirely.
+            tempPromptFile = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            await File.WriteAllTextAsync(tempPromptFile, fullPrompt, System.Text.Encoding.UTF8);
+
             // Create process for this query
             var processInfo = LlmFactory.CreateForLlama(_llmPath, _modelPath);
-            
-            // Add the prompt directly to arguments
-            processInfo.Arguments += $" -p \"{fullPrompt}\"";
-            
-            // Set context size to prevent memory issues (2048 tokens = ~1500 chars of context)
-            processInfo.Arguments += $" -c 2048";
+
+            // Use -f (prompt file) instead of -p (inline prompt) to safely pass any content
+            processInfo.Arguments += $" -f \"{tempPromptFile}\"";
+
+            // Force plain text-completion mode. Newer llama-cli builds default to interactive
+            // conversation mode whenever the model ships a chat template (e.g. Gemma/Llama
+            // instruct models): the process prints its startup banner and "> " prompt, treats
+            // the -f content as interactive input, and waits on stdin for the next turn instead
+            // of exiting. That breaks this class's whole design — the "...\nAssistant:" prompt
+            // is written for completion mode, the assistant-marker extraction needs the prompt
+            // echoed back, and the multi-line prompt would otherwise be split into one "turn"
+            // per line. With -no-cnv llama-cli evaluates the prompt, generates, and exits.
+            processInfo.Arguments += " -no-cnv";
+
+            // Context window size (tokens) — must be large enough to hold the system prompt,
+            // any injected tool/document content, and the user question, or llama-cli will
+            // silently truncate the prompt and can return an empty completion. Configurable via
+            // AppConfiguration.Llm.ContextSize (see AiChatServicePooled.QueryLlmAsync).
+            processInfo.Arguments += $" -c {contextSize}";
             
             // Configure GPU offloading
             // -ngl 0 = CPU only (no GPU layers)
@@ -115,14 +156,22 @@ public class PersistentLlmProcess : IPersistentLlmProcess
                 processInfo.Arguments += $" -ngl 0";
             }
             
-            // Apply generation parameters
-            processInfo.Arguments += $" -n {maxTokens}";
-            processInfo.Arguments += $" --temp {temperature:F2}";
-            processInfo.Arguments += $" --top-p {topP:F2}";
+            // Apply generation parameters. Cap -n at half the context window: the prompt
+            // (system prompt + any injected document content + question) needs room too, and
+            // asking llama-cli to generate as many tokens as the entire context holds leaves zero
+            // space for the prompt itself — a combination that can make llama-cli fail outright
+            // (empty output, or worse) rather than just truncating gracefully.
+            var effectiveMaxTokens = Math.Min(maxTokens, Math.Max(1, contextSize / 2));
+            processInfo.Arguments += $" -n {effectiveMaxTokens}";
+            // Format the floating-point flags with the invariant culture. Under a decimal-comma
+            // locale (e.g. sv-SE) "{temperature:F2}" emits "0,30", and llama.cpp's C++ float
+            // parser stops at the comma and reads 0 — silently zeroing temp/top-p/the penalties.
+            processInfo.Arguments += string.Create(CultureInfo.InvariantCulture, $" --temp {temperature:F2}");
+            processInfo.Arguments += string.Create(CultureInfo.InvariantCulture, $" --top-p {topP:F2}");
             processInfo.Arguments += $" --top-k {topK}";
-            processInfo.Arguments += $" --repeat-penalty {repeatPenalty:F2}";
-            processInfo.Arguments += $" --presence-penalty {presencePenalty:F2}";
-            processInfo.Arguments += $" --frequency-penalty {frequencyPenalty:F2}";
+            processInfo.Arguments += string.Create(CultureInfo.InvariantCulture, $" --repeat-penalty {repeatPenalty:F2}");
+            processInfo.Arguments += string.Create(CultureInfo.InvariantCulture, $" --presence-penalty {presencePenalty:F2}");
+            processInfo.Arguments += string.Create(CultureInfo.InvariantCulture, $" --frequency-penalty {frequencyPenalty:F2}");
             
             var process = processInfo.Build();
 
@@ -138,6 +187,12 @@ public class PersistentLlmProcess : IPersistentLlmProcess
         finally
         {
             _requestLock.Release();
+
+            // Clean up the temp prompt file regardless of success or failure
+            if (tempPromptFile != null && File.Exists(tempPromptFile))
+            {
+                try { File.Delete(tempPromptFile); } catch { /* ignore cleanup errors */ }
+            }
         }
     }
 
@@ -146,15 +201,17 @@ public class PersistentLlmProcess : IPersistentLlmProcess
         var output = new StringBuilder();
         var error = new StringBuilder();
         var assistantStarted = false;
+        var anyOutputReceived = false; // Any stdout output seen (even without an assistant marker)
         var endMarkerDetected = false; // Flag to signal end of generation
         var lastOutputTime = DateTime.UtcNow;
         var processStartTime = DateTime.UtcNow;
         var outputLock = new object();
         var fullOutput = new StringBuilder(); // Keep track of all output for debugging
 
-        // Use fixed 10-second pause timeout
-        // This detects when the LLM has stopped generating (paused for more than 10 seconds)
-        const int pauseTimeoutMs = 10000;  // 10 seconds
+        // Configurable pause timeout (see PauseTimeoutMs): detects when the LLM has stopped
+        // generating (paused for longer than this) so a partial/complete response can be
+        // returned instead of waiting for the full overall timeout.
+        var pauseTimeoutMs = _pauseTimeoutMs;
 
         process.OutputDataReceived += (sender, e) =>
         {
@@ -163,53 +220,78 @@ public class PersistentLlmProcess : IPersistentLlmProcess
             lock (outputLock)
             {
                 lastOutputTime = DateTime.UtcNow;
+                anyOutputReceived = true;
                 fullOutput.AppendLine(e.Data); // Keep full output for analysis
+
+                // Newer llama-cli builds default to conversation mode: the chat template is
+                // applied internally (so no assistant marker ever appears on stdout) and the
+                // process stays alive waiting for the next user turn instead of exiting. The
+                // per-turn stats line it prints right after the response is therefore treated
+                // as an end-of-generation marker so we stop immediately instead of waiting for
+                // the pause/overall timeout. It's excluded from the captured response.
+                if (LlmOutputPatterns.IsTurnStatsLine(e.Data))
+                {
+                    Console.WriteLine($"\n[Generation complete - stats line detected: {e.Data.Trim()}]");
+                    endMarkerDetected = true;
+                    return;
+                }
 
                 // Look for assistant tag - support multiple formats
                 if (!assistantStarted)
                 {
-                    var fullText = output.ToString() + e.Data;
-                    
+                    // Accumulate every pre-marker chunk (not just the latest one) so a marker
+                    // split across two OutputDataReceived callbacks is still detected.
+                    output.Append(e.Data).Append('\n');
+                    var fullText = output.ToString();
+
                     // Try different assistant tag formats used by different models
                     // Order matters - check more specific patterns first!
+                    var foundMarker = false;
                     foreach (var (pattern, marker) in LlmOutputPatterns.AssistantPatterns)
                     {
                         var assistantIndex = fullText.IndexOf(pattern, StringComparison.Ordinal); // Use Ordinal for exact match
                         if (assistantIndex >= 0)
                         {
                             assistantStarted = true;
+                            foundMarker = true;
                             var startIndex = assistantIndex + marker.Length;
                             output.Clear();
-                            
+
                             // Extract text after the assistant marker
                             var textAfterMarker = fullText.Substring(startIndex).TrimStart('\r', '\n', ' ');
                             output.Append(textAfterMarker);
-                            
+
                             Console.WriteLine($"\n[Detected format: {pattern}]"); // Debug info
                             Console.Write(textAfterMarker); // Write the first chunk
                             break;
                         }
                     }
+
+                    // Stream the raw, not-yet-matched output live instead of staying silent
+                    // until the marker is found (or the call times out). This is what shows
+                    // model-loading progress, banners, and any interactive-mode prompts while
+                    // we're waiting for the assistant marker to appear.
+                    if (!foundMarker)
+                    {
+                        Console.Write($"\n[raw] {e.Data}");
+                    }
                 }
                 else
                 {
                     // Check if this chunk contains an end marker
-                    foreach (var endMarker in LlmOutputPatterns.EndMarkers)
+                    var matchedEndMarker = LlmOutputPatterns.EndMarkers.FirstOrDefault(m => e.Data.Contains(m));
+                    if (matchedEndMarker != null)
                     {
-                        if (e.Data.Contains(endMarker))
+                        // Extract text before the end marker
+                        var endIndex = e.Data.IndexOf(matchedEndMarker, StringComparison.Ordinal);
+                        if (endIndex > 0)
                         {
-                            // Extract text before the end marker
-                            var endIndex = e.Data.IndexOf(endMarker, StringComparison.Ordinal);
-                            if (endIndex > 0)
-                            {
-                                var finalText = e.Data.Substring(0, endIndex);
-                                Console.Write(finalText);
-                                output.Append(finalText);
-                            }
-                            Console.WriteLine($"\n[End marker detected: {endMarker}]");
-                            endMarkerDetected = true;
-                            break;
+                            var finalText = e.Data.Substring(0, endIndex);
+                            Console.Write(finalText);
+                            output.Append(finalText);
                         }
+                        Console.WriteLine($"\n[End marker detected: {matchedEndMarker}]");
+                        endMarkerDetected = true;
                     }
                     
                     // Only append if no end marker detected
@@ -229,7 +311,22 @@ public class PersistentLlmProcess : IPersistentLlmProcess
             {
                 lock (outputLock)
                 {
+                    // stderr activity is liveness too: llama-cli streams model-loading progress
+                    // and prompt-eval info on stderr while stdout stays silent. Without resetting
+                    // the pause timer here, a cold start (banner on stdout at t=0, then 10-30s of
+                    // silent-on-stdout model loading) trips the pause timeout and kills the
+                    // process before the first generated token — the response then contains only
+                    // the startup banner.
+                    lastOutputTime = DateTime.UtcNow;
                     error.AppendLine(e.Data);
+
+                    // Stream stderr live too (skip the noisy, purely informational backend
+                    // lines) so model-loading progress is visible instead of only appearing
+                    // in the final error dump.
+                    if (!e.Data.Contains("ggml_cuda_init") && !e.Data.Contains("load_backend"))
+                    {
+                        Console.Write($"\n[stderr] {e.Data}");
+                    }
                 }
             }
         };
@@ -244,7 +341,7 @@ public class PersistentLlmProcess : IPersistentLlmProcess
         while (!process.HasExited)
         {
             await Task.Delay(1000);
-            if (!assistantStarted) Console.Write(".");
+            if (!anyOutputReceived) Console.Write(".");
             
             var timeSinceOutput = (DateTime.UtcNow - lastOutputTime).TotalMilliseconds;
             var totalTime = (DateTime.UtcNow - processStartTime).TotalMilliseconds;
@@ -264,8 +361,12 @@ public class PersistentLlmProcess : IPersistentLlmProcess
                 break;
             }
             
-            // If we've started getting assistant output and there's a pause, consider done
-            if (assistantStarted && timeSinceOutput > pauseTimeoutMs)
+            // If output has started flowing and there's a pause, consider generation done.
+            // This must not require assistantStarted: llama-cli conversation mode (the default
+            // in newer builds when the model has a chat template) never prints any of the
+            // assistant markers, so gating on the marker alone made the pause timeout dead
+            // code there — every response then waited out the full overall timeout instead.
+            if ((assistantStarted || anyOutputReceived) && timeSinceOutput > pauseTimeoutMs)
             {
                 Console.WriteLine($"\n[Generation complete - {pauseTimeoutMs/1000}s pause detected]");
                 break;
@@ -291,9 +392,15 @@ public class PersistentLlmProcess : IPersistentLlmProcess
         }
 
         // Wait for output/error streams to finish
-        process.WaitForExit();
+        await process.WaitForExitAsync();
 
-        var result = output.ToString();
+        // When no assistant marker was found, `output` holds every raw stdout line seen —
+        // including llama-cli's own startup banner and interactive-UI lines. Strip that
+        // recognizable CLI noise so the caller never receives the banner as if the model
+        // had said it (it would otherwise flow all the way into chat/agent responses).
+        var result = assistantStarted
+            ? output.ToString()
+            : LlmOutputPatterns.StripCliNoise(output.ToString());
         var errorText = error.ToString();
 
         // Debug: If result is empty but we have full output, log for analysis
@@ -332,7 +439,7 @@ public class PersistentLlmProcess : IPersistentLlmProcess
 
         // Remove incomplete sentence at the end if it ends with '>'
         // This happens when generation is cut off mid-token
-        if (cleaned.EndsWith(">") && !cleaned.EndsWith(">>"))
+        if (cleaned.EndsWith('>') && !cleaned.EndsWith(">>"))
         {
             var lastCompleteStop = Math.Max(
                 cleaned.LastIndexOf('.'),
@@ -350,11 +457,12 @@ public class PersistentLlmProcess : IPersistentLlmProcess
 
     public void Dispose()
     {
-        if (_disposed)
-            return;
-
-        _disposed = true;
-        _requestLock?.Dispose();
+        if (!_disposed)
+        {
+            _requestLock?.Dispose();
+            _disposed = true;
+        }
+        GC.SuppressFinalize(this);
     }
 }
 

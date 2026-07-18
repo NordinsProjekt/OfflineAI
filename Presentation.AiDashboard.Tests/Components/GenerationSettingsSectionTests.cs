@@ -12,7 +12,7 @@ namespace Presentation.AiDashboard.Tests.Components;
 /// </summary>
 public class GenerationSettingsSectionTests : TestContext
 {
-    private DashboardState CreateMockDashboardState()
+    private static DashboardState CreateMockDashboardState()
     {
         var state = new DashboardState();
         // Expand sections by default for testing
@@ -21,7 +21,7 @@ public class GenerationSettingsSectionTests : TestContext
         return state;
     }
 
-    private double ParseNumber(string text)
+    private static double ParseNumber(string text)
     {
         // Try current culture first, then invariant
         if (double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out var result))
@@ -124,6 +124,48 @@ public class GenerationSettingsSectionTests : TestContext
         
         Assert.NotNull(timeoutInput);
         Assert.Equal("120", timeoutInput.GetAttribute("value"));
+    }
+
+    [Fact]
+    public void GenerationSettingsSection_PauseTimeoutSeconds_DisplaysCorrectValue()
+    {
+        // Arrange
+        var dashboardState = CreateMockDashboardState();
+        dashboardState.SettingsService.PauseTimeoutSeconds = 25;
+        Services.AddSingleton(dashboardState);
+
+        // Act
+        var cut = RenderComponent<GenerationSettingsSection>();
+
+        // Assert
+        var inputs = cut.FindAll("input[type='number']");
+        var pauseTimeoutInput = inputs.FirstOrDefault(i =>
+            i.GetAttribute("min") == "1" &&
+            i.GetAttribute("max") == "120");
+
+        Assert.NotNull(pauseTimeoutInput);
+        Assert.Equal("25", pauseTimeoutInput.GetAttribute("value"));
+    }
+
+    [Fact]
+    public void GenerationSettingsSection_PauseTimeoutSeconds_CanBeChanged()
+    {
+        // Arrange
+        var dashboardState = CreateMockDashboardState();
+        dashboardState.SettingsService.PauseTimeoutSeconds = 10;
+        Services.AddSingleton(dashboardState);
+
+        var cut = RenderComponent<GenerationSettingsSection>();
+        var inputs = cut.FindAll("input[type='number']");
+        var pauseTimeoutInput = inputs.FirstOrDefault(i =>
+            i.GetAttribute("min") == "1" &&
+            i.GetAttribute("max") == "120");
+
+        // Act
+        pauseTimeoutInput?.Input("25");
+
+        // Assert
+        Assert.Equal(25, dashboardState.SettingsService.PauseTimeoutSeconds);
     }
 
     [Fact]
@@ -329,6 +371,7 @@ public class GenerationSettingsSectionTests : TestContext
         Assert.Contains("Temperature", labelTexts);
         Assert.Contains("Max Tokens", labelTexts);
         Assert.Contains("Timeout (seconds)", labelTexts);
+        Assert.Contains("Pause Timeout (seconds)", labelTexts);
         Assert.Contains("Top-K", labelTexts);
         Assert.Contains("Top-P", labelTexts);
         Assert.Contains("Repeat Penalty", labelTexts);
@@ -349,10 +392,24 @@ public class GenerationSettingsSectionTests : TestContext
         var cut = RenderComponent<GenerationSettingsSection>();
 
         // Assert
-        var hints = cut.FindAll(".oa-hint");
-        Assert.Equal(2, hints.Count);
-        Assert.Contains("Number of knowledge chunks to use (1-5)", hints[0].TextContent);
-        Assert.Contains("Minimum similarity score", hints[1].TextContent);
+        var hintTexts = cut.FindAll(".oa-hint").Select(h => h.TextContent).ToList();
+        Assert.Contains(hintTexts, t => t.Contains("Number of knowledge chunks to use (1-5)"));
+        Assert.Contains(hintTexts, t => t.Contains("Minimum similarity score"));
+    }
+
+    [Fact]
+    public void GenerationSettingsSection_HasHelpText_ForPauseTimeout()
+    {
+        // Arrange
+        var dashboardState = CreateMockDashboardState();
+        Services.AddSingleton(dashboardState);
+
+        // Act
+        var cut = RenderComponent<GenerationSettingsSection>();
+
+        // Assert
+        var hintTexts = cut.FindAll(".oa-hint").Select(h => h.TextContent).ToList();
+        Assert.Contains(hintTexts, t => t.Contains("Raise it for slower/bigger models"));
     }
 
     [Fact]

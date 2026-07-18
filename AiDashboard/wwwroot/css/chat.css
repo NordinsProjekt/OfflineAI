@@ -98,6 +98,149 @@
     scrollbar-color: var(--border-color) transparent;
 }
 
+/***** QuickAsk message classes – dark overrides for chat dashboard *****/
+.oa-chat .oa-messages-list {
+    gap: 1.25rem;
+}
+
+.oa-chat .oa-msg-text {
+    background: linear-gradient(135deg, rgba(21, 26, 36, 0.7), rgba(15, 20, 25, 0.7));
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: 16px;
+    border-top-left-radius: 4px;
+    backdrop-filter: blur(10px);
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s ease;
+}
+
+.oa-chat .oa-msg-text:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.oa-chat .oa-message.user .oa-msg-text {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(37, 99, 235, 0.15));
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-top-left-radius: 16px;
+    border-top-right-radius: 4px;
+}
+
+.oa-chat .oa-msg-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    border: 2px solid rgba(59, 130, 246, 0.2);
+    box-shadow: var(--shadow-md);
+}
+
+.oa-chat .oa-message.user .oa-msg-avatar {
+    background: linear-gradient(135deg, var(--accent-success), #059669);
+    border-color: rgba(16, 185, 129, 0.2);
+}
+
+.oa-chat .oa-msg-content {
+    max-width: 75%;
+}
+
+.oa-chat .oa-msg-meta {
+    color: var(--text-muted);
+}
+
+/***** Human-readable prose elements emitted by LlmResponseFormatterService *****/
+.oa-chat .oa-msg-text .llm-heading {
+    margin: 0.75rem 0 0.5rem 0;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.3;
+}
+
+.oa-chat .oa-msg-text .llm-heading:first-child {
+    margin-top: 0;
+}
+
+.oa-chat .oa-msg-text .llm-hr {
+    margin: 0.75rem 0;
+    border: none;
+    border-top: 2px solid var(--border-color);
+}
+
+.oa-chat .oa-msg-text .llm-quote {
+    display: block;
+    margin: 0.5rem 0;
+    padding: 0.5rem 1rem;
+    border-left: 4px solid var(--accent-primary);
+    background: rgba(59, 130, 246, 0.08);
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+.oa-chat .oa-msg-text .llm-list {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+    line-height: 1.6;
+}
+
+.oa-chat .oa-msg-text .llm-list li {
+    margin: 0.25rem 0;
+}
+
+/***** Code block styling emitted by LlmResponseFormatterService *****/
+.oa-chat .oa-msg-text .code-block-header,
+.oa-chat .oa-msg-text .code-block-footer {
+    font-weight: 600;
+    color: white;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-radius: 6px 6px 0 0;
+}
+
+.oa-chat .oa-msg-text .code-block-footer {
+    border-radius: 0 0 6px 6px;
+}
+
+.oa-chat .oa-msg-text .code-block {
+    display: block;
+    background: rgba(0, 0, 0, 0.4);
+    color: #d4d4d4;
+    margin: 0;
+    padding: 1rem;
+    overflow-x: auto;
+    font-family: 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+}
+
+.oa-chat .oa-msg-text .syntax-keyword { color: #569cd6; font-weight: 500; }
+.oa-chat .oa-msg-text .syntax-string { color: #ce9178; }
+.oa-chat .oa-msg-text .syntax-comment { color: #6a9955; font-style: italic; }
+.oa-chat .oa-msg-text .syntax-number { color: #b5cea8; }
+.oa-chat .oa-msg-text .syntax-type { color: #4ec9b0; }
+.oa-chat .oa-msg-text .syntax-tag { color: #569cd6; }
+.oa-chat .oa-msg-text .syntax-attribute { color: #9cdcfe; }
+.oa-chat .oa-msg-text .syntax-razor { color: #c586c0; font-weight: 500; }
+.oa-chat .oa-msg-text .syntax-selector { color: #d7ba7d; }
+.oa-chat .oa-msg-text .syntax-property { color: #9cdcfe; }
+.oa-chat .oa-msg-text .syntax-value { color: #ce9178; }
+
+.oa-chat .oa-typing-indicator {
+    background: linear-gradient(135deg, rgba(21, 26, 36, 0.7), rgba(15, 20, 25, 0.7));
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    border-top-left-radius: 4px;
+}
+
+.oa-chat .oa-typing-indicator span {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+}
+
 .oa-message {
     display: flex;
     gap: 14px;
@@ -231,6 +374,87 @@
     padding: 0;
     border: none;
 }
+
+/***** Human-readable prose elements emitted by LlmResponseFormatterService *****/
+.oa-bubble .llm-heading {
+    margin: 10px 0 6px 0;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.3;
+}
+
+.oa-bubble .llm-heading:first-child {
+    margin-top: 0;
+}
+
+.oa-bubble .llm-hr {
+    margin: 10px 0;
+    border: none;
+    border-top: 2px solid var(--border-color);
+}
+
+.oa-bubble .llm-quote {
+    display: block;
+    margin: 8px 0;
+    padding: 6px 12px;
+    border-left: 4px solid var(--accent-primary);
+    background: rgba(59, 130, 246, 0.08);
+    font-style: italic;
+}
+
+.oa-bubble .llm-list {
+    margin: 6px 0;
+    padding-left: 22px;
+    line-height: 1.6;
+}
+
+.oa-bubble .llm-list li {
+    margin: 4px 0;
+}
+
+/***** Code block styling emitted by LlmResponseFormatterService *****/
+.oa-bubble .code-block-header,
+.oa-bubble .code-block-footer {
+    font-weight: 600;
+    color: white;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    padding: 8px 12px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-radius: 8px 8px 0 0;
+}
+
+.oa-bubble .code-block-footer {
+    border-radius: 0 0 8px 8px;
+}
+
+.oa-bubble .code-block {
+    display: block;
+    background: rgba(0, 0, 0, 0.4);
+    color: #d4d4d4;
+    margin: 0;
+    padding: 12px;
+    overflow-x: auto;
+    font-family: 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+}
+
+.oa-bubble .syntax-keyword { color: #569cd6; font-weight: 500; }
+.oa-bubble .syntax-string { color: #ce9178; }
+.oa-bubble .syntax-comment { color: #6a9955; font-style: italic; }
+.oa-bubble .syntax-number { color: #b5cea8; }
+.oa-bubble .syntax-type { color: #4ec9b0; }
+.oa-bubble .syntax-tag { color: #569cd6; }
+.oa-bubble .syntax-attribute { color: #9cdcfe; }
+.oa-bubble .syntax-razor { color: #c586c0; font-weight: 500; }
+.oa-bubble .syntax-selector { color: #d7ba7d; }
+.oa-bubble .syntax-property { color: #9cdcfe; }
+.oa-bubble .syntax-value { color: #ce9178; }
 
 .oa-message-time {
     font-size: 11px;

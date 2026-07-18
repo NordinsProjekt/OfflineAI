@@ -174,7 +174,7 @@ public class MemoryFragmentCleaningService
     /// <summary>
     /// Clean specific fragments by ID.
     /// </summary>
-    public async Task<int> CleanFragmentsAsync(IEnumerable<Guid> fragmentIds, bool dryRun = false)
+    public static async Task<int> CleanFragmentsAsync(IEnumerable<Guid> fragmentIds, bool dryRun = false)
     {
         int cleanedCount = 0;
         

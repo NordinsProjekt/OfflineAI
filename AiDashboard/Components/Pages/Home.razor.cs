@@ -3,17 +3,25 @@ using Microsoft.AspNetCore.Components.Web;
 using AiDashboard.State;
 using AiDashboard.Models;
 using AiDashboard.Services.Interfaces;
+using Services.FileAgent;
+using Services.AgentTools;
 
 namespace AiDashboard.Components.Pages;
 
-public partial class Home : IDisposable
+public sealed partial class Home : IDisposable
 {
     [Inject] private DashboardState Dashboard { get; set; } = default!;
     [Inject] private ILlmResponseFormatterService Formatter { get; set; } = default!;
+    [Inject] private IFileAgentService FileAgent { get; set; } = default!;
+    [Inject] private IAgenticChatService AgenticChat { get; set; } = default!;
 
     private string composerText = string.Empty;
     private bool isProcessing = false;
-    private ElementReference messagesContainer;
+
+    // Bare filename of the most recently uploaded file (via AgentFileUpload), so a terse
+    // follow-up like "Summarize" can still be resolved to the right /läs-pdf or /läs command —
+    // see IAgenticChatService.SendWithToolsAsync's recentlyUploadedFilename parameter.
+    private string? lastUploadedFilename;
 
     private List<ChatMessageModel> messages = new()
     {
@@ -74,6 +82,28 @@ public partial class Home : IDisposable
         composerText = value;
     }
 
+    private void OnFileUploaded(string filename)
+    {
+        lastUploadedFilename = filename;
+
+        var msg = new ChatMessageModel
+        {
+            IsUser = false,
+            Text = $"✓ Fil uppladdad: {filename} — fråga mig t.ex. \"sammanfatta {filename}\" så läser jag den."
+        };
+        msg.FormattedText = FormatMessage(msg.Text, isUser: false);
+        messages.Add(msg);
+        StateHasChanged();
+    }
+
+    private void OnFileUploadError(string errorMessage)
+    {
+        var msg = new ChatMessageModel { IsUser = false, Text = $"⚠ {errorMessage}" };
+        msg.FormattedText = FormatMessage(msg.Text, isUser: false);
+        messages.Add(msg);
+        StateHasChanged();
+    }
+
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Enter" && !e.ShiftKey)
@@ -90,7 +120,7 @@ public partial class Home : IDisposable
         composerText = string.Empty;
         isProcessing = true;
 
-        // Add user message
+        // Add user message to chat history
         var userMsg = new ChatMessageModel { IsUser = true, Text = userMessage };
         userMsg.FormattedText = FormatMessage(userMsg.Text, isUser: true);
         messages.Add(userMsg);
@@ -98,13 +128,136 @@ public partial class Home : IDisposable
 
         try
         {
-            // Get AI response
-            var response = await Dashboard.SendMessageAsync(userMessage);
+            if (FileAgent.IsCommand(userMessage))
+            {
+                var result = await FileAgent.ExecuteAsync(userMessage);
 
-            // Add AI response - formatter handles all formatting
-            var aiMsg = new ChatMessageModel { IsUser = false, Text = response };
-            aiMsg.FormattedText = FormatMessage(aiMsg.Text, isUser: false);
-            messages.Add(aiMsg);
+                if (result.ResultType == FileAgentResultType.FileRead && result.IsSuccess
+                    && result.InjectedContext is not null)
+                {
+                    // /läs: file content is combined with the user-supplied instruction into
+                    // InjectedContext (see FileAgentService.ReadFileAsync), then forwarded to the AI
+                    var response = await Dashboard.SendActiveAsync(result.InjectedContext);
+                    var aiMsg = new ChatMessageModel { IsUser = false, Text = response };
+                    aiMsg.FormattedText = FormatMessage(aiMsg.Text, isUser: false);
+                    messages.Add(aiMsg);
+                }
+                else if (result.ResultType == FileAgentResultType.FillRequested && result.IsSuccess
+                    && result.LlmPrompt is not null)
+                {
+                    // /fyll: send the structured prompt to the LLM
+                    var response = await Dashboard.SendActiveAsync(result.LlmPrompt);
+
+                    if (FileAgent.TryExtractFileContent(response, out var fileContent))
+                    {
+                        // Save the extracted block to the file
+                        await FileAgent.WriteExtractedContentAsync(result.TargetFilename!, fileContent);
+
+                        // Show the response with markers stripped
+                        var displayText = FileAgent.StripFileMarkers(response);
+                        var aiMsg = new ChatMessageModel { IsUser = false, Text = displayText };
+                        aiMsg.FormattedText = FormatMessage(displayText, isUser: false);
+                        messages.Add(aiMsg);
+
+                        var confirmMsg = new ChatMessageModel
+                        {
+                            IsUser = false,
+                            Text   = $"✓ Fil sparad: {result.TargetFilename}"
+                        };
+                        confirmMsg.FormattedText = FormatMessage(confirmMsg.Text, isUser: false);
+                        messages.Add(confirmMsg);
+                    }
+                    else
+                    {
+                        // LLM did not use markers — show raw response + warning
+                        var aiMsg = new ChatMessageModel { IsUser = false, Text = response };
+                        aiMsg.FormattedText = FormatMessage(response, isUser: false);
+                        messages.Add(aiMsg);
+
+                        var warnMsg = new ChatMessageModel
+                        {
+                            IsUser = false,
+                            Text   = $"⚠ Kunde inte extrahera filinnehåll — filen sparades inte. Kontrollera att LLM:n använde markörerna <<<FIL>>> och <<<SLUT>>>."
+                        };
+                        warnMsg.FormattedText = FormatMessage(warnMsg.Text, isUser: false);
+                        messages.Add(warnMsg);
+                    }
+                }
+                else if (result.ResultType == FileAgentResultType.EditRequested && result.IsSuccess
+                    && result.LlmPrompt is not null)
+                {
+                    // /redigera: send the numbered-content prompt to the LLM and expect one or
+                    // more <REDIGERA RAD=...> blocks describing which lines to replace
+                    var response = await Dashboard.SendActiveAsync(result.LlmPrompt);
+
+                    if (FileAgent.TryExtractLineEdits(response, out var edits))
+                    {
+                        var applyResult = await FileAgent.ApplyLineEditsAsync(result.TargetFilename!, edits);
+
+                        // Show any explanatory text the LLM wrote outside the edit blocks
+                        var displayText = FileAgent.StripEditMarkers(response);
+                        if (!string.IsNullOrWhiteSpace(displayText))
+                        {
+                            var aiMsg = new ChatMessageModel { IsUser = false, Text = displayText };
+                            aiMsg.FormattedText = FormatMessage(displayText, isUser: false);
+                            messages.Add(aiMsg);
+                        }
+
+                        var resultMsg = new ChatMessageModel { IsUser = false, Text = applyResult.Message };
+                        resultMsg.FormattedText = FormatMessage(applyResult.Message, isUser: false);
+                        messages.Add(resultMsg);
+                    }
+                    else
+                    {
+                        // LLM did not use the expected format — show raw response + warning
+                        var aiMsg = new ChatMessageModel { IsUser = false, Text = response };
+                        aiMsg.FormattedText = FormatMessage(response, isUser: false);
+                        messages.Add(aiMsg);
+
+                        var warnMsg = new ChatMessageModel
+                        {
+                            IsUser = false,
+                            Text   = "⚠ Kunde inte tolka radändringar — filen ändrades inte."
+                        };
+                        warnMsg.FormattedText = FormatMessage(warnMsg.Text, isUser: false);
+                        messages.Add(warnMsg);
+                    }
+                }
+                else
+                {
+                    // /skapa or error: show the result as a system message
+                    var sysMsg = new ChatMessageModel { IsUser = false, Text = result.Message };
+                    sysMsg.FormattedText = FormatMessage(sysMsg.Text, isUser: false);
+                    messages.Add(sysMsg);
+                }
+            }
+            else
+            {
+                // Regular AI message — let the LLM decide (agentic pattern) whether it needs to
+                // use a file tool; AgenticChat primes it with the tool dictionary, detects any
+                // slash command in the reply via string search, executes it, and feeds the
+                // result back to the LLM for a final answer.
+                var agentResult = await AgenticChat.SendWithToolsAsync(
+                    userMessage,
+                    Dashboard.SendActiveAsync,
+                    onToolStatus: status => Dashboard.StatusMessage = status,
+                    recentlyUploadedFilename: lastUploadedFilename);
+
+                foreach (var invocation in agentResult.ToolInvocations)
+                {
+                    var toolMsg = new ChatMessageModel
+                    {
+                        IsUser = false,
+                        Text   = $"🔧 Used {invocation.Command} — {invocation.ResultSummary}"
+                    };
+                    toolMsg.FormattedText = FormatMessage(toolMsg.Text, isUser: false);
+                    messages.Add(toolMsg);
+                }
+
+                var aiMsg = new ChatMessageModel { IsUser = false, Text = agentResult.FinalResponse };
+                aiMsg.FormattedText = FormatMessage(aiMsg.Text, isUser: false);
+                messages.Add(aiMsg);
+            }
         }
         catch (Exception ex)
         {
@@ -122,5 +275,6 @@ public partial class Home : IDisposable
     public void Dispose()
     {
         Dashboard.OnChange -= Refresh;
+        GC.SuppressFinalize(this);
     }
 }

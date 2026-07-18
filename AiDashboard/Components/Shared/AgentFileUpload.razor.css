@@ -1,0 +1,70 @@
+.agent-upload {
+    display: inline-flex;
+    align-items: center;
+}
+
+.agent-upload-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.agent-upload-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.agent-upload-btn.disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+/* Theme: Dark (Dashboard chat) */
+.theme-dark .agent-upload-btn {
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.theme-dark .agent-upload-btn:not(.disabled):hover {
+    background: rgba(59, 130, 246, 0.16);
+    border-color: rgba(59, 130, 246, 0.5);
+    transform: translateY(-2px);
+}
+
+/* Theme: Light (QuickAsk) */
+.theme-light .agent-upload-btn {
+    background: white;
+    border: 2px solid #e2e8f0;
+}
+
+.theme-light .agent-upload-btn:not(.disabled):hover {
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.agent-upload-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(128, 128, 128, 0.3);
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: agent-upload-spin 0.8s linear infinite;
+}
+
+@keyframes agent-upload-spin {
+    to { transform: rotate(360deg); }
+}

@@ -1,0 +1,146 @@
+/* Agent Mode page — reuses the .oa-quick-ask-page / .oa-quick-header / .oa-quick-container /
+   .oa-quick-card shell from quickask.css and the .oa-batch-* controls/badges/rows from
+   batchprocessing.css (same light-card look). Only agent-specific bits live here. */
+
+.oa-goal-card {
+    padding: 1.5rem;
+    overflow-y: auto;
+}
+
+.oa-goal-workspace {
+    margin: 0 0 0.75rem;
+    font-size: 0.85rem;
+    color: #4a5568;
+}
+
+.oa-goal-workspace-path {
+    margin-left: 0.5rem;
+    color: #a0aec0;
+    font-size: 0.8rem;
+}
+
+.oa-goal-input {
+    width: 100%;
+}
+
+.oa-goal-input:disabled {
+    background: #f7fafc;
+    color: #a0aec0;
+}
+
+.oa-goal-phase-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+}
+
+.oa-goal-iteration {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #4a5568;
+}
+
+.oa-goal-verdict {
+    color: #c53030;
+}
+
+.oa-goal-log {
+    margin-top: 1.5rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 0.85rem 1rem;
+    background: #f7fafc;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.oa-goal-log-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #a0aec0;
+    margin-bottom: 0.5rem;
+}
+
+.oa-goal-log-line {
+    font-size: 0.85rem;
+    color: #4a5568;
+    line-height: 1.6;
+}
+
+.oa-goal-log-hint {
+    margin: 0.5rem 0 0;
+    font-size: 0.8rem;
+    color: #a0aec0;
+}
+
+/* Right-hand header button, opposite the back button on the left. */
+.oa-header-action {
+    margin-left: auto;
+}
+
+.oa-header-action:hover {
+    transform: translateX(4px);
+}
+
+/* Agent History page — a run list where each row expands into its own detail. */
+
+.oa-history-summary {
+    cursor: pointer;
+}
+
+.oa-history-meta {
+    margin-left: auto;
+    font-size: 0.8rem;
+    color: #a0aec0;
+    white-space: nowrap;
+}
+
+.oa-history-detail {
+    margin-top: 0.85rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid #e2e8f0;
+}
+
+.oa-history-goal {
+    margin: 0 0 1rem;
+    font-size: 0.9rem;
+    color: #2d3748;
+    white-space: pre-wrap;
+}
+
+.oa-history-facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.35rem 1rem;
+    margin: 0 0 1rem;
+    font-size: 0.85rem;
+}
+
+.oa-history-facts dt {
+    color: #a0aec0;
+    font-weight: 600;
+}
+
+.oa-history-facts dd {
+    margin: 0;
+    color: #4a5568;
+    word-break: break-all;
+}
+
+.oa-history-section-title {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #a0aec0;
+    margin: 1.25rem 0 0.5rem;
+}
+
+.oa-history-event-time {
+    color: #a0aec0;
+    margin-right: 0.5rem;
+    font-variant-numeric: tabular-nums;
+}

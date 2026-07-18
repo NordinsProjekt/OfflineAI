@@ -30,7 +30,7 @@ public class LanguageStopWordsServiceTests
         stopWords.Should().Contain("sorterar");
         stopWords.Should().Contain("jag");
         stopWords.Should().Contain("en");
-        stopWords.Should().Contain("pÂ");
+        stopWords.Should().Contain("p√•");
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public class LanguageStopWordsServiceTests
         stopWords.Should().NotBeEmpty();
         stopWords.Should().Contain("hur");
         stopWords.Should().Contain("vad");
-        stopWords.Should().Contain("n‰r");
+        stopWords.Should().Contain("n√§r");
     }
 
     [Fact]
@@ -54,7 +54,7 @@ public class LanguageStopWordsServiceTests
 
         // Assert
         stopWords.Should().NotBeEmpty();
-        stopWords.Should().Contain("Âtervinna");
+        stopWords.Should().Contain("√•tervinna");
         stopWords.Should().Contain("sorterar");
     }
 
@@ -67,10 +67,10 @@ public class LanguageStopWordsServiceTests
         // Assert - Recycling-specific verbs should be included
         stopWords.Should().Contain("sorterar");
         stopWords.Should().Contain("sortera");
-        stopWords.Should().Contain("sl‰nger");
-        stopWords.Should().Contain("sl‰nga");
-        stopWords.Should().Contain("Âtervinna");
-        stopWords.Should().Contain("Âtervinner");
+        stopWords.Should().Contain("sl√§nger");
+        stopWords.Should().Contain("sl√§nga");
+        stopWords.Should().Contain("√•tervinna");
+        stopWords.Should().Contain("√•tervinner");
     }
 
     [Fact]
@@ -83,8 +83,8 @@ public class LanguageStopWordsServiceTests
         stopWords.Should().Contain("hur");
         stopWords.Should().Contain("var");
         stopWords.Should().Contain("vad");
-        stopWords.Should().Contain("n‰r");
-        stopWords.Should().Contain("varfˆr");
+        stopWords.Should().Contain("n√§r");
+        stopWords.Should().Contain("varf√∂r");
         stopWords.Should().Contain("vem");
         stopWords.Should().Contain("vilken");
         stopWords.Should().Contain("vilket");
@@ -99,8 +99,8 @@ public class LanguageStopWordsServiceTests
         // Assert - Modal verbs should be filtered
         stopWords.Should().Contain("ska");
         stopWords.Should().Contain("kan");
-        stopWords.Should().Contain("mÂste");
-        stopWords.Should().Contain("bˆr");
+        stopWords.Should().Contain("m√•ste");
+        stopWords.Should().Contain("b√∂r");
     }
 
     [Fact]
@@ -130,9 +130,9 @@ public class LanguageStopWordsServiceTests
         stopWords.Should().Contain("det");
         stopWords.Should().Contain("de");
         stopWords.Should().Contain("i");
-        stopWords.Should().Contain("pÂ");
+        stopWords.Should().Contain("p√•");
         stopWords.Should().Contain("till");
-        stopWords.Should().Contain("frÂn");
+        stopWords.Should().Contain("fr√•n");
         stopWords.Should().Contain("med");
         stopWords.Should().Contain("av");
     }
@@ -284,7 +284,7 @@ public class LanguageStopWordsServiceTests
         lightStopWords.Should().Contain("en");
         lightStopWords.Should().Contain("ett");
         lightStopWords.Should().Contain("i");
-        lightStopWords.Should().Contain("pÂ");
+        lightStopWords.Should().Contain("p√•");
         
         // Should NOT contain verbs or question words
         lightStopWords.Should().NotContain("sorterar");
@@ -341,7 +341,7 @@ public class LanguageStopWordsServiceTests
     public void GetStopWords_NullLanguage_ReturnsEmptyArray()
     {
         // Act
-        var stopWords = _service.GetStopWords(null);
+        var stopWords = _service.GetStopWords(null!);
 
         // Assert
         stopWords.Should().BeEmpty();
@@ -424,7 +424,7 @@ public class LanguageStopWordsServiceTests
     public void FilterSwedishQuery_VarKanJagLamnaBatterier_ShouldKeepBatterier()
     {
         // Arrange
-        var query = "Var kan jag l‰mna batterier?";
+        var query = "Var kan jag l√§mna batterier?";
         var stopWords = _service.GetStopWords("Swedish");
 
         // Act
@@ -435,7 +435,7 @@ public class LanguageStopWordsServiceTests
         var filtered = words.Where(w => !stopWords.Contains(w)).ToList();
 
         // Assert
-        filtered.Should().Contain("l‰mna");
+        filtered.Should().Contain("l√§mna");
         filtered.Should().Contain("batterier");
     }
 

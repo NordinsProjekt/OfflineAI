@@ -1,5 +1,3 @@
-using System;
-
 namespace Services.Configuration;
 
 /// <summary>
@@ -23,7 +21,7 @@ public class GenerationSettingsService
         }
     }
 
-    private int _maxTokens = 512;
+    private int _maxTokens = 128000;
     public int MaxTokens
     {
         get => _maxTokens;
@@ -107,6 +105,23 @@ public class GenerationSettingsService
         }
     }
 
+    // How long (seconds) to wait after the last output chunk before treating generation as
+    // complete/stalled. Independent of TimeoutSeconds, which bounds the whole call. A larger
+    // or slower local model can have multi-second gaps between chunks, so this is user-tunable
+    // instead of the previously hardcoded 10s (see Docs/LLM-PAUSE-TIMEOUT-10-SECONDS.md).
+    private int _pauseTimeoutSeconds = 10;
+    public int PauseTimeoutSeconds
+    {
+        get => _pauseTimeoutSeconds;
+        set
+        {
+            var clampedValue = Math.Clamp(value, 1, 120);
+            if (_pauseTimeoutSeconds == clampedValue) return;
+            _pauseTimeoutSeconds = clampedValue;
+            NotifyStateChanged();
+        }
+    }
+
     private bool _ragMode = true;
     public bool RagMode
     {
@@ -184,9 +199,24 @@ public class GenerationSettingsService
     }
 
     /// <summary>
-    /// Get GPU layers based on UseGpu toggle (34 layers when ON, 0 when OFF)
+    /// Number of model layers to offload to the GPU via llama.cpp's <c>-ngl</c> flag, used when
+    /// <see cref="UseGpu"/> is on. Default: 99 — llama.cpp's well-known "offload all layers"
+    /// sentinel, which it automatically clamps to however many layers the selected model
+    /// actually has, so switching models never requires re-tuning this by hand. Lower it only to
+    /// intentionally keep some layers on CPU (e.g. to fit a specific VRAM budget).
     /// </summary>
-    public int GpuLayers => UseGpu ? 34 : 0;
+    private int _gpuLayers = 99;
+    public int GpuLayers
+    {
+        get => _gpuLayers;
+        set
+        {
+            var clampedValue = Math.Clamp(value, 0, 99);
+            if (_gpuLayers == clampedValue) return;
+            _gpuLayers = clampedValue;
+            NotifyStateChanged();
+        }
+    }
 
     /// <summary>
     /// Create a GenerationSettings object from current settings
@@ -236,12 +266,14 @@ public class GenerationSettingsService
         PresencePenalty = 0.0;
         FrequencyPenalty = 0.0;
         TimeoutSeconds = 300; // 5 minutes (changed from 30 seconds)
+        PauseTimeoutSeconds = 10;
         RagMode = true;
         PerformanceMetrics = false;
         DebugMode = false;
         RagTopK = 3;
         RagMinRelevanceScore = 0.5;
-        UseGpu = true; // Default to GPU enabled with 34 layers
+        UseGpu = true; // Default to GPU enabled
+        GpuLayers = 99; // Offload all layers — auto-adapts to whichever model is loaded
     }
 
     private void NotifyStateChanged() => OnChange?.Invoke();

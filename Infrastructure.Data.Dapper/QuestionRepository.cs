@@ -13,6 +13,7 @@ public class QuestionRepository : IQuestionRepository
 {
     private readonly string _connectionString;
     private const string QuestionsTable = "Questions";
+    private const string QuestionsTableRef = "[Questions]";
 
     public QuestionRepository(string connectionString)
     {
@@ -24,24 +25,38 @@ public class QuestionRepository : IQuestionRepository
         var createTableSql = $@"
             IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '{QuestionsTable}')
             BEGIN
-                CREATE TABLE [{QuestionsTable}] (
+                CREATE TABLE {QuestionsTableRef} (
                     Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
                     Question NVARCHAR(MAX) NOT NULL,
                     Answer NVARCHAR(MAX) NOT NULL,
                     LlmId UNIQUEIDENTIFIER NOT NULL,
+                    ConversationId UNIQUEIDENTIFIER NULL,
                     CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
                     FOREIGN KEY (LlmId) REFERENCES [LLMs](Id) ON DELETE CASCADE
                 );
 
-                CREATE INDEX IX_{QuestionsTable}_LlmId ON [{QuestionsTable}](LlmId);
-                CREATE INDEX IX_{QuestionsTable}_CreatedAt ON [{QuestionsTable}](CreatedAt);
+                CREATE INDEX IX_{QuestionsTable}_LlmId ON {QuestionsTableRef}(LlmId);
+                CREATE INDEX IX_{QuestionsTable}_CreatedAt ON {QuestionsTableRef}(CreatedAt);
+                CREATE INDEX IX_{QuestionsTable}_ConversationId ON {QuestionsTableRef}(ConversationId);
+            END
+            ELSE
+            BEGIN
+                -- Add ConversationId column if it doesn't exist (migration for existing databases)
+                IF NOT EXISTS (SELECT * FROM sys.columns
+                               WHERE object_id = OBJECT_ID('{QuestionsTable}')
+                               AND name = 'ConversationId')
+                BEGIN
+                    ALTER TABLE {QuestionsTableRef} ADD ConversationId UNIQUEIDENTIFIER NULL;
+
+                    CREATE INDEX IX_{QuestionsTable}_ConversationId ON {QuestionsTableRef}(ConversationId);
+                END
             END";
 
         using var connection = new SqlConnection(_connectionString);
         await connection.ExecuteAsync(createTableSql);
     }
 
-    public async Task<Guid> SaveQuestionAsync(string question, string answer, Guid llmId)
+    public async Task<Guid> SaveQuestionAsync(string question, string answer, Guid llmId, Guid? conversationId = null)
     {
         if (string.IsNullOrWhiteSpace(question))
             throw new ArgumentException("Question cannot be empty", nameof(question));
@@ -56,13 +71,14 @@ public class QuestionRepository : IQuestionRepository
             Question = question,
             Answer = answer,
             LlmId = llmId,
+            ConversationId = conversationId,
             CreatedAt = DateTime.UtcNow
         };
 
         using var connection = new SqlConnection(_connectionString);
         await connection.ExecuteAsync(
-            $@"INSERT INTO [{QuestionsTable}] (Id, Question, Answer, LlmId, CreatedAt)
-               VALUES (@Id, @Question, @Answer, @LlmId, @CreatedAt)",
+            $@"INSERT INTO {QuestionsTableRef} (Id, Question, Answer, LlmId, ConversationId, CreatedAt)
+               VALUES (@Id, @Question, @Answer, @LlmId, @ConversationId, @CreatedAt)",
             entity);
 
         return entity.Id;
@@ -72,7 +88,7 @@ public class QuestionRepository : IQuestionRepository
     {
         using var connection = new SqlConnection(_connectionString);
         var results = await connection.QueryAsync<QuestionEntity>(
-            $"SELECT * FROM [{QuestionsTable}] ORDER BY CreatedAt DESC");
+            $"SELECT * FROM {QuestionsTableRef} ORDER BY CreatedAt DESC");
 
         return results.AsList();
     }
@@ -81,8 +97,18 @@ public class QuestionRepository : IQuestionRepository
     {
         using var connection = new SqlConnection(_connectionString);
         var results = await connection.QueryAsync<QuestionEntity>(
-            $"SELECT * FROM [{QuestionsTable}] WHERE LlmId = @LlmId ORDER BY CreatedAt DESC",
+            $"SELECT * FROM {QuestionsTableRef} WHERE LlmId = @LlmId ORDER BY CreatedAt DESC",
             new { LlmId = llmId });
+
+        return results.AsList();
+    }
+
+    public async Task<List<QuestionEntity>> GetQuestionsByConversationAsync(Guid conversationId)
+    {
+        using var connection = new SqlConnection(_connectionString);
+        var results = await connection.QueryAsync<QuestionEntity>(
+            $"SELECT * FROM {QuestionsTableRef} WHERE ConversationId = @ConversationId ORDER BY CreatedAt ASC",
+            new { ConversationId = conversationId });
 
         return results.AsList();
     }
@@ -91,7 +117,7 @@ public class QuestionRepository : IQuestionRepository
     {
         using var connection = new SqlConnection(_connectionString);
         return await connection.QuerySingleOrDefaultAsync<QuestionEntity>(
-            $"SELECT * FROM [{QuestionsTable}] WHERE Id = @Id",
+            $"SELECT * FROM {QuestionsTableRef} WHERE Id = @Id",
             new { Id = id });
     }
 
@@ -99,7 +125,7 @@ public class QuestionRepository : IQuestionRepository
     {
         using var connection = new SqlConnection(_connectionString);
         var results = await connection.QueryAsync<QuestionEntity>(
-            $"SELECT TOP(@Count) * FROM [{QuestionsTable}] ORDER BY CreatedAt DESC",
+            $"SELECT TOP(@Count) * FROM {QuestionsTableRef} ORDER BY CreatedAt DESC",
             new { Count = count });
 
         return results.AsList();
@@ -109,7 +135,7 @@ public class QuestionRepository : IQuestionRepository
     {
         using var connection = new SqlConnection(_connectionString);
         await connection.ExecuteAsync(
-            $"DELETE FROM [{QuestionsTable}] WHERE Id = @Id",
+            $"DELETE FROM {QuestionsTableRef} WHERE Id = @Id",
             new { Id = id });
     }
 
@@ -120,7 +146,7 @@ public class QuestionRepository : IQuestionRepository
 
         using var connection = new SqlConnection(_connectionString);
         var results = await connection.QueryAsync<QuestionEntity>(
-            $@"SELECT * FROM [{QuestionsTable}] 
+            $@"SELECT * FROM {QuestionsTableRef} 
                WHERE Question LIKE @SearchText OR Answer LIKE @SearchText 
                ORDER BY CreatedAt DESC",
             new { SearchText = $"%{searchText}%" });

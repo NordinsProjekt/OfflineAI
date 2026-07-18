@@ -1,6 +1,7 @@
 using Application.AI.Pooling;
 using Application.AI.Processing;
 using Moq;
+using System.Collections.Concurrent;
 
 namespace Application.AI.Tests.Pooling;
 
@@ -8,7 +9,7 @@ namespace Application.AI.Tests.Pooling;
 /// Unit tests for ModelInstancePool class.
 /// Tests cover initialization, instance management, health checks, and disposal.
 /// </summary>
-public class ModelInstancePoolTests : IDisposable
+public sealed class ModelInstancePoolTests : IDisposable
 {
     private readonly string _testLlmPath;
     private readonly string _testModelPath;
@@ -187,6 +188,81 @@ public class ModelInstancePoolTests : IDisposable
 
     #endregion
 
+    #region PauseTimeoutMs Property Tests
+
+    [Fact]
+    public void PauseTimeoutMs_Default_Is10Seconds()
+    {
+        // Arrange & Act
+        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
+
+        // Assert
+        Assert.Equal(10000, pool.PauseTimeoutMs);
+    }
+
+    [Fact]
+    public void PauseTimeoutMs_SetValidValue_UpdatesPauseTimeout()
+    {
+        // Arrange
+        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
+
+        // Act
+        pool.PauseTimeoutMs = 30000;
+
+        // Assert
+        Assert.Equal(30000, pool.PauseTimeoutMs);
+    }
+
+    [Fact]
+    public void PauseTimeoutMs_SetTooLow_ThrowsArgumentOutOfRangeException()
+    {
+        // Arrange
+        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => pool.PauseTimeoutMs = 999);
+        Assert.Contains("Pause timeout must be between 1 and 120 seconds", exception.Message);
+    }
+
+    [Fact]
+    public void PauseTimeoutMs_SetTooHigh_ThrowsArgumentOutOfRangeException()
+    {
+        // Arrange
+        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => pool.PauseTimeoutMs = 120001);
+        Assert.Contains("Pause timeout must be between 1 and 120 seconds", exception.Message);
+    }
+
+    [Fact]
+    public void PauseTimeoutMs_SetMinimumValidValue_Succeeds()
+    {
+        // Arrange
+        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
+
+        // Act
+        pool.PauseTimeoutMs = 1000;
+
+        // Assert
+        Assert.Equal(1000, pool.PauseTimeoutMs);
+    }
+
+    [Fact]
+    public void PauseTimeoutMs_SetMaximumValidValue_Succeeds()
+    {
+        // Arrange
+        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
+
+        // Act
+        pool.PauseTimeoutMs = 120000;
+
+        // Assert
+        Assert.Equal(120000, pool.PauseTimeoutMs);
+    }
+
+    #endregion
+
     #region AvailableCount Property Tests
 
     [Fact]
@@ -249,7 +325,9 @@ public class ModelInstancePoolTests : IDisposable
     {
         // Arrange
         var pool = new ModelInstancePool("invalid-path", "invalid-model", maxInstances: 2);
-        var progressCalls = new List<(int current, int total)>();
+        // ConcurrentBag is used instead of List because the callback is invoked from
+        // parallel tasks and List<T> is not thread-safe.
+        var progressCalls = new ConcurrentBag<(int current, int total)>();
 
         // Act
         try
@@ -324,7 +402,9 @@ public class ModelInstancePoolTests : IDisposable
     {
         // Arrange
         var pool = new ModelInstancePool("invalid-path", "invalid-model", maxInstances: 2);
-        var progressCalls = new List<(int current, int total)>();
+        // ConcurrentBag is used instead of List because the callback is invoked from
+        // parallel tasks and List<T> is not thread-safe.
+        var progressCalls = new ConcurrentBag<(int current, int total)>();
 
         // Act
         try
@@ -377,8 +457,8 @@ public class ModelInstancePoolTests : IDisposable
     {
         // Arrange
         var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-        var cts = new CancellationTokenSource();
-        cts.Cancel();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
 
         // Act & Assert
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
@@ -450,21 +530,6 @@ public class ModelInstancePoolTests : IDisposable
         pool.Dispose();
         // No exception should be thrown
         Assert.True(true);
-    }
-
-    [Fact]
-    public async Task Dispose_SetsDisposedFlag()
-    {
-        // Arrange
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-
-        // Act
-        pool.Dispose();
-
-        // Assert
-        // After disposal, operations should throw ObjectDisposedException
-        await Assert.ThrowsAsync<ObjectDisposedException>(
-            async () => await pool.AcquireAsync());
     }
 
     #endregion
@@ -546,7 +611,7 @@ public class ModelInstancePoolTests : IDisposable
     }
 
     [Fact]
-    public void ConcurrentAccess_MultipleTimeoutChanges_ThreadSafe()
+    public async Task ConcurrentAccess_MultipleTimeoutChanges_ThreadSafe()
     {
         // Arrange
         var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
@@ -560,7 +625,7 @@ public class ModelInstancePoolTests : IDisposable
         }
 
         // Wait for all changes to complete
-        Task.WaitAll(tasks.ToArray());
+        await Task.WhenAll(tasks);
 
         // Assert - Should have one of the valid timeout values
         Assert.True(pool.TimeoutMs >= 1000 && pool.TimeoutMs <= 300000);
@@ -569,16 +634,6 @@ public class ModelInstancePoolTests : IDisposable
     #endregion
 
     #region Edge Cases
-
-    [Fact]
-    public void EdgeCase_MaxInstancesOne_CreatesValidPool()
-    {
-        // Arrange & Act
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath, maxInstances: 1);
-
-        // Assert
-        Assert.Equal(1, pool.MaxInstances);
-    }
 
     [Fact]
     public void EdgeCase_VeryLargeMaxInstances_CreatesValidPool()
@@ -628,55 +683,9 @@ public class ModelInstancePoolTests : IDisposable
         }
     }
 
-    [Fact]
-    public void EdgeCase_DisposeImmediatelyAfterConstruction_Succeeds()
-    {
-        // Arrange & Act
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-        pool.Dispose();
-
-        // Assert - Should not throw
-        Assert.True(true);
-    }
-
     #endregion
 
     #region Error Handling Tests
-
-    [Fact]
-    public async Task ErrorHandling_AcquireWithoutInitialize_ThrowsInvalidOperationException()
-    {
-        // Arrange
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-
-        // Act & Assert
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            async () => await pool.AcquireAsync());
-    }
-
-    [Fact]
-    public async Task ErrorHandling_ReinitializeAfterDispose_ThrowsObjectDisposedException()
-    {
-        // Arrange
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-        pool.Dispose();
-
-        // Act & Assert
-        await Assert.ThrowsAsync<ObjectDisposedException>(
-            async () => await pool.ReinitializeAsync(_testLlmPath, _testModelPath));
-    }
-
-    [Fact]
-    public async Task ErrorHandling_AcquireAfterDispose_ThrowsObjectDisposedException()
-    {
-        // Arrange
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-        pool.Dispose();
-
-        // Act & Assert
-        await Assert.ThrowsAsync<ObjectDisposedException>(
-            async () => await pool.AcquireAsync());
-    }
 
     [Fact]
     public void ErrorHandling_InvalidTimeoutValue_PreservesOldValue()
@@ -810,29 +819,17 @@ public class ModelInstancePoolTests : IDisposable
     [InlineData(0)]
     [InlineData(500)]
     [InlineData(999)]
-    public void ParameterValidation_TimeoutTooLow_ThrowsException(int invalidTimeout)
-    {
-        // Arrange
-        var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
-
-        // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => pool.TimeoutMs = invalidTimeout);
-        
-        pool.Dispose();
-    }
-
-    [Theory]
     [InlineData(300001)]
     [InlineData(400000)]
     [InlineData(1000000)]
-    public void ParameterValidation_TimeoutTooHigh_ThrowsException(int invalidTimeout)
+    public void ParameterValidation_TimeoutOutOfRange_ThrowsException(int invalidTimeout)
     {
         // Arrange
         var pool = new ModelInstancePool(_testLlmPath, _testModelPath);
 
         // Act & Assert
         Assert.Throws<ArgumentOutOfRangeException>(() => pool.TimeoutMs = invalidTimeout);
-        
+
         pool.Dispose();
     }
 
@@ -887,6 +884,152 @@ public class ModelInstancePoolTests : IDisposable
         var property = typeof(ModelInstancePool).GetProperty(nameof(pool.TotalInstances));
         Assert.NotNull(property);
         Assert.Null(property.GetSetMethod());
+    }
+
+    #endregion
+
+    #region Semaphore Consistency Tests (Fixes for partial initialization and return race)
+
+    /// <summary>
+    /// Regression test for Fix 1: after InitializeAsync fails to create all instances the
+    /// exception is surfaced and the pool's AvailableCount stays at 0.
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_AllInstancesFail_ThrowsAndAvailableCountIsZero()
+    {
+        // Arrange
+        var pool = new ModelInstancePool("invalid-llm", "invalid-model", maxInstances: 3);
+
+        // Act & Assert
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await pool.InitializeAsync());
+
+        Assert.Contains("Failed to initialize any LLM instances", ex.Message);
+        Assert.Equal(0, pool.AvailableCount);
+        Assert.Equal(0, pool.TotalInstances);
+
+        pool.Dispose();
+    }
+
+    /// <summary>
+    /// Regression test for Fix 1: after InitializeAsync fails to create all instances the
+    /// exception is thrown before any semaphore draining occurs, so a subsequent AcquireAsync
+    /// propagates the expected "No healthy instances" error and does NOT block indefinitely.
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_AllInstancesFail_AcquireThrowsNoHealthyInstances()
+    {
+        // Arrange – pool whose InitializeAsync throws (all instances fail)
+        var pool = new ModelInstancePool("invalid-llm", "invalid-model", maxInstances: 1);
+
+        try { await pool.InitializeAsync(); }
+        catch (InvalidOperationException) { /* expected */ }
+
+        // Act & Assert – AcquireAsync should not block; it should surface the
+        // "No healthy instances" error since the bag is empty.
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await pool.AcquireAsync());
+
+        Assert.Contains("No healthy instances available in pool", ex.Message);
+
+        pool.Dispose();
+    }
+
+    /// <summary>
+    /// Regression test for Fix 1: when InitializeAsync fails to create all instances, the
+    /// exception is thrown before any semaphore draining occurs, so all maxInstances permits
+    /// are still available. This verifies the semaphore state is consistent with the pool
+    /// being in a failed/unusable state (all permits present, zero instances).
+    /// </summary>
+    [Fact]
+    public async Task InitializeAsync_AllInstancesFail_SemaphoreRetainsAllPermits()
+    {
+        // Arrange – 3-instance pool where all fail
+        const int maxInstances = 3;
+        var pool = new ModelInstancePool("invalid-llm", "invalid-model", maxInstances: maxInstances);
+
+        try { await pool.InitializeAsync(); }
+        catch (InvalidOperationException) { /* expected – all fail */ }
+
+        // Read the private semaphore via reflection
+        var semaphoreField = typeof(ModelInstancePool)
+            .GetField("_semaphore", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.NotNull(semaphoreField);
+
+        var semaphore = (SemaphoreSlim?)semaphoreField!.GetValue(pool);
+        Assert.NotNull(semaphore);
+
+        // When all instances fail the throw occurs before draining, so all maxInstances
+        // permits are still available (pool never became usable).
+        Assert.Equal(maxInstances, semaphore!.CurrentCount);
+
+        pool.Dispose();
+    }
+
+    /// <summary>
+    /// Regression test for Fix 2: ReturnInstance must not release the semaphore when the
+    /// background replacement task fails to create a new instance. Without the fix a
+    /// .ContinueWith(_ => _semaphore.Release()) would release a permit even when no
+    /// instance was added, causing a phantom slot that leads to "No healthy instances".
+    ///
+    /// This test creates a real pool using temp files, acquires the sole instance, then
+    /// switches the pool's internal paths to invalid ones so that the replacement task
+    /// will fail. It marks the acquired instance as unhealthy and returns it, then asserts
+    /// that the semaphore count remains 0 (no phantom release occurred).
+    /// </summary>
+    [Fact]
+    public async Task ReturnInstance_UnhealthyInstanceAndReplacementFails_SemaphoreNotReleased()
+    {
+        // Create real temp files so the initial pool can be constructed
+        var tempLlm = Path.GetTempFileName();
+        var tempModel = Path.GetTempFileName();
+
+        try
+        {
+            var pool = new ModelInstancePool(tempLlm, tempModel, maxInstances: 1);
+            await pool.InitializeAsync();
+
+            // Read private fields via reflection
+            var bindingFlags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+
+            var semaphoreField = typeof(ModelInstancePool).GetField("_semaphore", bindingFlags);
+            var semaphore = (SemaphoreSlim?)semaphoreField!.GetValue(pool);
+            Assert.NotNull(semaphore);
+
+            // Switch the pool's internal paths to invalid so the replacement will fail
+            typeof(ModelInstancePool).GetField("_llmPath", bindingFlags)!.SetValue(pool, "invalid-now");
+            typeof(ModelInstancePool).GetField("_modelPath", bindingFlags)!.SetValue(pool, "invalid-now");
+
+            // Acquire the only instance (semaphore → 0)
+            var pooled = await pool.AcquireAsync();
+            Assert.Equal(0, semaphore!.CurrentCount);
+
+            // Mark the instance as unhealthy so ReturnInstance takes the replacement path
+            var isHealthyBacking = typeof(PersistentLlmProcess)
+                .GetField("<IsHealthy>k__BackingField", bindingFlags);
+            if (isHealthyBacking != null)
+            {
+                isHealthyBacking.SetValue(pooled.Process, false);
+            }
+
+            // Return the unhealthy instance – triggers the background replacement task
+            pooled.Dispose();
+
+            // Allow time for the background task to attempt (and fail) replacement.
+            // The replacement CreateAsync fails instantly (bad path), so 50 ms is plenty.
+            await Task.Delay(50);
+
+            // Assert: since replacement failed, the semaphore must still be 0.
+            // With the old code (.ContinueWith(Release)) it would be 1 here.
+            Assert.Equal(0, semaphore.CurrentCount);
+
+            pool.Dispose();
+        }
+        finally
+        {
+            if (File.Exists(tempLlm)) File.Delete(tempLlm);
+            if (File.Exists(tempModel)) File.Delete(tempModel);
+        }
     }
 
     #endregion

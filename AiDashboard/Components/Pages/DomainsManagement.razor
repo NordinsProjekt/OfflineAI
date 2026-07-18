@@ -23,7 +23,7 @@
 
 	@if (!string.IsNullOrWhiteSpace(statusMessage))
 	{
-		<div class="alert @(statusMessage.StartsWith("[OK]") ? "alert-success" : statusMessage.StartsWith("[ERROR]") ? "alert-danger" : "alert-info")">
+		<div class="alert @GetStatusAlertClass()">
 			@statusMessage
 		</div>
 	}
@@ -302,7 +302,7 @@ gh"></textarea>
 		{
 			var variants = formVariants
 				.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-				.Where(v => !v.Trim().StartsWith("#"))
+				.Where(v => !v.Trim().StartsWith('#'))
 				.Select(v => v.Trim())
 				.Where(v => !string.IsNullOrWhiteSpace(v))
 				.ToArray();
@@ -398,13 +398,20 @@ gh"></textarea>
 		       !string.IsNullOrWhiteSpace(formVariants);
 	}
 
-	private string FormatCategoryName(string category) =>
+	private static string FormatCategoryName(string category) =>
 		string.IsNullOrWhiteSpace(category)
 			? "Uncategorized"
 			: category.Replace("-", " ")
 				.Split(' ')
 				.Select(word => char.ToUpper(word[0]) + word.Substring(1))
 				.Aggregate((a, b) => $"{a} {b}");
+
+	private string GetStatusAlertClass()
+	{
+		if (statusMessage.StartsWith("[OK]"))
+			return "alert-success";
+		return statusMessage.StartsWith("[ERROR]") ? "alert-danger" : "alert-info";
+	}
 
 	public void Dispose()
 	{

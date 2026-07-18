@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "AiDashboard",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "AiDashboard/AiDashboard.csproj", "--urls", "http://localhost:5083"],
+      "port": 5083
+    }
+  ]
+}

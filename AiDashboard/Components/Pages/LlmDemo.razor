@@ -119,13 +119,16 @@
         finally
         {
             isProcessing = false;
-            timer?.Dispose();
-            timer = null;
+            if (timer != null)
+            {
+                await timer.DisposeAsync();
+                timer = null;
+            }
             StateHasChanged();
         }
     }
-    
-    private string SimulateLlmResponse(string q)
+
+    private static string SimulateLlmResponse(string q)
     {
         // Simulate different responses based on question
         if (q.Contains("C#", StringComparison.OrdinalIgnoreCase) || q.Contains("csharp", StringComparison.OrdinalIgnoreCase))

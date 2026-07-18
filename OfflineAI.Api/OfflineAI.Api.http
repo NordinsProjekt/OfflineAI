@@ -1,0 +1,289 @@
+@OfflineAI.Api_HostAddress = https://localhost:7015
+
+### Health Check
+GET {{OfflineAI.Api_HostAddress}}/api/Health
+Accept: application/json
+
+### Get Available Models
+GET {{OfflineAI.Api_HostAddress}}/api/Health/models
+Accept: application/json
+
+### Get All Available Domain Filters
+# Lists all domains you can use in domainFilter for RAG queries
+GET {{OfflineAI.Api_HostAddress}}/api/Domains
+Accept: application/json
+
+### Get Domains by Category
+# Get all domains in a specific category (e.g., board-games, card-games)
+GET {{OfflineAI.Api_HostAddress}}/api/Domains/category/board-games
+Accept: application/json
+
+### Get All Categories
+# Lists all available domain categories
+GET {{OfflineAI.Api_HostAddress}}/api/Domains/categories
+Accept: application/json
+
+###############################################################################
+# BASIC QUERIES (No RAG)
+###############################################################################
+
+### Simple Query - Math Question (No RAG)
+POST {{OfflineAI.Api_HostAddress}}/api/Query
+Content-Type: application/json
+
+{
+  "question": "What is 10+9?",
+  "enableRag": false,
+  "maxTokens": 512,
+  "temperature": 0.3
+}
+
+### Creative Query - Higher Temperature (No RAG)
+POST {{OfflineAI.Api_HostAddress}}/api/Query
+Content-Type: application/json
+
+{
+  "question": "Write a short poem about coding",
+  "enableRag": false,
+  "maxTokens": 256,
+  "temperature": 0.9
+}
+
+###############################################################################
+# MANUAL CONTEXT RAG
+# Use this when you have pre-retrieved context to provide
+###############################################################################
+
+### RAG with Manual Context - Game Rules
+POST {{OfflineAI.Api_HostAddress}}/api/Query
+Content-Type: application/json
+
+{
+  "question": "How do I win in Monopoly?",
+  "context": "In Monopoly, the objective is to bankrupt all other players. Players move around the board by rolling two dice. When landing on an unowned property, a player may buy it from the bank. If another player owns the property, rent must be paid. Players can build houses and hotels on their properties to increase rent. The game ends when all but one player has gone bankrupt.",
+  "enableRag": true,
+  "maxTokens": 512,
+  "temperature": 0.3
+}
+
+### RAG with Manual Context - Chess Rules
+POST {{OfflineAI.Api_HostAddress}}/api/Query
+Content-Type: application/json
+
+{
+  "question": "How does the knight move in chess?",
+  "context": "The knight moves in an L-shape: two squares in one direction and then one square perpendicular, or vice versa. Knights are the only pieces that can jump over other pieces. A knight on d4 can move to c2, e2, f3, f5, e6, c6, b5, or b3.",
+  "enableRag": true,
+  "maxTokens": 256,
+  "temperature": 0.2
+}
+
+###############################################################################
+# AUTO VECTOR SEARCH RAG (Requires Embedding Service + Database)
+# Automatically searches the knowledge base for relevant context
+# First call GET /api/Domains to see available domain filters!
+###############################################################################
+
+### RAG with Auto Vector Search - All Domains
+# Searches across all game rules in the database
+POST {{OfflineAI.Api_HostAddress}}/api/Query
+Content-Type: application/json
+
+{
+  "question": "How do I capture pieces in chess?",
+  "enableRag": true,
+  "topK": 5,
+  "minRelevanceScore": 0.5,
+  "maxTokens": 512,
+  "temperature": 0.3
+}
+
+### RAG with Auto Vector Search - Specific Domain Filter
+# Only searches within the "monopoly" domain
+POST {{OfflineAI.Api_HostAddress}}/api/Query
+Content-Type: application/json
+
+{
+  "question": "What happens when I land on Free Parking?",
+  "enableRag": true,
+  "domainFilter": ["monopoly"],
+  "topK": 3,
+  "minRelevanceScore": 0.6,
+  "maxTokens": 512,
+  "temperature": 0.3
+}
+
+### RAG with Auto Vector Search - Multiple Domains
+# Searches both chess and checkers rules
+POST {{OfflineAI.Api_HostAddress}}/api/Query
+Content-Type: application/json
+
+{
+  "question": "Can pawns move backwards?",
+  "enableRag": true,
+  "domainFilter": ["chess", "checkers"],
+  "topK": 4,
+  "minRelevanceScore": 0.5,
+  "maxTokens": 512,
+  "temperature": 0.3
+}
+
+### RAG with Auto Vector Search - Strict Matching
+# Higher relevance score for more precise results
+POST {{OfflineAI.Api_HostAddress}}/api/Query
+Content-Type: application/json
+
+{
+  "question": "What are the rules for castling?",
+  "enableRag": true,
+  "domainFilter": ["chess"],
+  "topK": 3,
+  "minRelevanceScore": 0.75,
+  "maxTokens": 512,
+  "temperature": 0.2
+}
+
+###############################################################################
+# VALIDATION ENDPOINTS
+###############################################################################
+
+### Validate Request - Valid
+POST {{OfflineAI.Api_HostAddress}}/api/Query/validate
+Content-Type: application/json
+
+{
+  "question": "What is 10+9?",
+  "enableRag": false,
+  "maxTokens": 512,
+  "temperature": 0.3,
+  "topK": 3,
+  "minRelevanceScore": 0.5
+}
+
+### Validate Request - Invalid (missing question)
+POST {{OfflineAI.Api_HostAddress}}/api/Query/validate
+Content-Type: application/json
+
+{
+  "question": "",
+  "enableRag": false,
+  "maxTokens": 512,
+  "temperature": 0.3
+}
+
+### Validate Request - Invalid (bad temperature)
+POST {{OfflineAI.Api_HostAddress}}/api/Query/validate
+Content-Type: application/json
+
+{
+  "question": "Test question",
+  "enableRag": false,
+  "maxTokens": 512,
+  "temperature": 3.5
+}
+
+###############################################################################
+# WORKSPACES
+# See WORKSPACE_AND_FILES_GUIDE.md for full details.
+###############################################################################
+
+### List workspaces
+GET {{OfflineAI.Api_HostAddress}}/api/Workspace
+Accept: application/json
+
+### Get the active workspace
+GET {{OfflineAI.Api_HostAddress}}/api/Workspace/active
+Accept: application/json
+
+### Create a workspace
+POST {{OfflineAI.Api_HostAddress}}/api/Workspace
+Content-Type: application/json
+
+{
+  "name": "Rulebooks",
+  "path": "D:\\Games\\Rulebooks"
+}
+
+### Switch the active workspace
+POST {{OfflineAI.Api_HostAddress}}/api/Workspace/active
+Content-Type: application/json
+
+{
+  "name": "Rulebooks"
+}
+
+### Remove a workspace
+DELETE {{OfflineAI.Api_HostAddress}}/api/Workspace/Rulebooks
+
+###############################################################################
+# FILES (pictures, PDFs, text) — operate on the active workspace
+###############################################################################
+
+### List files in the active workspace
+GET {{OfflineAI.Api_HostAddress}}/api/Files
+Accept: application/json
+
+### Upload a PDF into the active workspace
+POST {{OfflineAI.Api_HostAddress}}/api/Files/upload
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="rules.pdf"
+Content-Type: application/pdf
+
+< ./rules.pdf
+--WebAppBoundary--
+
+### Upload an image into the active workspace
+POST {{OfflineAI.Api_HostAddress}}/api/Files/upload
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="board.png"
+Content-Type: image/png
+
+< ./board.png
+--WebAppBoundary--
+
+### Extract text from an uploaded PDF (or read a text file)
+GET {{OfflineAI.Api_HostAddress}}/api/Files/rules.pdf/text
+Accept: application/json
+
+### Ingest a workspace PDF into the RAG knowledge base
+# Requires Embedding + Database to be configured (see README.md)
+POST {{OfflineAI.Api_HostAddress}}/api/Files/rules.pdf/ingest
+Content-Type: application/json
+
+{
+  "collectionName": "monopoly",
+  "replaceExisting": false
+}
+
+### Ask a question about an uploaded image
+# Requires AppConfiguration:Gemma4Cli:ModelPath to be configured (see README.md)
+POST {{OfflineAI.Api_HostAddress}}/api/Files/board.png/ask-image
+Content-Type: application/json
+
+{
+  "question": "What color are the pieces on this board?"
+}
+
+###############################################################################
+# PICTURE (IMAGE) QUERIES — one-shot, no workspace upload needed
+# Requires AppConfiguration:Gemma4Cli:ModelPath to be configured (see README.md)
+###############################################################################
+
+### Ask a one-shot question about a picture
+POST {{OfflineAI.Api_HostAddress}}/api/Query/image
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="question"
+
+What is shown in this picture?
+--WebAppBoundary
+Content-Disposition: form-data; name="image"; filename="photo.jpg"
+Content-Type: image/jpeg
+
+< ./photo.jpg
+--WebAppBoundary--

@@ -2,19 +2,24 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Configuration;
 using Services.UI;
+using OfflineAI.Configuration;
 using OfflineAI.Modes;
 using Application.AI.Embeddings;
 using Services.Memory;
 using Application.AI.Pooling;
 using Services.Configuration;
+using Services.Language;
 using Infrastructure.Data.Dapper;
-using Microsoft.SemanticKernel.Embeddings;
+using Microsoft.Extensions.AI;
 using System.Diagnostics;
 using Services.Management;
 
+// Infrastructure.Data.Dapper uses WindowsIdentity to grant DB access; this app only runs on Windows.
+[assembly: System.Runtime.Versioning.SupportedOSPlatform("windows")]
+
 namespace OfflineAI
 {
-    internal class Program
+    internal static class Program
     {
         static async Task Main(string[] args)
         {
@@ -78,11 +83,14 @@ namespace OfflineAI
                             appConfig.Embedding.Dimension,
                             appConfig.Debug.EnableDebugMode));
                     
-                    services.AddSingleton<ITextEmbeddingGenerationService>(provider => 
+                    services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(provider =>
                         provider.GetRequiredService<SemanticEmbeddingService>());
                     
                     // Register persistence service
                     services.AddSingleton<VectorMemoryPersistenceService>();
+
+                    // Register stop words service (needed by DatabaseVectorMemory for keyword extraction)
+                    services.AddSingleton<ILanguageStopWordsService, LanguageStopWordsService>();
                     
                     // Register LLM sync service
                     services.AddSingleton(provider =>
@@ -125,7 +133,7 @@ namespace OfflineAI
             
             try
             {
-                var (added, existing, total) = await llmSyncService.SyncLlmsAsync();
+                var (_, _, total) = await llmSyncService.SyncLlmsAsync();
                 
                 if (total == 0)
                 {

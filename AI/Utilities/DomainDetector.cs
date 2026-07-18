@@ -33,12 +33,10 @@ public class DomainDetector(IKnowledgeDomainRepository domainRepository) : IDoma
 
         foreach (var (domainId, variants) in _variantsCache)
         {
-            if (variants.Any(variant => lowerQuery.Contains(variant, StringComparison.OrdinalIgnoreCase)))
+            if (variants.Any(variant => lowerQuery.Contains(variant, StringComparison.OrdinalIgnoreCase)) &&
+                !detectedDomains.Contains(domainId))
             {
-                if (!detectedDomains.Contains(domainId))
-                {
-                    detectedDomains.Add(domainId);
-                }
+                detectedDomains.Add(domainId);
             }
         }
 

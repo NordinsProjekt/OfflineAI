@@ -22,7 +22,14 @@ public class QuestionEntity
     /// Foreign key to the LLM that generated this answer
     /// </summary>
     public Guid LlmId { get; set; }
-    
+
+    /// <summary>
+    /// Groups multiple question/answer turns that belong to the same multi-turn
+    /// conversation/session, so a full conversation can be reconstructed as one unit.
+    /// Null for legacy rows saved before conversation grouping was introduced.
+    /// </summary>
+    public Guid? ConversationId { get; set; }
+
     /// <summary>
     /// Timestamp when the question was asked
     /// </summary>

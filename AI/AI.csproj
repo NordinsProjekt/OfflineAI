@@ -17,6 +17,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Application.AI.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Entities\Entities.csproj" />
     <ProjectReference Include="..\Factories\Factories.csproj" />
     <ProjectReference Include="..\Services\Services.csproj" />
@@ -24,12 +28,13 @@
 
   <ItemGroup>
     <PackageReference Include="BERTTokenizers" Version="1.2.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.10" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.20.1" />
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.5.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.27.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
-    <PackageReference Include="Microsoft.ML.Tokenizers.Data.Cl100kBase" Version="1.0.2" />
-    <PackageReference Include="Microsoft.SemanticKernel" Version="1.66.0" />
+    <PackageReference Include="Microsoft.ML.Tokenizers.Data.Cl100kBase" Version="2.0.0" />
+    <PackageReference Include="Microsoft.SemanticKernel" Version="1.77.0" />
   </ItemGroup>
 
 </Project>

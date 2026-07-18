@@ -14,14 +14,14 @@ public class BotPersonalityService(IBotPersonalityRepository repository)
     // Change notification for UI components
     public event Action? OnChange;
     
-    private List<BotPersonalityEntity> _availablePersonalities = new();
+    private readonly List<BotPersonalityEntity> _availablePersonalities = new();
     public IReadOnlyList<BotPersonalityEntity> AvailablePersonalities => _availablePersonalities.AsReadOnly();
     
     private BotPersonalityEntity? _currentPersonality;
     public BotPersonalityEntity? CurrentPersonality
     {
         get => _currentPersonality;
-        set
+        private set
         {
             if (_currentPersonality == value) return;
             _currentPersonality = value;

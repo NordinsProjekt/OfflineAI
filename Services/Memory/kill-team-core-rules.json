@@ -1,0 +1,182 @@
+{
+  "domainName": "Kill Team",
+  "sourceFile": "Wahapedia - Kill Team 2nd Edition Core Rules (wahapedia.ru/kill-team2/the-rules/core-rules/)",
+  "sections": [
+    {
+      "heading": "Source and Scope",
+      "content": "This domain covers the Warhammer 40,000: Kill Team CORE RULES only, as published on Wahapedia at wahapedia.ru/kill-team2/the-rules/core-rules/. It reflects Kill Team 2nd Edition: the Core Book (Edition 2, Version 2.0, last updated May 2024) plus The Balance Dataslate (Q2 2024, last updated June 2024).\n\nIt does not include faction army lists, individual operative datacards, specific killzone or terrain packs, Tac Ops, Critical Operations, or mission briefings, which are published separately on other pages.\n\nNote: Wahapedia also hosts a newer ruleset under a kill-team3 section that renames Engagement Range to Control Range and changes several mechanics (for example, weapon Piercing instead of Armour Penetration, and a fixed 3-dice defence roll). If a player's question uses \"Control Range\" or other unfamiliar terminology, confirm which edition their group is playing before answering, since this document is specifically 2nd Edition."
+    },
+    {
+      "heading": "Tools of War",
+      "content": "To play Warhammer 40,000: Kill Team, each player needs a collection of Citadel miniatures with their accompanying rules (a faction army list), a set of combat gauges, a killzone (game board) with terrain, and dice. Tokens are also useful to mark when operatives have acted, taken wounds, or performed special actions."
+    },
+    {
+      "heading": "Operatives and Kill Teams",
+      "content": "The miniatures a player uses are called operatives. A player's own operatives are \"friendly\" operatives; the opponent's are \"enemy\" operatives. A player does not select individual operatives freely - they select a Kill Team, a specialist squad configuration defined by their faction's army list. Some Kill Teams specify an exact configuration of operatives; others allow the player to choose a configuration within stated restrictions. In battle, all of a player's friendly operatives collectively make up their Kill Team."
+    },
+    {
+      "heading": "Combat Gauges and Measuring Distances",
+      "content": "Kill Team measures distances using four physical combat gauges instead of a tape measure (though a tape measure marked in inches can be used as an equivalent): the triangle = 1 inch, the circle = 2 inches, the square = 3 inches, and the pentagon = 6 inches. A bare gauge symbol with no number means \"one length of that gauge.\" When a number appears in front of a gauge symbol, it means that many lengths of that gauge measured end to end.\n\nDistances can be measured at any time and broken into smaller increments in any combination, as long as the total does not exceed the specified distance (for example, a 3 inch move can be measured as one 3 inch increment, or as a 1 inch increment followed by a 2 inch increment, in either order).\n\nAlways measure to and from the closest part of an operative's base, not the miniature itself. Something is \"within\" a range if the closest part of its base is no more than the specified distance away. Something is \"wholly within\" a range if every part of its base is no more than that distance away. An operative is always within and wholly within range of itself."
+    },
+    {
+      "heading": "The Killzone",
+      "content": "The killzone is the playing area where operatives fight. Games are designed to be played on a 30 inch by 22 inch area (the size of a Kill Team gameboard), unless a mission specifies otherwise. Killzones contain terrain features that add tactical depth to the game."
+    },
+    {
+      "heading": "Dice Rolling Rules",
+      "content": "Kill Team uses six-sided dice (D6). For a D3, roll one D6 and halve the result, rounding fractions up. Many rules require a result of a certain value or higher to succeed (for example \"3+\" means a result of 3, 4, 5, or 6 succeeds, while 1 or 2 fails).\n\nA dice can only ever be re-rolled once - you cannot re-roll a dice that has already been re-rolled, and you cannot choose to keep the original result once you re-roll, even if the new result is worse.\n\nA roll-off means both players roll one D6 each; the higher roll wins. Ties are re-rolled. If both players have a rule letting them re-roll during a roll-off, both must declare they are using it before either re-rolls, starting with the player who lost the roll-off.\n\nModifiers to a dice result are cumulative and can push the result above or below the die's normal minimum or maximum (for example a roll of 6 with a +1 modifier becomes a 7)."
+    },
+    {
+      "heading": "Datacards: Physical Profile",
+      "content": "Each operative has a datacard listing its rules. The Physical Profile includes:\n\nMovement (M) - the distance the operative can move, given as a gauge distance.\n\nAction Point Limit (APL) - the number of action points the operative generates when activated, spent to perform actions.\n\nGroup Activation (GA) - most operatives activate individually, but some must be activated together in a group of the stated size.\n\nDefence (Df) - how many attack dice the operative can defend against each time it is attacked at range.\n\nSave (Sv) - the D6 result needed to avert a ranged attack; a LOWER number is a better Save.\n\nWounds (W) - how many wounds the operative can lose before being incapacitated."
+    },
+    {
+      "heading": "Datacards: Weapon Profiles",
+      "content": "Ranged and melee weapon profiles list: Name; Attacks (A) - the number of attack dice rolled; Ballistic Skill (BS) for ranged weapons or Weapon Skill (WS) for melee weapons - the D6 result needed to score a hit, where a LOWER number is better; Damage (Dmg) - two values, Normal Damage then Critical Damage, inflicted per successful attack dice; Special Rules (SR) - rules that apply whenever the operative attacks with that weapon (rules marked with an asterisk are explained on that operative's own datacard); and Critical Hit Rules (marked with !) - extra effects the weapon causes on a critical hit."
+    },
+    {
+      "heading": "Datacards: Abilities, Actions, and Keywords",
+      "content": "Abilities may only affect operatives with specific keywords. An operative never benefits twice from the same ability granted by two different sources - it only applies once.\n\nUnique Actions are actions listed on an operative's own datacard that only it can perform, in addition to the universal actions available to everyone.\n\nKeywords identify an operative. A rule that names a KEYWORD in bold only affects operatives with that exact keyword (an operative needs all listed keywords if more than one is named). Orange keywords with a skull icon are faction keywords, used when building a roster. Pluralising a keyword in rules text doesn't change which operatives it applies to. Keywords in angle brackets, such as <CHAPTER>, are chosen by the player when the operative is added to their roster; that choice replaces the bracketed keyword everywhere on the datacard."
+    },
+    {
+      "heading": "Engagement Range",
+      "content": "Engagement Range is the zone of threat an operative presents to enemies, used in rules such as moving and fighting. Engagement Range is 1 inch. It is mutual: two operatives are within each other's Engagement Range if either one of them is Visible to and within 1 inch of the other."
+    },
+    {
+      "heading": "Modifying Characteristics",
+      "content": "Modifiers to an operative's or weapon's characteristics are cumulative.\n\nFor characteristics that represent a D6 result needed (Save, Ballistic Skill, Weapon Skill), \"improve\" means making the required result lower (better), and \"worsen\" means making it higher. For example, worsening a Ballistic Skill of 4+ by 1 makes it 5+.\n\nIf an operative's APL is modified, the change lasts until the end of its current or next activation, whichever comes first. Regardless of how many separate rules modify APL, the total change can never exceed -1 or +1 from the operative's normal APL.\n\nBalance Dataslate rule: an operative's Movement characteristic can never be modified to less than 2 inches, even while injured."
+    },
+    {
+      "heading": "Fire Teams",
+      "content": "Many Kill Teams presented in Kill Team: Compendium are built by selecting one or two fire teams - a collection of operatives and selection requirements tied to that Kill Team. If a Kill Team uses two fire teams, the same fire team can be selected more than once. Many fire teams may include a LEADER operative; a Kill Team can only ever include one LEADER, and matched play requires exactly one. A Kill Team's overall archetype(s) are the combined archetype(s) of its fire teams."
+    },
+    {
+      "heading": "Battle Structure Overview",
+      "content": "A battle consists of four Turning Points. Each Turning Point has three phases, completed in order and in full before the next Turning Point begins: the Initiative phase, the Strategy phase, and the Firefight phase.\n\nIn the Initiative phase, players ready their operatives and determine who has initiative. In the Strategy phase, players generate Command Points (CP) and spend them on Ploys, and may reveal Tac Ops. In the Firefight phase, players alternate activating operatives to move, shoot, fight, and perform other actions."
+    },
+    {
+      "heading": "Initiative Phase",
+      "content": "Step 1, Ready Operatives: each player readies all friendly operatives in the killzone by flipping their order token to the ready side.\n\nStep 2, Determine Initiative: in the first Turning Point, initiative is set by the mission sequence for the way of playing chosen. In every later Turning Point, players roll off; the winner decides who has initiative. If that roll-off ties, the player who did NOT have initiative in the previous Turning Point gains it automatically.\n\nHaving initiative controls things like who activates first, and who decides the order of simultaneous effects (for example two rules that both trigger at the end of a Turning Point)."
+    },
+    {
+      "heading": "Strategy Phase",
+      "content": "Step 1, Generate Command Points: each player gains 1 Command Point (CP), which accumulates in a pool until spent. CP can be spent on Strategic Ploys (used only in the Strategy phase) or saved for Tactical Ploys (used at other specified times, most often the Firefight phase). Both Strategic and Tactical Ploys are defined per faction in each army list. Every faction also has access to the universal Tactical Ploy Command Re-roll: after rolling one attack or defence dice, spend the ploy to re-roll that dice. Other than Command Re-roll, each Tactical Ploy can only be used once per Turning Point by each player.\n\nStep 2, Play Strategic Ploys: starting with the player who has initiative, players alternate either using one Strategic Ploy (paying its CP cost immediately and resolving it before passing to the other player) or passing. This repeats until both players pass in succession. A player cannot use the same Strategic Ploy more than once in a single Strategy phase, and cannot use a Ploy they cannot afford.\n\nStep 3, Target Reveal: starting with the player who has initiative, players alternate revealing an eligible Tac Op for that Turning Point or passing, until both players pass in succession. Revealing is optional unless a specific Tac Op must be revealed in a given Turning Point to be achievable."
+    },
+    {
+      "heading": "Firefight Phase and Activations",
+      "content": "Starting with the player who has initiative, players alternate activating one ready friendly operative at a time until every operative in the killzone has been activated.\n\nIf an operative has a Group Activation greater than 1, operatives of that type must be activated together: the player activates one, finishes its activation, then immediately selects another ready friendly operative of the same type, repeating until the stated Group Activation number has been activated (or no more of that type remain ready) - this whole group still only counts as one turn in the alternation before the opponent activates.\n\nEach time an operative activates, its controlling player sets its order: Engage or Conceal (in the first Turning Point, an operative keeps the order it was given during deployment; every Turning Point after that, the controlling player can freely choose). An operative with a Conceal order is not a valid shooting target in the right circumstances, but cannot perform certain actions; an operative with an Engage order can perform more actions but is a valid target more easily.\n\nThe activating operative generates a number of action points equal to its APL and spends them on actions. When it has no more actions to perform (or no AP left), its activation ends and its order token is flipped to expended.\n\nBalance Dataslate rule: regardless of any rule that allows activating operatives in succession, a player can never activate more than two operatives in the same Turning Point before the opponent gets to either activate a ready operative or perform Overwatch."
+    },
+    {
+      "heading": "Actions: General Rules",
+      "content": "Each action costs a stated number of action points (AP), subtracted from the active operative's remaining AP for that activation; if there isn't enough AP left, a different action must be chosen. The controlling player does not have to declare an operative's whole activation in advance - they can perform one action, see its result, then choose the next. Unless a rule says otherwise, an operative cannot perform the same action more than once during a single activation.\n\nActions come in four categories: Universal actions (available to every operative, detailed in this document); Unique actions (listed only on a specific operative's datacard); Mission actions (defined by the mission being played); and Free actions, which can only be performed when another rule explicitly grants them - performing a free action costs no extra AP beyond what the granting rule already specified, but the action's own requirements still apply, and it still counts as having been performed for rules purposes (so it can't be repeated in the same activation unless otherwise stated)."
+    },
+    {
+      "heading": "Overwatch",
+      "content": "If, on your turn to activate an operative, you have no ready operatives left but your opponent still has ready operatives, you may instead select one friendly operative that already has an Engage order and has already activated this phase, and have it perform a single Overwatch action: it makes a shooting attack with one of its ranged weapons, but its Ballistic Skill is worsened by 1 for that attack.\n\nAn operative cannot perform Overwatch if it is within Engagement Range of an enemy operative. Each operative can perform Overwatch at most once per Turning Point, and only while it has an Engage order. Once your opponent has activated all of their operatives, the Firefight phase ends (no further Overwatch is possible)."
+    },
+    {
+      "heading": "Action: Normal Move (1AP)",
+      "content": "Move the active operative up to a distance not exceeding its Movement characteristic, in straight-line increments (an increment can be shorter than the smallest gauge, but still counts as using that gauge's minimum length).\n\nThe operative must end the move somewhere it can legally be placed; if that isn't possible, it can't move there. It cannot move off the killzone edge or through another operative's base, and it cannot end the move within Engagement Range of an enemy operative, unless another friendly operative is already within that enemy operative's Engagement Range, in which case it is allowed to finish there too.\n\nAn operative cannot move through terrain - it must traverse, climb, jump, or drop instead. Operatives with the FLY keyword can move over and around other operatives and their bases as if they weren't there, but must still finish the move following all normal placement requirements and cannot end on top of another operative.\n\nAn operative cannot perform a Normal Move while within Engagement Range of an enemy operative, and cannot perform it in the same activation as a Charge or Fall Back action."
+    },
+    {
+      "heading": "Action: Charge (1AP)",
+      "content": "A Charge follows the same rules as a Normal Move, except: the operative can move up to its Movement characteristic PLUS 2 inches; it must finish the move within Engagement Range of an enemy operative (if that's impossible, choose a different action instead and the AP is refunded); and if it moves within Engagement Range of an enemy operative that no other friendly operative is already engaging, it cannot then leave that enemy operative's Engagement Range during the same move (though if a special rule allows Charging while already in Engagement Range, the operative can move out of one enemy's Engagement Range as long as it ends the move within Engagement Range of at least one enemy operative).\n\nAn operative cannot Charge while it has a Conceal order, or if it is already within Engagement Range of an enemy operative, or in the same activation as a Normal Move, Dash, or Fall Back action."
+    },
+    {
+      "heading": "Action: Fall Back (2AP)",
+      "content": "A Fall Back follows the same rules as a Normal Move, except it can only be performed while within Engagement Range of an enemy operative, and it can move through enemy Engagement Range but must NOT finish the move within Engagement Range of any enemy operative. If it's impossible to end outside all enemy Engagement Ranges, the action cannot be performed and its AP is refunded.\n\nAn operative cannot Fall Back in the same activation as a Normal Move or Charge action."
+    },
+    {
+      "heading": "Action: Dash (1AP)",
+      "content": "A Dash follows the same rules as a Normal Move, except the operative can move up to 3 inches regardless of its Movement characteristic.\n\nAn operative cannot Dash while within Engagement Range of an enemy operative, or in the same activation as a Charge action."
+    },
+    {
+      "heading": "Action: Pick Up (1AP)",
+      "content": "The operative must be within 1 inch of an objective marker or token it can interact with. Remove that marker or token from the killzone - the operative is now carrying it, remains in control of it at all times while carrying it, and otherwise acts normally.\n\nAn operative can drop what it's carrying at any point in its activation at no extra AP cost; its controlling player places the marker or token's centre within 1 inch of, and Visible to, the operative (or as close as possible while staying Visible, if that isn't achievable). An operative must drop anything it's carrying before being removed from the killzone.\n\nAn operative cannot Pick Up a marker or token if it's within Engagement Range of an enemy operative, if it doesn't control that marker or token, or if it's already carrying something else."
+    },
+    {
+      "heading": "Action: Shoot - Overview and Valid Targets (1AP)",
+      "content": "An operative cannot Shoot while it has a Conceal order or is within Engagement Range of an enemy operative. Making a shooting attack is called the shooting sequence, with the shooter's controller as the attacker and the target's controller as the defender.\n\nStep 1: the attacker picks one of the active operative's ranged weapons and collects attack dice equal to its Attacks (A) characteristic.\n\nStep 2: the attacker picks a valid target - an enemy operative in the active operative's Line of Sight that has no friendly (to it) operatives within its own Engagement Range. If there is no valid target, the Shoot action cannot be resolved; choose a different action and refund the AP."
+    },
+    {
+      "heading": "Action: Shoot - Rolling Attack and Defence Dice",
+      "content": "Step 3, Roll Attack Dice: the attacker rolls their attack dice. Each result equal to or above the weapon's Ballistic Skill is a successful hit and is kept; results of 6 always hit and count as critical hits, while results of 1 always fail regardless of BS. Non-critical successes are normal hits.\n\nStep 4, Roll Defence Dice: the defender rolls a number of D6 equal to the target's Defence characteristic. Each result equal to or above the target's Save is a successful save and is kept (a 1 always fails regardless of Save); a 6 is a critical save, other successes are normal saves. If the target is in Cover, the defender may keep one additional save automatically as a normal save without rolling it. Weapon Special Rules (such as Armour Penetration) may affect this step."
+    },
+    {
+      "heading": "Action: Shoot - Resolving Saves, Hits, and Casualties",
+      "content": "Step 5, Resolve Successful Saves: the defender uses each kept save to cancel one of the attacker's hits. A single normal save cancels one normal hit. Two normal saves together can cancel one critical hit. A critical save can cancel either a normal or a critical hit.\n\nStep 6, Resolve Successful Hits: the attacker resolves each remaining hit one at a time - a normal hit inflicts the weapon's Normal Damage, a critical hit inflicts its Critical Damage.\n\nStep 7, Remove Incapacitated Operatives: any operative reduced to 0 wounds is removed from the killzone only after ALL of that action's shooting attacks are complete (relevant when one Shoot action hits multiple targets, such as with the Blast special rule)."
+    },
+    {
+      "heading": "Action: Fight (1AP)",
+      "content": "An operative can only Fight if an enemy operative is within its Engagement Range. The attacker is whoever's operative performs the action; the defender is the target's controller.\n\nStep 1: the attacker picks a valid target - an enemy operative within Engagement Range. If there's no valid target, choose a different action and refund the AP.\n\nStep 2: the attacker picks one of their melee weapons and collects attack dice equal to its Attacks (A); the defender then picks one of their own melee weapons and does the same.\n\nStep 3: both players roll their attack dice simultaneously. Results equal to or above the relevant Weapon Skill are hits (6 always hits as a critical, 1 always fails).\n\nStep 4: starting with the attacker, players alternate resolving one successful hit at a time (once one side runs out, the other resolves all remaining hits). To resolve a hit, choose to strike (inflict Normal or Critical Damage on the opponent, matching the hit type) or parry (discard one of the opponent's hits - a normal hit can only cancel a normal hit, a critical hit can cancel either). Combat ends immediately if one operative is incapacitated; any of its unresolved hits are discarded."
+    },
+    {
+      "heading": "Combat Support in the Fight Action",
+      "content": "Each time an operative fights, its Weapon Skill is improved by 1 for every OTHER friendly operative supporting it in that same combat. To support, a friendly operative must be within Engagement Range of the same enemy operative in that combat and NOT within Engagement Range of any other enemy operative. Support applies independently to both the attacker and defender if they each have supporting operatives nearby."
+    },
+    {
+      "heading": "Wounds and Damage",
+      "content": "Every operative has a starting Wounds value tracking how much damage it can take before being incapacitated. Each time damage is inflicted, the operative loses wounds equal to that damage value.\n\nAn operative with 0 or fewer wounds remaining is incapacitated: it is removed from the killzone immediately and its abilities can no longer be used (subject to the specific timing rules for removing casualties during shooting and fighting sequences).\n\nMortal wounds inflict damage directly and cannot be stopped by rolling defence dice; each mortal wound inflicts 1 point of damage.\n\nAn operative with fewer than half its starting wounds remaining is injured: while injured, subtract 1 inch from its Movement, and worsen the Ballistic Skill of its ranged weapons and the Weapon Skill of its melee weapons by 1 each."
+    },
+    {
+      "heading": "Controlling Objective Markers and Tokens",
+      "content": "Friendly operatives control an objective marker or token if the combined APL of all friendly operatives within Engagement Range of its centre exceeds the combined APL of enemy operatives within Engagement Range of it. An operative that is carrying a marker or token always controls it, regardless of APL totals nearby. Unless stated otherwise, always measure to and from a marker or token's centre. Control is re-checked at the start and end of every individual action during an operative's activation."
+    },
+    {
+      "heading": "Line of Sight: Visible Targets",
+      "content": "Whether a target is in an active operative's Line of Sight (LoS) depends on its order. A target with an Engage order is in LoS if it is Visible and Not Obscured. A target with a Conceal order is in LoS only if it is Visible, Not Obscured, AND Not in Cover.\n\nTo be Visible, you must be able to draw an imaginary, unobstructed straight line 1mm wide (a \"visibility line\") from the head of the active operative's miniature to any part of the target's miniature (not its base). If parts of the active operative's own miniature or base would block this (for example, shooting straight down or up at another operative), those parts are treated as if they aren't there. The same 1mm-wide line concept applies when a rule requires selecting a Visible point on the killzone."
+    },
+    {
+      "heading": "Line of Sight: Obscured",
+      "content": "Obscuring terrain can block Line of Sight regardless of whether the target has an Engage or Conceal order. A target counts as Obscured if it is more than 2 inches from the point where a Cover line crosses a terrain feature with the Obscuring trait (Heavy terrain is always Obscuring). However, if the ACTIVE (shooting) operative is within 1 inch of the point where that Cover line crosses the Obscuring terrain, that part of the terrain is not treated as Obscuring for that check."
+    },
+    {
+      "heading": "Line of Sight: Cover",
+      "content": "Cover lets an operative use terrain (or another operative) for protection while it has an Engage order, or to hide while it has a Conceal order. A target counts as being in Cover only if BOTH of the following are true: it is more than 2 inches from the active (shooting) operative, AND it is within 1 inch of a point where a Cover line crosses either another operative's base (as long as that other operative is itself in the active operative's LoS) or a terrain feature with the Cover trait.\n\nAn operative with an Engage order that is in Cover gets a defensive benefit during the shooting sequence (the defender may keep one extra automatic normal save). An operative with a Conceal order that is in Cover is not a valid shooting target at all.\n\nTo establish a Cover line, the active operative's controlling player draws an imaginary 1mm-wide straight line from any point on the active operative's base to every part of the target's base."
+    },
+    {
+      "heading": "Terrain Traits",
+      "content": "Terrain features are built from parts with specific traits:\n\nHeavy terrain provides Cover and is Obscuring.\n\nLight terrain provides Cover unless stated otherwise (for example, some Vantage Points).\n\nTraversable terrain can be traversed (see the Traverse rule).\n\nInsignificant terrain is too small to affect play and grants no rules benefits.\n\nScalable applies to terrain features more than 2 inches tall: when climbing such a feature, the final incremental distance of less than the climbing gauge is ignored completely, rather than rounded up.\n\nBarricades are a common example of set-up terrain: wide, tall obstacles that are always Light and Traversable."
+    },
+    {
+      "heading": "Vantage Points",
+      "content": "A Vantage Point is a terrain feature with a raised level operatives can be placed on. If part of a terrain feature isn't defined as a Vantage Point, operatives can climb or traverse over it, but cannot finish a move or be set up on it.\n\nEach time an operative on a Vantage Point makes a shooting attack, any enemy operative with a Conceal order that is in Cover from Light terrain (or another operative) and is at least 2 inches lower than the shooter is instead treated as having an Engage order for that attack (making it targetable).\n\nEach time an operative ON a Vantage Point is shot at, it cannot use the floor of the Vantage Point, or any part of the terrain lower than itself, as Cover or to be Obscured - it can only use parts at the same height or higher (such as a rampart or battlement)."
+    },
+    {
+      "heading": "Moving Through Terrain: Traverse",
+      "content": "A traverse lets an operative clear a small obstacle (like a barricade or pipe) while moving horizontally. During a move, an operative can ascend and descend terrain with the Traversable trait at a cost of 1 inch of its move, but cannot finish its move on top of that terrain. If this isn't possible, it must go around the obstacle instead. A traverse is not a climb - the operative vaults over the obstacle rather than scaling it."
+    },
+    {
+      "heading": "Moving Through Terrain: Jump",
+      "content": "A jump lets an operative cross a gap between terrain where the gap is no more than 2 inches wide horizontally and no more than 2 inches different in height (vertically) from one edge to the other. The operative must be within 1 inch of the edge it's jumping from.\n\nTo jump, roll one D6 as a jump test: on a 1, the jump fails, the operative stays where it is, and the action ends; on a 2+, the jump succeeds and the operative moves across the gap. Only the horizontal distance travelled during a jump counts against the operative's move allowance - the vertical portion is free.\n\nAn operative cannot choose to jump instead of climbing when simply ascending or descending the same terrain feature (use Climb or Drop instead); jumping is only for crossing a gap between two separate terrain features. The operative must still be able to legally finish the move at its destination, or it cannot attempt the jump at all."
+    },
+    {
+      "heading": "Moving Through Terrain: Climb",
+      "content": "A climb is how an operative ascends or descends a terrain feature it cannot simply traverse across. The operative must be within 1 inch of a physical, climbable part of the terrain (a wall, pipe, chain, etc.) to begin. Climbing distance counts towards the operative's total move, measured in 2 inch increments, with any partial increment of less than 2 inches rounded UP to 2 inches (the Scalable trait changes this rounding for tall terrain - see Terrain Traits).\n\nAn operative must be able to finish its move at a legal location - it cannot stop partway up a climb. If it doesn't have enough Movement left to complete the climb, it cannot begin the climb at all, though it may use a Dash action to gain the extra distance needed to complete it."
+    },
+    {
+      "heading": "Moving Through Terrain: Drop",
+      "content": "A drop lets an operative descend from height without climbing. The operative must be within 1 inch of the edge it will drop from, and the destination must be vertically within 3 inches of the level the operative currently occupies. Vertical drop distance counts towards the operative's total move, measured in 2 inch increments, rounded DOWN (so any leftover vertical distance under 2 inches is ignored entirely, and a drop of less than 2 inches costs no movement at all).\n\nAn operative cannot drop into a space blocked by another operative's base (unless it has the FLY keyword). An operative may use a Dash action during a drop to help reach its intended destination."
+    },
+    {
+      "heading": "Flying Over Terrain (FLY Keyword)",
+      "content": "Operatives with the FLY keyword ignore vertical distance entirely when moving on or over terrain: they don't need to climb or traverse, and can cross gaps freely instead of needing to jump. When a FLY operative drops, its destination can be any vertical distance away, and none of that vertical distance counts against its move."
+    },
+    {
+      "heading": "Ways to Play",
+      "content": "Every game follows a mission sequence for its chosen way of playing, within which the four-Turning-Point battle takes place. There are three ways to play:\n\nOpen Play is free-form and permissive, ideal for new players learning the core mechanics or for players who want to design their own custom battles.\n\nMatched Play is the most mechanically balanced format, suited to fair, competitive, tactically deep games under a shared set of rules.\n\nNarrative Play focuses on storytelling - unique missions and linked campaigns where the consequences of each game carry forward and an operative's experience and injuries can be tracked.\n\nThe underlying rules of battle are identical across all three; players using different ways to play can still play each other with minor adjustments to the mission sequence (for example, only the player running a Narrative campaign needs to complete that sequence's Update Dataslates step)."
+    },
+    {
+      "heading": "Weapon Special Rule: Armour Penetration (APx)",
+      "content": "Each time a friendly operative makes a shooting attack with a weapon that has Armour Penetration (written as APx, for example AP1), subtract x from the target's Defence characteristic for that attack only (reducing how many defence dice it rolls). If a shooting attack could apply two different APx special rules at once, they are not cumulative - the attacker chooses which single one to use."
+    },
+    {
+      "heading": "Weapon Special Rule: Blast (x)",
+      "content": "When a friendly operative performs a Shoot action with a weapon that has the Blast special rule (Blast X, for example Blast 2 inches), the originally selected target is the primary target. After resolving that shooting attack, make a further shooting attack with the same weapon (and profile) against each OTHER operative that is Visible to and within X of the primary target - each of these secondary targets is automatically a valid target and cannot be in Cover, regardless of their order. Whether a secondary target counts as Obscured or in Cover is judged relative to the primary target, not recalculated from scratch. An operative cannot use a Blast weapon while performing an Overwatch action."
+    },
+    {
+      "heading": "Example Terrain Features",
+      "content": "When building a custom killzone, players should agree on each terrain feature's traits before the battle (a Killzone Environment will define this for players automatically). Common examples: a Pipe is Light and Traversable; a Wall is Heavy; a Low Wall is Light and Traversable; Battlefield Detritus (small clutter, usually low) is Insignificant; Killzone Materiel is Light, and Traversable if low enough; an Industrial Machine is Heavy; larger features like Buildings, Forests, Industrial Structures, and Munitorum Containers are typically made of multiple parts with different traits assigned to each part."
+    }
+  ]
+}

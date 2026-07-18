@@ -86,6 +86,24 @@ public static class ServiceCollectionExtensions
     }
     
     /// <summary>
+    /// Registers AgentRunRepository for goal-agent run history
+    /// </summary>
+    public static IServiceCollection AddDapperAgentRunRepository(
+        this IServiceCollection services,
+        string connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new ArgumentException("Connection string cannot be null or empty", nameof(connectionString));
+        }
+
+        services.AddSingleton<IAgentRunRepository>(sp =>
+            new AgentRunRepository(connectionString));
+
+        return services;
+    }
+
+    /// <summary>
     /// Registers BotPersonalityRepository for managing bot personalities
     /// </summary>
     public static IServiceCollection AddDapperBotPersonalityRepository(

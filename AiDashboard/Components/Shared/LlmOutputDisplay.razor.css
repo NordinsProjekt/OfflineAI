@@ -74,26 +74,24 @@
     line-height: 1.5;
 }
 
-/* Code block styling */
-.code-block {
-    margin: 1rem 0;
-    border: 1px solid #dee2e6;
-    border-radius: 6px;
-    overflow: hidden;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.code-header {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 0.75rem 1rem;
+/* Code block styling - class names emitted by LlmResponseFormatterService (rendered via MarkupString, so ::deep is required) */
+::deep .code-block-header,
+::deep .code-block-footer {
     font-weight: 600;
+    color: white;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 0.75rem 1rem;
     font-size: 0.875rem;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    border-radius: 6px 6px 0 0;
 }
 
-.code-content {
+::deep .code-block-footer {
+    border-radius: 0 0 6px 6px;
+}
+
+::deep .code-block {
     background: #1e1e1e; /* VS Code dark theme background */
     color: #d4d4d4; /* VS Code default text color */
     margin: 0;
@@ -102,9 +100,11 @@
     font-family: 'Fira Code', 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 0.9rem;
     line-height: 1.6;
+    border-radius: 0 0 6px 6px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.code-content code {
+::deep .code-block code {
     color: #d4d4d4;
     background: transparent;
 }
@@ -112,61 +112,103 @@
 /* IDE-like Syntax Highlighting Colors (VS Code Dark+ theme inspired) */
 
 /* Keywords (purple/blue) */
-.code-content .syntax-keyword {
+::deep .syntax-keyword {
     color: #569cd6;
     font-weight: 500;
 }
 
 /* Strings (orange/brown) */
-.code-content .syntax-string {
+::deep .syntax-string {
     color: #ce9178;
 }
 
 /* Comments (green) */
-.code-content .syntax-comment {
+::deep .syntax-comment {
     color: #6a9955;
     font-style: italic;
 }
 
 /* Numbers (light green) */
-.code-content .syntax-number {
+::deep .syntax-number {
     color: #b5cea8;
 }
 
 /* Types/Classes (cyan) */
-.code-content .syntax-type {
+::deep .syntax-type {
     color: #4ec9b0;
 }
 
 /* HTML Tags (blue-green) */
-.code-content .syntax-tag {
+::deep .syntax-tag {
     color: #569cd6;
 }
 
 /* HTML Attributes (light blue) */
-.code-content .syntax-attribute {
+::deep .syntax-attribute {
     color: #9cdcfe;
 }
 
 /* Razor syntax (magenta) */
-.code-content .syntax-razor {
+::deep .syntax-razor {
     color: #c586c0;
     font-weight: 500;
 }
 
 /* CSS Selectors (yellow) */
-.code-content .syntax-selector {
+::deep .syntax-selector {
     color: #d7ba7d;
 }
 
 /* CSS Properties (light blue) */
-.code-content .syntax-property {
+::deep .syntax-property {
     color: #9cdcfe;
 }
 
 /* CSS Values (light green) */
-.code-content .syntax-value {
+::deep .syntax-value {
     color: #ce9178;
+}
+
+/* Human-readable prose elements emitted by LlmResponseFormatterService */
+::deep .llm-heading {
+    margin: 1rem 0 0.5rem 0;
+    font-weight: 600;
+    color: #212529;
+    line-height: 1.3;
+}
+
+::deep .llm-hr {
+    margin: 1rem 0;
+    border: none;
+    border-top: 2px solid #dee2e6;
+}
+
+::deep .llm-quote {
+    display: block;
+    margin: 0.75rem 0;
+    padding: 0.5rem 1rem;
+    border-left: 4px solid #667eea;
+    background: #f1f3ff;
+    color: #495057;
+    font-style: italic;
+}
+
+::deep .llm-list {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+    line-height: 1.6;
+}
+
+::deep .llm-list li {
+    margin: 0.25rem 0;
+}
+
+::deep strong {
+    font-weight: 700;
+}
+
+::deep em {
+    font-style: italic;
 }
 
 /* Spinner animation */
@@ -191,14 +233,14 @@
         padding: 1rem;
     }
     
-    .code-content {
+    ::deep .code-block {
         padding: 1rem;
         font-size: 0.85rem;
     }
 }
 
 /* Code syntax highlighting hints */
-.code-content {
+::deep .code-block {
     tab-size: 4;
     -moz-tab-size: 4;
 }
@@ -209,19 +251,19 @@
 }
 
 /* Scrollbar styling for code blocks (for Webkit browsers) */
-.code-content::-webkit-scrollbar {
+::deep .code-block::-webkit-scrollbar {
     height: 8px;
 }
 
-.code-content::-webkit-scrollbar-track {
+::deep .code-block::-webkit-scrollbar-track {
     background: #252526;
 }
 
-.code-content::-webkit-scrollbar-thumb {
+::deep .code-block::-webkit-scrollbar-thumb {
     background: #424242;
     border-radius: 4px;
 }
 
-.code-content::-webkit-scrollbar-thumb:hover {
+::deep .code-block::-webkit-scrollbar-thumb:hover {
     background: #4e4e4e;
 }

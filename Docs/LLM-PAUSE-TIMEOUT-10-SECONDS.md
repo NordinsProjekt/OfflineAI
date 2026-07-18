@@ -223,14 +223,36 @@ Quantum computing is a
 
 ## Configuration
 
-The 10-second pause timeout is **hardcoded** and cannot be changed by users. This is intentional to:
+**Update:** The pause timeout is no longer hardcoded. Larger/slower local models (e.g. a 12B model
+running on CPU) can have legitimate multi-second gaps between output chunks, especially with the
+longer tool-priming prompts used by the agentic chat/tool-calling loop — a fixed 10s was cutting
+those responses off mid-generation. It's now a user-configurable setting, alongside the existing
+overall timeout:
 
-1. Keep behavior consistent and predictable
-2. Avoid confusion with overall timeout setting
-3. Provide optimal user experience
-4. Prevent accidental misconfiguration
+- `GenerationSettingsService.PauseTimeoutSeconds` (default 10, range 1–120 seconds)
+- Exposed in the Dashboard sidebar under **Generation → Pause Timeout (seconds)**
+- Flows through `DashboardChatService.SendMessageAsync(..., pauseTimeoutSeconds)` →
+  `ModelInstancePool.PauseTimeoutMs` → `PersistentLlmProcess.PauseTimeoutMs`, mirroring exactly how
+  the overall `TimeoutSeconds` setting already flowed through `TimeoutMs` at each layer.
 
-The overall timeout remains user-configurable via settings.
+If responses are getting cut off short on a slower/bigger model, raise this setting instead of
+the overall timeout — they are independent (see "Understanding the Two Timeouts" above).
+
+**Update 2 (conversation-mode llama-cli):** Newer llama-cli builds default to *conversation
+mode* whenever the model ships a chat template. In that mode the template is applied internally,
+so none of the assistant markers (`Assistant:`, `<|im_start|>assistant`, `<start_of_turn>model`, …)
+ever appear on stdout — every line stays `[raw]` — and the process does not exit after the
+response; it waits for the next user turn. The pause detection used to be gated on
+`assistantStarted` (marker found), which made it dead code in conversation mode: every response
+waited out the full **overall** timeout (e.g. 300 s) even with Pause Timeout set to 10 s.
+
+Two fixes in `PersistentLlmProcess.ExecuteProcessAsync`:
+
+1. The pause timeout now arms as soon as *any* stdout output has been received, marker or not.
+2. The per-turn stats line conversation mode prints right after the response completes
+   (e.g. `[ Prompt: 2201.5 t/s | Generation: 65.7 t/s ]`, detected by
+   `LlmOutputPatterns.IsTurnStatsLine`) is treated as an end-of-generation marker, so the wait
+   ends immediately — no pause delay at all — and the lingering process is killed.
 
 ## Testing
 

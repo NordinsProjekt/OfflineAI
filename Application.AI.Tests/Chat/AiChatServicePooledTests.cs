@@ -62,6 +62,7 @@ public class AiChatServicePooledTests
             It.IsAny<float>(),
             It.IsAny<float>(),
             It.IsAny<bool>(),
+            It.IsAny<int>(),
             It.IsAny<int>()))
             .ReturnsAsync(response);
 
@@ -71,22 +72,12 @@ public class AiChatServicePooledTests
     }
 
     /// <summary>
-    /// Helper method to setup SearchRelevantMemoryAsync with all parameters.
-    /// Moq doesn't support optional parameters in expression trees (CS0854).
-    /// Always use It.IsAny<> for flexible matching unless specific values are needed.
+    /// Helper method to setup SearchRelevantMemoryAsync with broad argument matching.
+    /// Moq doesn't support optional parameters in expression trees (CS0854), so every
+    /// parameter is matched with It.IsAny&lt;&gt;.
     /// </summary>
-    private void SetupSearchAsync(
-        Mock<ISearchableMemory> mock,
-        string? returnValue,
-        string? query = null,
-        int? topK = null,
-        double? minRelevanceScore = null,
-        List<string>? domainFilter = null,
-        int? maxCharsPerFragment = null,
-        bool? includeMetadata = null,
-        string? language = null)
+    private static void SetupSearchAsync(Mock<ISearchableMemory> mock, string? returnValue)
     {
-        // Use It.IsAny for all parameters for broadest matching
         mock.Setup(m => m.SearchRelevantMemoryAsync(
             It.IsAny<string>(),      // query
             It.IsAny<int>(),         // topK
@@ -378,6 +369,7 @@ public class AiChatServicePooledTests
             It.IsAny<float>(),
             It.IsAny<float>(),
             It.IsAny<bool>(),
+            It.IsAny<int>(),
             It.IsAny<int>()))
             .ThrowsAsync(new TimeoutException("Query timed out"));
 
@@ -423,6 +415,7 @@ public class AiChatServicePooledTests
             It.IsAny<float>(),
             It.IsAny<float>(),
             It.IsAny<bool>(),
+            It.IsAny<int>(),
             It.IsAny<int>()))
             .ThrowsAsync(new InvalidOperationException("Process failed"));
 
@@ -486,7 +479,7 @@ public class AiChatServicePooledTests
     {
         // Arrange
         var question = "What is AI?";
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         var cancellationToken = cts.Token;
         
         // Return a meaningful context that's long enough (> 150 chars)
@@ -537,9 +530,10 @@ public class AiChatServicePooledTests
             It.IsAny<float>(),
             It.IsAny<float>(),
             It.IsAny<bool>(),
+            It.IsAny<int>(),
             It.IsAny<int>()))
-            .Callback<string, string, int, float, int, float, float, float, float, bool, int>(
-                (sysPrompt, userQ, _, _, _, _, _, _, _, _, _) => capturedSystemPrompt = sysPrompt)
+            .Callback<string, string, int, float, int, float, float, float, float, bool, int, int>(
+                (sysPrompt, userQ, _, _, _, _, _, _, _, _, _, _) => capturedSystemPrompt = sysPrompt)
             .ReturnsAsync(response);
 
         var mockPooledInstance = new PooledInstance(mockProcess.Object, _mockModelPool.Object);
@@ -609,7 +603,7 @@ public class AiChatServicePooledTests
         _mockDomainDetector.Setup(d => d.GetDisplayNameAsync("gloomhaven"))
             .ReturnsAsync("Gloomhaven");
         
-        SetupSearchAsync(_mockSearchableMemory, context, domainFilter: detectedDomains);
+        SetupSearchAsync(_mockSearchableMemory, context);
 
         var mockPooledInstance = CreateMockPooledInstance("Gloomhaven is a cooperative game.");
         
@@ -640,7 +634,7 @@ public class AiChatServicePooledTests
         // Return a meaningful context that's long enough (> 150 chars)
         var context = "Artificial Intelligence (AI) refers to the simulation of human intelligence in machines that are programmed to think like humans and mimic leur actions. This includes learning, reasoning, and self-correction.";
         
-        SetupSearchAsync(_mockSearchableMemory, context, domainFilter: null);
+        SetupSearchAsync(_mockSearchableMemory, context);
 
         var mockPooledInstance = CreateMockPooledInstance("Response");
         
@@ -684,9 +678,10 @@ public class AiChatServicePooledTests
             It.IsAny<float>(),
             It.IsAny<float>(),
             It.IsAny<bool>(),
+            It.IsAny<int>(),
             It.IsAny<int>()))
-            .Callback<string, string, int, float, int, float, float, float, float, bool, int>(
-                (sysPrompt, _, _, _, _, _, _, _, _, _, _) => capturedSystemPrompt = sysPrompt)
+            .Callback<string, string, int, float, int, float, float, float, float, bool, int, int>(
+                (sysPrompt, _, _, _, _, _, _, _, _, _, _, _) => capturedSystemPrompt = sysPrompt)
             .ReturnsAsync("Response");
 
         var mockPooledInstance = new PooledInstance(mockProcess.Object, _mockModelPool.Object);
@@ -724,7 +719,7 @@ public class AiChatServicePooledTests
         // Return a meaningful context that's long enough (> 150 chars)
         var context = "Artificial Intelligence (AI) refers to the simulation of human intelligence in machines that are programmed to think like humans and mimic leur actions. This includes learning, reasoning, and self-correction.";
         
-        SetupSearchAsync(_mockSearchableMemory, context, topK: 5, minRelevanceScore: 0.7);
+        SetupSearchAsync(_mockSearchableMemory, context);
 
         var mockPooledInstance = CreateMockPooledInstance("Response");
         
@@ -872,9 +867,10 @@ public class AiChatServicePooledTests
             It.IsAny<float>(),
             It.IsAny<float>(),
             It.IsAny<bool>(),
+            It.IsAny<int>(),
             It.IsAny<int>()))
-            .Callback<string, string, int, float, int, float, float, float, float, bool, int>(
-                (_, _, maxTokens, temp, topK, topP, repeatP, presenceP, freqP, _, _) =>
+            .Callback<string, string, int, float, int, float, float, float, float, bool, int, int>(
+                (_, _, maxTokens, temp, topK, topP, repeatP, presenceP, freqP, _, _, _) =>
                 {
                     capturedMaxTokens = maxTokens;
                     capturedTemperature = temp;

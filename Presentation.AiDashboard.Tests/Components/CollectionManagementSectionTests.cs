@@ -20,7 +20,7 @@ public class CollectionManagementSectionTests : TestContext
         _mockJSRuntime = new Mock<IJSRuntime>();
     }
 
-    private DashboardState CreateMockDashboardState()
+    private static DashboardState CreateMockDashboardState()
     {
         var state = new DashboardState();
         // Expand the collection section for testing

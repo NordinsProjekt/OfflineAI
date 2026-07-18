@@ -42,4 +42,12 @@ public interface IQuickAskService
     /// <param name="modelFileName">The full model filename.</param>
     /// <returns>A shortened, user-friendly model name.</returns>
     string FormatModelName(string modelFileName);
+
+    /// <summary>
+    /// Strips common LLM artifacts from a raw response before display or further processing.
+    /// Removes instruction tokens ([/INST]), metadata headers/footers, and other model-specific markers.
+    /// </summary>
+    /// <param name="response">The raw LLM response text.</param>
+    /// <returns>Cleaned response with artifacts removed.</returns>
+    string SanitizeLlmResponse(string response);
 }

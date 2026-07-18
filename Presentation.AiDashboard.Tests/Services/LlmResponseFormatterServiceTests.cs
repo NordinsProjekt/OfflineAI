@@ -704,12 +704,270 @@ public class Person
 
         // Assert
         Assert.Contains("[C# Code]", result);
-        Assert.Contains("Sure, here's a simple", result);
+        // Prose is HTML-encoded for safety, so an apostrophe is emitted as its HTML entity and
+        // renders back to an apostrophe in the browser.
+        Assert.Contains("Sure, here&#39;s a simple", result);
         Assert.Contains("To run this program", result);
         
         // Verify code elements are present
         Assert.Contains("System", result);
         Assert.Contains("HelloWorld", result);
         Assert.Contains("Console", result);
+    }
+
+    // ----- StripLlmArtifacts (Step 0: every response is normalized first) -----
+
+    [Fact]
+    public void FormatResponse_WithInstructionTokens_StripsThem()
+    {
+        // Arrange
+        var input = "[INST] What is 2+2? [/INST]The answer is 4.";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.DoesNotContain("[INST]", result);
+        Assert.DoesNotContain("[/INST]", result);
+        Assert.Contains("The answer is 4.", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithSystemTokenBlock_StripsIt()
+    {
+        // Arrange
+        var input = "<<SYS>>You are a helpful assistant.<</SYS>>Hello there!";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.DoesNotContain("<<SYS>>", result);
+        Assert.DoesNotContain("You are a helpful assistant.", result);
+        Assert.Contains("Hello there!", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithChatMlTokens_StripsThem()
+    {
+        // Arrange
+        var input = "<|im_start|>assistant\nHi, how can I help?<|im_end|>";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.DoesNotContain("<|im_start|>", result);
+        Assert.DoesNotContain("<|im_end|>", result);
+        Assert.Contains("Hi, how can I help?", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithDetectedFormatHeader_StripsIt()
+    {
+        // Arrange
+        var input = "[Detected format: Assistant:]Here is your answer.";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.DoesNotContain("[Detected format", result);
+        Assert.Contains("Here is your answer.", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithGenerationCompleteFooter_StripsIt()
+    {
+        // Arrange
+        var input = "Here is your answer.\n[Generation complete - 10s pause detected]";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.DoesNotContain("[Generation complete", result);
+        Assert.Contains("Here is your answer.", result);
+    }
+
+    // ----- Human-readable prose rules (Step 4) -----
+
+    [Fact]
+    public void FormatResponse_WithMarkdownHeading_ConvertsToHeadingTag()
+    {
+        // Arrange
+        var input = "# Overview\nThis explains the topic.\n## Details\nMore info here.";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("<h1 class=\"llm-heading\">Overview</h1>", result);
+        Assert.Contains("<h2 class=\"llm-heading\">Details</h2>", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithHorizontalRule_ConvertsToHrTag()
+    {
+        // Arrange
+        var input = "First section.\n---\nSecond section.";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("<hr class=\"llm-hr\">", result);
+        Assert.Contains("First section.", result);
+        Assert.Contains("Second section.", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithBlockquote_ConvertsToBlockquoteTag()
+    {
+        // Arrange
+        var input = "As the docs say:\n> This is important.\n> Read carefully.";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("<blockquote class=\"llm-quote\">", result);
+        Assert.Contains("This is important.", result);
+        Assert.Contains("Read carefully.", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithBulletList_ConvertsToUnorderedList()
+    {
+        // Arrange
+        var input = "Steps to follow:\n- First step\n- Second step\n- Third step";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("<ul class=\"llm-list\">", result);
+        Assert.Contains("<li>First step</li>", result);
+        Assert.Contains("<li>Second step</li>", result);
+        Assert.Contains("<li>Third step</li>", result);
+        Assert.Contains("</ul>", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithBoldText_ConvertsToStrongTag()
+    {
+        // Arrange
+        var input = "This is **very important** information.";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("<strong>very important</strong>", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithItalicText_ConvertsToEmTag()
+    {
+        // Arrange
+        var input = "This is *somewhat* nuanced.";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("<em>somewhat</em>", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithUnderscoreInIdentifier_DoesNotApplyItalic()
+    {
+        // Arrange
+        var input = "Use the my_variable_name field to store the result.";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("my_variable_name", result);
+        Assert.DoesNotContain("<em>", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithProseAndCodeBlock_DoesNotFormatInsideCode()
+    {
+        // Arrange - a heading/list marker and emphasis-like text INSIDE the code block should be left alone
+        var input = "# Example\nHere is code:```csharp// - not a list\n// **not bold**\nvar x = 1;```Done.";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("<h1 class=\"llm-heading\">Example</h1>", result);
+        Assert.Contains("[C# Code]", result);
+        // The code contents must not have been turned into list/strong tags
+        Assert.DoesNotContain("<ul class=\"llm-list\">", result);
+        Assert.DoesNotContain("<strong>not bold</strong>", result);
+    }
+
+    // ----- XSS: model text is rendered as a raw MarkupString, so any markup in it must be encoded -----
+
+    [Fact]
+    public void FormatResponse_WithScriptTagInProse_EncodesIt()
+    {
+        // Arrange
+        var input = "Here is the answer.<script>alert('xss')</script>";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert - the raw executable tag must not survive into the rendered markup
+        Assert.DoesNotContain("<script>", result);
+        Assert.Contains("&lt;script&gt;", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithEventHandlerAttributeInProse_EncodesIt()
+    {
+        // Arrange
+        var input = "Look at this image: <img src=x onerror=\"alert(document.cookie)\">";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert - no live <img> element / event handler is emitted
+        Assert.DoesNotContain("<img", result);
+        Assert.Contains("&lt;img", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithHtmlInsideCodeBlock_EncodesButStillHighlights()
+    {
+        // Arrange - a script tag inside a code fence must be shown as text, never executed
+        var input = "```html\n<script>alert(1)</script>\n```";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("[HTML Code]", result);
+        Assert.DoesNotContain("<script>", result);
+        Assert.Contains("&lt;", result); // encoded angle brackets present
+    }
+
+    [Fact]
+    public void FormatResponse_WithNumberedListAndBoldText_BothFormatCorrectly()
+    {
+        // Arrange
+        var input = "Here are the **key** steps:\n1. First do this\n2. Then do that";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("<strong>key</strong>", result);
+        Assert.Contains("<ol class=\"llm-list\">", result);
+        Assert.Contains("<li>First do this</li>", result);
+        Assert.Contains("<li>Then do that</li>", result);
     }
 }

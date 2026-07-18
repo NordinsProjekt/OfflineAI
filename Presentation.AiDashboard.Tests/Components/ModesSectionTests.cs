@@ -11,7 +11,7 @@ namespace Presentation.AiDashboard.Tests.Components;
 /// </summary>
 public class ModesSectionTests : TestContext
 {
-    private DashboardState CreateMockDashboardState()
+    private static DashboardState CreateMockDashboardState()
     {
         var state = new DashboardState();
         // Expand the modes section for testing
@@ -132,6 +132,75 @@ public class ModesSectionTests : TestContext
     }
 
     [Fact]
+    public void ModesSection_UseGpuOn_ShowsGpuLayersSlider()
+    {
+        // Arrange
+        var dashboardState = CreateMockDashboardState();
+        dashboardState.SettingsService.UseGpu = true;
+        Services.AddSingleton(dashboardState);
+
+        // Act
+        var cut = RenderComponent<ModesSection>();
+
+        // Assert
+        Assert.NotEmpty(cut.FindAll(".oa-gpu-layers-slider"));
+    }
+
+    [Fact]
+    public void ModesSection_UseGpuOff_HidesGpuLayersSlider()
+    {
+        // Arrange
+        var dashboardState = CreateMockDashboardState();
+        dashboardState.SettingsService.UseGpu = false;
+        Services.AddSingleton(dashboardState);
+
+        // Act
+        var cut = RenderComponent<ModesSection>();
+
+        // Assert
+        Assert.Empty(cut.FindAll(".oa-gpu-layers-slider"));
+    }
+
+    [Fact]
+    public void ModesSection_GpuLayersDefault_Is99AndShowsMaxAuto()
+    {
+        // Arrange
+        var dashboardState = CreateMockDashboardState();
+        dashboardState.SettingsService.UseGpu = true;
+        Services.AddSingleton(dashboardState);
+
+        // Act
+        var cut = RenderComponent<ModesSection>();
+
+        // Assert
+        Assert.Equal(99, dashboardState.SettingsService.GpuLayers);
+        var slider = cut.Find(".oa-gpu-layers-slider");
+        Assert.Equal("99", slider.GetAttribute("value"));
+        Assert.Equal("0", slider.GetAttribute("min"));
+        Assert.Equal("99", slider.GetAttribute("max"));
+        Assert.Contains("Max (auto)", cut.Find(".oa-gpu-layers-field label").TextContent);
+    }
+
+    [Fact]
+    public void ModesSection_GpuLayersSlider_CanBeLoweredBelowMax()
+    {
+        // Arrange
+        var dashboardState = CreateMockDashboardState();
+        dashboardState.SettingsService.UseGpu = true;
+        Services.AddSingleton(dashboardState);
+
+        var cut = RenderComponent<ModesSection>();
+        var slider = cut.Find(".oa-gpu-layers-slider");
+
+        // Act
+        slider.Input("40");
+
+        // Assert
+        Assert.Equal(40, dashboardState.SettingsService.GpuLayers);
+        Assert.Contains("GPU Layers: 40", cut.Find(".oa-gpu-layers-field label").TextContent);
+    }
+
+    [Fact]
     public void ModesSection_InitialState_ReflectsSettings()
     {
         // Arrange - Set specific values to test
@@ -186,7 +255,7 @@ public class ModesSectionTests : TestContext
         Assert.Contains("RAG Mode", labels[0].TextContent);
         Assert.Contains("Performance Metrics", labels[1].TextContent);
         Assert.Contains("Debug Mode", labels[2].TextContent);
-        Assert.Contains("Use GPU (34 layers)", labels[3].TextContent);
+        Assert.Contains("Use GPU", labels[3].TextContent);
     }
 
     [Fact]

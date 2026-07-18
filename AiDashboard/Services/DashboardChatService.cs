@@ -18,7 +18,7 @@ namespace AiDashboard.Services
     /// Wraps AiChatServicePooled for use in the Blazor dashboard.
     /// Manages chat state and applies dashboard settings to the AI chat service.
     /// </summary>
-    public class DashboardChatService : IDisposable
+    public sealed class DashboardChatService : IDisposable
     {
         private ILlmMemory _memory;
         private readonly ILlmMemory _conversationMemory;
@@ -27,8 +27,10 @@ namespace AiDashboard.Services
         private readonly IQuestionRepository? _questionRepository;
         private readonly ILlmRepository? _llmRepository;
         private Func<string?>? _getCurrentModelName;
+        private Guid? _conversationId;
         private bool _disposed;
-        
+        private readonly int _contextSize;
+
         /// <summary>
         /// Get the domain detector for domain registration.
         /// </summary>
@@ -41,7 +43,8 @@ namespace AiDashboard.Services
             IDomainDetector? domainDetector = null,
             IQuestionRepository? questionRepository = null,
             ILlmRepository? llmRepository = null,
-            Func<string?>? getCurrentModelName = null)
+            Func<string?>? getCurrentModelName = null,
+            int contextSize = 0)
         {
             _memory = memory ?? throw new ArgumentNullException(nameof(memory));
             _conversationMemory = conversationMemory ?? throw new ArgumentNullException(nameof(conversationMemory));
@@ -50,6 +53,7 @@ namespace AiDashboard.Services
             _questionRepository = questionRepository;
             _llmRepository = llmRepository;
             _getCurrentModelName = getCurrentModelName;
+            _contextSize = contextSize;
         }
 
         /// <summary>
@@ -59,6 +63,24 @@ namespace AiDashboard.Services
         public void SetCurrentModelNameProvider(Func<string?> getCurrentModelName)
         {
             _getCurrentModelName = getCurrentModelName ?? throw new ArgumentNullException(nameof(getCurrentModelName));
+        }
+
+        /// <summary>
+        /// Identifier grouping all turns (from any backend) of the current multi-turn
+        /// conversation/session, so the full conversation can be saved and reconstructed
+        /// as one unit. Lazily created on first save.
+        /// </summary>
+        public Guid ConversationId => _conversationId ??= Guid.NewGuid();
+
+        /// <summary>
+        /// Starts a new conversation/session. Subsequent saved question/answer turns
+        /// (classic pooled backend or an external backend like Gemma 4 CLI) will be
+        /// grouped under a new <see cref="ConversationId"/>. Call this when the user
+        /// clears the chat or otherwise starts a new logical conversation.
+        /// </summary>
+        public void StartNewConversation()
+        {
+            _conversationId = Guid.NewGuid();
         }
 
         /// <summary>
@@ -113,7 +135,7 @@ namespace AiDashboard.Services
         /// <summary>
         /// Apply bot personality settings to generation settings.
         /// </summary>
-        private void ApplyPersonalitySettings(BotPersonalityEntity? personality, GenerationSettings settings)
+        private static void ApplyPersonalitySettings(BotPersonalityEntity? personality, GenerationSettings settings)
         {
             if (personality == null) return;
             
@@ -138,7 +160,8 @@ namespace AiDashboard.Services
             BotPersonalityEntity? personality = null,
             bool useGpu = false,
             int gpuLayers = 0,
-            int timeoutSeconds = 300) // Changed from 30 to 300 (5 minutes)
+            int timeoutSeconds = 300, // Changed from 30 to 300 (5 minutes)
+            int pauseTimeoutSeconds = 10)
         {
             if (string.IsNullOrWhiteSpace(message))
                 throw new ArgumentNullException(nameof(message));
@@ -148,6 +171,10 @@ namespace AiDashboard.Services
 
             // Update timeout in the model pool (5 minutes = 300,000 ms)
             _modelPool.TimeoutMs = timeoutSeconds * 1000;
+
+            // Update pause-detection timeout (how long to wait after the last output chunk
+            // before treating generation as complete) — see GenerationSettingsService.PauseTimeoutSeconds.
+            _modelPool.PauseTimeoutMs = pauseTimeoutSeconds * 1000;
 
             // Check pool health
             if (_modelPool.AvailableCount == 0)
@@ -170,7 +197,8 @@ namespace AiDashboard.Services
                 var llmSettings = new LlmSettings
                 {
                     UseGpu = useGpu,
-                    GpuLayers = gpuLayers
+                    GpuLayers = gpuLayers,
+                    ContextSize = _contextSize
                 };
 
                 // Create chat service with current settings
@@ -224,6 +252,44 @@ namespace AiDashboard.Services
         /// </summary>
         private async Task SaveQuestionAnswerAsync(string question, string answer)
         {
+            // Get current model name dynamically
+            var currentModelFileName = _getCurrentModelName?.Invoke();
+
+            if (string.IsNullOrWhiteSpace(currentModelFileName))
+            {
+                Console.WriteLine("[WARNING] Cannot save question/answer: current model name is not available");
+                return;
+            }
+
+            await SaveQuestionAnswerCoreAsync(question, answer, currentModelFileName);
+        }
+
+        /// <summary>
+        /// Save a question and answer produced by a backend that does not flow through
+        /// <see cref="SendMessageAsync"/> (e.g. the Gemma 4 CLI backend). The turn is
+        /// grouped under the same <see cref="ConversationId"/> as the rest of the current
+        /// session, so multi-turn chats are saved as one unit regardless of backend.
+        /// </summary>
+        /// <param name="question">The user's question/message.</param>
+        /// <param name="answer">The LLM's answer.</param>
+        /// <param name="modelName">The name/filename identifying the LLM that produced the answer.</param>
+        public async Task SaveExternalQuestionAnswerAsync(string question, string answer, string? modelName)
+        {
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                Console.WriteLine("[WARNING] Cannot save question/answer: model name is not available");
+                return;
+            }
+
+            await SaveQuestionAnswerCoreAsync(question, answer, modelName);
+        }
+
+        /// <summary>
+        /// Shared persistence logic: resolves/creates the LLM entry and saves the
+        /// question/answer pair grouped under the current <see cref="ConversationId"/>.
+        /// </summary>
+        private async Task SaveQuestionAnswerCoreAsync(string question, string answer, string modelName)
+        {
             // Only save if repositories are available
             if (_questionRepository == null || _llmRepository == null)
             {
@@ -232,20 +298,11 @@ namespace AiDashboard.Services
 
             try
             {
-                // Get current model name dynamically
-                var currentModelFileName = _getCurrentModelName?.Invoke();
-                
-                if (string.IsNullOrWhiteSpace(currentModelFileName))
-                {
-                    Console.WriteLine("[WARNING] Cannot save question/answer: current model name is not available");
-                    return;
-                }
-
                 // Get or create LLM entry
-                var llmId = await _llmRepository.AddOrGetLlmAsync(currentModelFileName);
+                var llmId = await _llmRepository.AddOrGetLlmAsync(modelName);
 
-                // Save question and answer
-                await _questionRepository.SaveQuestionAsync(question, answer, llmId);
+                // Save question and answer, grouped under the current conversation/session
+                await _questionRepository.SaveQuestionAsync(question, answer, llmId, ConversationId);
             }
             catch (Exception ex)
             {

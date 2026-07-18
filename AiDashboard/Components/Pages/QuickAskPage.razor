@@ -1,22 +1,27 @@
 @page "/quick-ask"
 @namespace AiDashboard.Components.Pages
 @using global::Services.QuickAsk
+@using global::Services.FileAgent
+@using global::Services.AgentTools
+@using AiDashboard.State
 
 @rendermode InteractiveServer
 @inject NavigationManager Navigation
 @inject DashboardState Dashboard
 @inject AiDashboard.Services.Interfaces.ILlmResponseFormatterService Formatter
 @inject IQuickAskService QuickAskService
+@inject IFileAgentService FileAgent
+@inject IAgenticChatService AgenticChat
 
 <PageTitle>Quick Ask - OfflineAI</PageTitle>
 
 <div class="oa-quick-ask-page">
     <div class="oa-quick-header">
-        <button class="oa-back-button" @onclick="@(() => Navigation.NavigateTo("/"))">
-            Back to Home
-        </button>
-        <h1>Quick Ask</h1>
-        <p class="oa-quick-subtitle">Ask anything, get instant answers from your local AI</p>
+        <button class="oa-back-button" @onclick="@(() => Navigation.NavigateTo("/"))">Back to Home</button>
+        <div class="oa-quick-header-center">
+            <h1>Quick Ask</h1>
+            <p class="oa-quick-subtitle">Ask anything, get instant answers from your local AI</p>
+        </div>
     </div>
 
     <div class="oa-quick-container">
@@ -83,6 +88,11 @@
             </div>
 
             <div class="oa-input-area">
+                <AgentFileUpload DarkMode="false"
+                                  Disabled="@isProcessing"
+                                  OnUploaded="@OnFileUploaded"
+                                  OnError="@OnFileUploadError"
+                                  DropZoneSelector=".oa-quick-card" />
                 <textarea class="oa-quick-input"
                           placeholder="Type your question here..."
                           @bind="currentQuestion"
@@ -138,6 +148,31 @@
                     <span>Model: @QuickAskService.FormatModelName(Dashboard.ModelService.CurrentModel)</span>
                 </div>
             }
+            <div class="oa-info-badge oa-model-selector">
+                <span class="model-label-text">Tokens:</span>
+                <select class="oa-model-dropdown oa-tokens-dropdown" @bind="_selectedMaxTokens">
+                    @foreach (var preset in Enum.GetValues<MaxTokensPreset>())
+                    {
+                        <option value="@preset">@preset.ToLabel()</option>
+                    }
+                </select>
+            </div>
+            <div class="oa-info-badge oa-model-selector" title="How long to wait after the LLM's last output before treating the response as complete. Raise it for slower/bigger models.">
+                <span class="model-label-text">Pause:</span>
+                <input type="number" min="1" max="120" class="oa-pause-timeout-input"
+                       @bind="Dashboard.SettingsService.PauseTimeoutSeconds" @bind:event="oninput">
+                <span class="model-label-text">s</span>
+            </div>
+            @if (Dashboard.IsGemma4Available)
+            {
+                <div class="oa-info-badge oa-model-selector">
+                    <span class="model-label-text">Backend:</span>
+                    <select class="oa-model-dropdown" @bind="_selectedBackend">
+                        <option value="@LlmBackend.Classic">Classic</option>
+                        <option value="@LlmBackend.Gemma4Cli">Gemma 4 CLI</option>
+                    </select>
+                </div>
+            }
         </div>
     </div>
 </div>
@@ -146,7 +181,19 @@
     private string currentQuestion = "";
     private bool isProcessing = false;
     private readonly List<QuickAskMessage> messages = new();
-    
+    private MaxTokensPreset _selectedMaxTokens = MaxTokensPreset.Tokens128K;
+    private LlmBackend _selectedBackend = LlmBackend.Classic;
+
+    // Bare filename of the most recently uploaded file (via AgentFileUpload), so a terse
+    // follow-up like "Summarize" can still be resolved to the right /läs-pdf or /läs command —
+    // see IAgenticChatService.SendWithToolsAsync's recentlyUploadedFilename parameter.
+    private string? lastUploadedFilename;
+
+    protected override void OnInitialized()
+    {
+        _selectedBackend = Dashboard.SelectedBackend;
+    }
+
     private string SelectedModel
     {
         get => Dashboard.ModelService.CurrentModel;
@@ -172,33 +219,167 @@
         if (string.IsNullOrWhiteSpace(currentQuestion) || isProcessing)
             return;
 
-        // Create user message using service
-        var userMessage = QuickAskService.CreateUserMessage(currentQuestion);
+        var input = currentQuestion.Trim();
+
+        // Add user message to chat history
+        var userMessage = QuickAskService.CreateUserMessage(input);
         messages.Add(userMessage);
 
-        var question = currentQuestion;
         currentQuestion = "";
         isProcessing = true;
+
+        // Apply the selected MaxTokens preset before every call
+        Dashboard.SettingsService.MaxTokens = _selectedMaxTokens.ToInt();
+
+        // Sync selected backend to DashboardState
+        Dashboard.SelectedBackend = _selectedBackend;
+
         StateHasChanged();
 
         var startTime = DateTime.Now;
 
         try
         {
-            // Call the QuickAsk-specific method that disables RAG
-            var response = await Dashboard.SendQuickAskAsync(question);
+            if (FileAgent.IsCommand(input))
+            {
+                var result = await FileAgent.ExecuteAsync(input);
 
-            // Create AI message using service
-            var aiMessage = QuickAskService.CreateAiMessage(response, startTime);
-            
-            // Apply full formatting to AI response
-            aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
-            
-            messages.Add(aiMessage);
+                if (result.ResultType == FileAgentResultType.FileRead && result.IsSuccess
+                    && result.InjectedContext is not null)
+                {
+                    // /läs: file content is combined with the user-supplied instruction into
+                    // InjectedContext (see FileAgentService.ReadFileAsync), then forwarded to the LLM
+                    var response = await Dashboard.SendQuickAskActiveAsync(result.InjectedContext);
+                    var aiMessage = QuickAskService.CreateAiMessage(response, startTime);
+                    aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
+                    messages.Add(aiMessage);
+                }
+                else if (result.ResultType == FileAgentResultType.FillRequested && result.IsSuccess
+                    && result.LlmPrompt is not null)
+                {
+                    // /fyll: send structured prompt to the LLM
+                    var response = await Dashboard.SendQuickAskActiveAsync(result.LlmPrompt);
+
+                    if (FileAgent.TryExtractFileContent(response, out var fileContent))
+                    {
+                        await FileAgent.WriteExtractedContentAsync(result.TargetFilename!, fileContent);
+
+                        var displayText = FileAgent.StripFileMarkers(response);
+                        var aiMessage = QuickAskService.CreateAiMessage(displayText, startTime);
+                        aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
+                        messages.Add(aiMessage);
+
+                        messages.Add(new QuickAskMessage
+                        {
+                            IsUser        = false,
+                            Text          = $"✓ Fil sparad: {result.TargetFilename}",
+                            FormattedText = $"✓ Fil sparad: {result.TargetFilename}",
+                            Timestamp     = DateTime.Now
+                        });
+                    }
+                    else
+                    {
+                        // LLM did not use markers — show raw response + warning
+                        var aiMessage = QuickAskService.CreateAiMessage(response, startTime);
+                        aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
+                        messages.Add(aiMessage);
+
+                        messages.Add(new QuickAskMessage
+                        {
+                            IsUser        = false,
+                            Text          = "⚠ Kunde inte extrahera filinnehåll — filen sparades inte.",
+                            FormattedText = "⚠ Kunde inte extrahera filinnehåll — filen sparades inte.",
+                            Timestamp     = DateTime.Now
+                        });
+                    }
+                }
+                else if (result.ResultType == FileAgentResultType.EditRequested && result.IsSuccess
+                    && result.LlmPrompt is not null)
+                {
+                    // /redigera: send the numbered-content prompt to the LLM and expect one or
+                    // more <REDIGERA RAD=...> blocks describing which lines to replace
+                    var response = await Dashboard.SendQuickAskActiveAsync(result.LlmPrompt);
+
+                    if (FileAgent.TryExtractLineEdits(response, out var edits))
+                    {
+                        var applyResult = await FileAgent.ApplyLineEditsAsync(result.TargetFilename!, edits);
+
+                        // Show any explanatory text the LLM wrote outside the edit blocks
+                        var displayText = FileAgent.StripEditMarkers(response);
+                        if (!string.IsNullOrWhiteSpace(displayText))
+                        {
+                            var aiMessage = QuickAskService.CreateAiMessage(displayText, startTime);
+                            aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
+                            messages.Add(aiMessage);
+                        }
+
+                        messages.Add(new QuickAskMessage
+                        {
+                            IsUser        = false,
+                            Text          = applyResult.Message,
+                            FormattedText = applyResult.Message,
+                            Timestamp     = DateTime.Now
+                        });
+                    }
+                    else
+                    {
+                        // LLM did not use the expected format — show raw response + warning
+                        var aiMessage = QuickAskService.CreateAiMessage(response, startTime);
+                        aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
+                        messages.Add(aiMessage);
+
+                        messages.Add(new QuickAskMessage
+                        {
+                            IsUser        = false,
+                            Text          = "⚠ Kunde inte tolka radändringar — filen ändrades inte.",
+                            FormattedText = "⚠ Kunde inte tolka radändringar — filen ändrades inte.",
+                            Timestamp     = DateTime.Now
+                        });
+                    }
+                }
+                else
+                {
+                    // /skapa or error: show as a plain system message (no tokens/s)
+                    messages.Add(new QuickAskMessage
+                    {
+                        IsUser        = false,
+                        Text          = result.Message,
+                        FormattedText = result.Message,
+                        Timestamp     = DateTime.Now
+                    });
+                }
+            }
+            else
+            {
+                // Regular question — let the LLM decide (agentic pattern) whether it needs to
+                // use a file tool; AgenticChat primes it with the tool dictionary, detects any
+                // slash command in the reply via string search, executes it, and feeds the
+                // result back to the LLM for a final answer.
+                var agentResult = await AgenticChat.SendWithToolsAsync(
+                    input,
+                    Dashboard.SendQuickAskActiveAsync,
+                    onToolStatus: status => Dashboard.StatusMessage = status,
+                    recentlyUploadedFilename: lastUploadedFilename);
+
+                foreach (var invocation in agentResult.ToolInvocations)
+                {
+                    var toolText = $"🔧 Used {invocation.Command} — {invocation.ResultSummary}";
+                    messages.Add(new QuickAskMessage
+                    {
+                        IsUser        = false,
+                        Text          = toolText,
+                        FormattedText = toolText,
+                        Timestamp     = DateTime.Now
+                    });
+                }
+
+                var aiMessage = QuickAskService.CreateAiMessage(agentResult.FinalResponse, startTime);
+                aiMessage.FormattedText = Formatter.FormatResponse(aiMessage.Text);
+                messages.Add(aiMessage);
+            }
         }
         catch (Exception ex)
         {
-            // Create error message using service
             var errorMessage = QuickAskService.CreateErrorMessage(ex.Message);
             messages.Add(errorMessage);
         }
@@ -212,11 +393,39 @@
     private void ClearConversation()
     {
         messages.Clear();
+        lastUploadedFilename = null;
+        Dashboard.StartNewConversation();
     }
 
     private async Task OnModelChanged()
     {
         // Trigger UI refresh
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnFileUploaded(string filename)
+    {
+        lastUploadedFilename = filename;
+
+        messages.Add(new QuickAskMessage
+        {
+            IsUser = false,
+            Text = $"✓ Fil uppladdad: {filename} — fråga mig t.ex. \"sammanfatta {filename}\" så läser jag den.",
+            FormattedText = $"✓ Fil uppladdad: {filename} — fråga mig t.ex. \"sammanfatta {filename}\" så läser jag den.",
+            Timestamp = DateTime.Now
+        });
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnFileUploadError(string errorMessage)
+    {
+        messages.Add(new QuickAskMessage
+        {
+            IsUser = false,
+            Text = $"⚠ {errorMessage}",
+            FormattedText = $"⚠ {errorMessage}",
+            Timestamp = DateTime.Now
+        });
         await InvokeAsync(StateHasChanged);
     }
 }

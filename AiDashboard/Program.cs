@@ -4,19 +4,28 @@ using AiDashboard.Services.Interfaces;
 using Application.AI.Pooling;
 using Application.AI.Management;
 using Application.AI.Embeddings;
+using Application.AI.Gemma4;
 using Services.Memory;
 using Services.Interfaces;
 using Services.Repositories;
-using Microsoft.SemanticKernel.Embeddings;
+using Services.AgentTools;
+using Microsoft.Extensions.AI;
 using Infrastructure.Data.Dapper;
 using Services.Configuration;
 using Services.Management;
 using Services.Language;
+using Services.FileAgent;
 using Services.QuickAsk;
+using Services.Workspace;
+using Services.BatchJobs;
+using Services.GoalAgent;
+
+// Infrastructure.Data.Dapper uses WindowsIdentity to grant DB access; this app only runs on Windows.
+[assembly: System.Runtime.Versioning.SupportedOSPlatform("windows")]
 
 namespace AiDashboard;
 
-public class Program
+public static class Program
 {
     public static void Main(string[] args)
     {
@@ -25,6 +34,25 @@ public class Program
         // Add services to the container.
         builder.Services.AddRazorComponents()
             .AddInteractiveServerComponents();
+
+        // Raise the Blazor Server circuit's SignalR message size above the default (~32 KB) so
+        // large file uploads (e.g. 100 MB PDFs via AgentFileUpload) don't get rejected before
+        // AgentFileUpload's own MaxFileSizeBytes check even runs. Set a bit higher than the
+        // largest AgentFileUpload.MaxFileSizeBytes in use (100 MB) to leave transport overhead.
+        builder.Services.Configure<Microsoft.AspNetCore.SignalR.HubOptions>(options =>
+        {
+            options.MaximumReceiveMessageSize = 110 * 1024 * 1024;
+        });
+
+        // Companion to the HubOptions change above: if the SignalR circuit ever falls back from
+        // WebSockets to long-polling (proxies, some browsers/networks), that transport sends
+        // data as regular HTTP request bodies, which Kestrel caps at ~28.6 MB by default —
+        // independently of MaximumReceiveMessageSize. Without raising this too, a large upload
+        // over long-polling gets its request rejected and the circuit dies ("Rejoin failed").
+        builder.WebHost.ConfigureKestrel(options =>
+        {
+            options.Limits.MaxRequestBodySize = 110 * 1024 * 1024;
+        });
 
         // Register AppConfiguration
         var appConfig = builder.Configuration.GetSection("AppConfiguration").Get<AppConfiguration>() ?? new AppConfiguration();
@@ -39,13 +67,155 @@ public class Program
         // Register QuickAsk service for conversation management
         builder.Services.AddSingleton<IQuickAskService, QuickAskService>();
 
+        // Register the workspace service: manages the list of user-selectable workspace
+        // directories (persisted in %AppData%\OfflineAI\workspaces.json) and the active
+        // selection. The file agent is always confined to whichever workspace is active.
+        builder.Services.AddSingleton<IWorkspaceService>(_ =>
+        {
+            var defaultAgentDir = !string.IsNullOrWhiteSpace(appConfig.Folders.AgentFilesFolder)
+                ? appConfig.Folders.AgentFilesFolder
+                : Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                    "OfflineAI", "AgentFiles");
+            // Confine every workspace to the configured root (defaults to the parent of the
+            // agent-files folder) so the file agent can never be pointed outside that tree.
+            return new WorkspaceService(defaultAgentDir, workspaceRoot: appConfig.Folders.WorkspaceRoot);
+        });
+
+        // Register file agent service for /skapa, /fyll, /läs chat commands. Rooted at the
+        // active workspace directory; SetBaseDirectory(...) re-confines it whenever the user
+        // switches workspaces, so the LLM can never read/write outside the selected directory.
+        builder.Services.AddSingleton<IFileAgentService>(sp =>
+        {
+            var workspaceService = sp.GetRequiredService<IWorkspaceService>();
+            var fileAgent = new FileAgentService(workspaceService.GetActiveWorkspace().Path);
+            workspaceService.ActiveWorkspaceChanged += workspace => fileAgent.SetBaseDirectory(workspace.Path);
+            return fileAgent;
+        });
+
+        // Register agent tool registry (used by Gemma 4 CLI tool-calling)
+        builder.Services.AddSingleton<IAgentToolRegistry, AgentToolRegistry>();
+
+        // Register the utility tools service for /tid, /datum, and /api <slutpunkt> <instruktion>.
+        // API endpoints are resolved only from AppConfiguration.AgentTools.Endpoints — the LLM can
+        // never supply an arbitrary URL.
+        builder.Services.AddHttpClient("AgentApiTools");
+        builder.Services.AddSingleton<IUtilityToolsService, UtilityToolsService>();
+
+        // Register the external tools service: operator-configured local executables the LLM
+        // may run by slash command. Tools are resolved only from
+        // AppConfiguration.AgentTools.ExternalTools (appsettings/user secrets) — the LLM picks
+        // a tool by name and supplies argument text; it can never specify a path.
+        builder.Services.AddSingleton<IExternalToolsService, ExternalToolsService>();
+
+        // Register the QB64 compiler tool: lets the LLM compile and run QBasic (.bas) files from
+        // the active workspace via /qb64 and /qb64-kompilera, feeding compiler errors and program
+        // output back into the tool-call loop so the model can fix its own code. The compiler
+        // path comes only from AppConfiguration.AgentTools.Qb64 (empty = the commands are never
+        // offered); the LLM supplies a bare filename that is confined to the active workspace.
+        builder.Services.AddSingleton<IQb64ToolService, Qb64ToolService>();
+
+        // Register the lightweight, text-based agentic chat service used by QuickAsk and the
+        // Dashboard chat: tells the LLM about the IFileAgentService/IUtilityToolsService slash
+        // commands and executes any it requests, feeding the result back for a final answer. The
+        // tool-call loop always stays internal to this service — only status callbacks and the
+        // final answer are meant to reach the user.
+        builder.Services.AddSingleton<IAgenticChatService>(sp =>
+            new AgenticChatService(
+                sp.GetRequiredService<IFileAgentService>(),
+                sp.GetRequiredService<IUtilityToolsService>(),
+                appConfig.AgentTools.MaxToolCallRounds,
+                sp.GetRequiredService<IExternalToolsService>(),
+                sp.GetRequiredService<IQb64ToolService>()));
+
+        // Register the batch job queue (Batch Processing page): feeds each queued task's
+        // free-text description into IAgenticChatService.SendWithToolsAsync one at a time, so
+        // jobs can freely use the same file-agent tools as regular chat. Singleton so the queue
+        // survives page navigation (not persisted across an app restart).
+        builder.Services.AddSingleton<IBatchJobService, BatchJobService>();
+
+        // Register the TDD-style goal agent (Agent Mode page): breaks a free-text workspace
+        // goal into checkable requirements, does file work via IAgenticChatService, verifies
+        // each requirement against the workspace, and repeats until everything passes (or the
+        // iteration cap is hit). Singleton so a run's progress survives page navigation. The
+        // file agent is passed so each run writes a full prompt/response transcript to
+        // agentlogg.txt in the active workspace for debugging. The run repository (optional — only
+        // registered when a database is configured) additionally records each run as history that
+        // survives an app restart, which agentlogg.txt does not: it is overwritten per run.
+        builder.Services.AddSingleton<IGoalAgentService>(sp =>
+            new GoalAgentService(
+                sp.GetRequiredService<IAgenticChatService>(),
+                sp.GetRequiredService<IFileAgentService>(),
+                appConfig.AgentTools.MaxGoalIterations,
+                sp.GetService<IAgentRunRepository>()));
+
+        // Register Gemma 4 CLI service. Prefer an explicit Gemma4Cli section, but when its
+        // ModelPath is empty fall back to the main Llm model *if that model is itself a Gemma
+        // model* (ModelType "Gemma") — Gemma4CliService builds Gemma's chat template, so pointing
+        // it at a non-Gemma model would mis-format the prompt. This lets the templated Gemma path
+        // (chat + goal agent) work from a single Llm config, instead of silently falling back to
+        // the un-templated pooled path that returns empty output for instruct models.
+        var gemma4CliCfg = appConfig.Gemma4Cli;
+        var gemma4CliExe = !string.IsNullOrWhiteSpace(gemma4CliCfg.LlamaCliPath)
+            ? gemma4CliCfg.LlamaCliPath
+            : appConfig.Llm?.ExecutablePath ?? string.Empty;
+        var gemma4UsingLlmFallback = string.IsNullOrWhiteSpace(gemma4CliCfg.ModelPath)
+            && string.Equals(appConfig.Llm?.ModelType, "Gemma", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(appConfig.Llm?.ModelPath);
+        string gemma4CliModel;
+        if (!string.IsNullOrWhiteSpace(gemma4CliCfg.ModelPath))
+            gemma4CliModel = gemma4CliCfg.ModelPath;
+        else if (gemma4UsingLlmFallback)
+            gemma4CliModel = appConfig.Llm!.ModelPath;
+        else
+            gemma4CliModel = string.Empty;
+        if (!string.IsNullOrWhiteSpace(gemma4CliModel)
+            && !string.IsNullOrWhiteSpace(gemma4CliExe))
+        {
+            builder.Services.AddSingleton<IGemma4CliService>(sp =>
+            {
+                var opts = new Gemma4CliOptions
+                {
+                    LlamaCliPath           = gemma4CliExe,
+                    ModelPath              = gemma4CliModel,
+                    // In fallback mode inherit the operator's hardware tuning from the Llm section
+                    // (they may have deliberately limited GPU layers / context for the GPU).
+                    GpuLayers              = gemma4UsingLlmFallback ? appConfig.Llm!.GpuLayers : gemma4CliCfg.GpuLayers,
+                    ContextSize            = gemma4UsingLlmFallback ? appConfig.Llm!.ContextSize : gemma4CliCfg.ContextSize,
+                    Device                 = !string.IsNullOrWhiteSpace(gemma4CliCfg.Device)
+                                                 ? gemma4CliCfg.Device
+                                                 : appConfig.Llm?.Device ?? string.Empty,
+                    MaxTokens              = gemma4CliCfg.MaxTokens,
+                    Temperature            = gemma4CliCfg.Temperature,
+                    TopP                   = gemma4CliCfg.TopP,
+                    TopK                   = gemma4CliCfg.TopK,
+                    TimeoutMs              = gemma4CliCfg.TimeoutMs,
+                    PauseTimeoutMs         = gemma4CliCfg.PauseTimeoutMs,
+                    MaxToolCallIterations  = gemma4CliCfg.MaxToolCallIterations
+                };
+                var registry = sp.GetRequiredService<IAgentToolRegistry>();
+                _ = registry; // available for future tool-call wiring
+                var source = gemma4UsingLlmFallback ? " (from Llm config)" : string.Empty;
+                Console.WriteLine($"[+] Gemma 4 CLI service registered (model: {Path.GetFileName(gemma4CliModel)}){source}");
+                return new Gemma4CliService(opts);
+            });
+        }
+        else
+        {
+            Console.WriteLine("[!] Gemma 4 CLI service not configured (AppConfiguration:Gemma4Cli:ModelPath missing)");
+        }
+
         // Register document analysis services
         builder.Services.AddScoped<IDocumentAnalysisService, DocumentAnalysisService>();
         builder.Services.AddScoped<IKursplanAnalysisService, KursplanAnalysisService>();
         builder.Services.AddScoped<IDocumentTypeDetector, DocumentTypeDetector>();
 
-        // Register web scraper service
+        // Register web scraper service. The named "WebScraper" client disables automatic redirect
+        // following so WebScraperService can validate every redirect hop against its SSRF host
+        // allow-list instead of letting HttpClient silently follow a redirect to an internal target.
         builder.Services.AddHttpClient();
+        builder.Services.AddHttpClient("WebScraper")
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         builder.Services.AddScoped<IWebScraperService, WebScraperService>();
 
         // Read configuration for LLM
@@ -81,6 +251,7 @@ public class Program
         }
 
         // Register embedding service (optional for dashboard - only needed if RAG is enabled)
+        var embeddingServiceRegistered = false;
         if (!string.IsNullOrEmpty(embeddingModelPath) && !string.IsNullOrEmpty(embeddingVocabPath))
         {
             try
@@ -91,9 +262,10 @@ public class Program
                     embeddingDimension,
                     debugMode: false));
 
-                builder.Services.AddSingleton<ITextEmbeddingGenerationService>(sp =>
+                builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp =>
                     sp.GetRequiredService<SemanticEmbeddingService>());
 
+                embeddingServiceRegistered = true;
                 Console.WriteLine("[+] Embedding service registered (RAG available)");
             }
             catch (Exception ex)
@@ -108,47 +280,37 @@ public class Program
         }
 
         // Register Dapper repositories (optional - but required for table management and collections)
-        IVectorMemoryRepository? repositoryInstance = null;
         if (!string.IsNullOrEmpty(dbConnectionString))
         {
             try
             {
                 builder.Services.AddDapperVectorMemoryRepository(dbConnectionString, dbTableName);
-                
+
                 // Register KnowledgeDomainRepository for domain-based filtering
                 builder.Services.AddDapperKnowledgeDomainRepository(dbConnectionString);
-                
+
                 // Register LLM and Question repositories
                 builder.Services.AddDapperLlmRepository(dbConnectionString);
                 builder.Services.AddDapperQuestionRepository(dbConnectionString);
-                
+
                 // Register BotPersonalityRepository for personality management
                 builder.Services.AddDapperBotPersonalityRepository(dbConnectionString);
 
-// Build a temporary service provider to check if services are registered
-                using var tempProvider = builder.Services.BuildServiceProvider();
-                repositoryInstance = tempProvider.GetService<IVectorMemoryRepository>();
-                
-                if (repositoryInstance != null)
+                // Register AgentRunRepository for goal-agent run history (Agent History page)
+                builder.Services.AddDapperAgentRunRepository(dbConnectionString);
+
+                Console.WriteLine("[+] Database repository registered");
+
+                // Only register persistence service if we have both repository AND embedding service
+                if (embeddingServiceRegistered)
                 {
-                    Console.WriteLine("[+] Database repository registered");
-                    
-                    // Only register persistence service if we have both repository AND embedding service
-                    var embeddingService = tempProvider.GetService<ITextEmbeddingGenerationService>();
-                    if (embeddingService != null)
-                    {
-                        builder.Services.AddSingleton<VectorMemoryPersistenceService>();
-                        Console.WriteLine("[+] Persistence service registered (collection loading available)");
-                    }
-                    else
-                    {
-                        Console.WriteLine("[!] Persistence service not registered - embedding service missing");
-                        Console.WriteLine("   Collection loading will not be available");
-                    }
+                    builder.Services.AddSingleton<VectorMemoryPersistenceService>();
+                    Console.WriteLine("[+] Persistence service registered (collection loading available)");
                 }
                 else
                 {
-                    Console.WriteLine("[!] Database repository registration failed");
+                    Console.WriteLine("[!] Persistence service not registered - embedding service missing");
+                    Console.WriteLine("   Collection loading will not be available");
                 }
             }
             catch (Exception ex)
@@ -183,7 +345,7 @@ public class Program
         // Register memory for knowledge base
         builder.Services.AddSingleton<ILlmMemory>(sp =>
         {
-            var embeddingService = sp.GetService<ITextEmbeddingGenerationService>();
+            var embeddingService = sp.GetService<IEmbeddingGenerator<string, Embedding<float>>>();
             var repository = sp.GetService<IVectorMemoryRepository>();
             var stopWordsService = sp.GetRequiredService<ILanguageStopWordsService>();
             var collectionName = appConfig.Debug?.CollectionName ?? builder.Configuration["AppConfiguration:Debug:CollectionName"] ?? "game-rules-mpnet";
@@ -273,13 +435,14 @@ public class Program
 
                 Console.WriteLine("[+] Chat service initialized");
                 return new DashboardChatService(
-                    vectorMemory, 
-                    conversationMemory, 
-                    modelPool, 
+                    vectorMemory,
+                    conversationMemory,
+                    modelPool,
                     domainDetector,
                     questionRepository,
                     llmRepository,
-                    null); // Will be set when DashboardState attaches the service
+                    null, // Will be set when DashboardState attaches the service
+                    appConfig.Llm?.ContextSize ?? 0);
             }
             catch (Exception ex)
             {
@@ -315,15 +478,28 @@ public class Program
                 var repository = sp.GetService<IVectorMemoryRepository>();
                 var persistenceService = sp.GetService<VectorMemoryPersistenceService>();
                 var personalityService = sp.GetService<BotPersonalityService>();
-                dashboardState.InitializeServices(repository, persistenceService, config, personalityService);
+                var workspaceService = sp.GetService<IWorkspaceService>();
+                dashboardState.InitializeServices(repository, persistenceService, config, personalityService, workspaceService);
                 
                 // Attach chat service
                 var chatService = sp.GetService<DashboardChatService>();
                 dashboardState.ChatService = chatService;
-                
+
                 if (chatService != null)
                 {
                     Console.WriteLine("[+] Chat service attached to dashboard");
+                }
+
+                // Attach Gemma 4 CLI service (optional). When it's available, make it the active
+                // backend by default: it applies Gemma's chat template, whereas the Classic pooled
+                // path sends an un-templated prompt that instruct models answer with an immediate
+                // stop token (empty reply). The user can still switch back to Classic in the UI.
+                var gemma4Cli = sp.GetService<IGemma4CliService>();
+                dashboardState.Gemma4CliService = gemma4Cli;
+                if (gemma4Cli != null)
+                {
+                    dashboardState.SelectedBackend = AiDashboard.State.LlmBackend.Gemma4Cli;
+                    Console.WriteLine("[+] Gemma 4 CLI service attached to dashboard (selected as active backend)");
                 }
                 
                 // Set model switch handler
@@ -344,7 +520,11 @@ public class Program
                             await dashboardState.RefreshModelsAsync();
                             Console.WriteLine($"[+] Found {dashboardState.ModelService.AvailableModels.Count} models in {modelFolder}");
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            // Background startup refresh — a failure here shouldn't crash the app.
+                            Console.WriteLine($"[!] Failed to refresh models: {ex.Message}");
+                        }
                     });
                 }
                 
@@ -354,7 +534,11 @@ public class Program
                     {
                         await dashboardState.RefreshCollectionsAsync();
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        // Background startup refresh — a failure here shouldn't crash the app.
+                        Console.WriteLine($"[!] Failed to refresh collections: {ex.Message}");
+                    }
                 });
 
                 Console.WriteLine("[+] Dashboard state initialized");
@@ -409,6 +593,28 @@ public class Program
                 }
             });
         }
+
+        // Initialize the goal-agent run history tables on startup (non-blocking, optional).
+        // Kept out of the block above so a failure here can't stop the vector memory / LLM /
+        // Question tables from being initialized — nothing else depends on run history.
+        Task.Run(async () =>
+        {
+            using var scope = app.Services.CreateScope();
+            try
+            {
+                var agentRunRepository = scope.ServiceProvider.GetService<IAgentRunRepository>();
+                if (agentRunRepository != null)
+                {
+                    await agentRunRepository.InitializeDatabaseAsync();
+                    Console.WriteLine("[+] Agent run history tables initialized");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[!] Warning: Failed to initialize agent run history tables: {ex.Message}");
+                Console.WriteLine("   Agent Mode runs will not be recorded in the history view");
+            }
+        });
 
         // Initialize DomainDetector on startup (non-blocking, optional)
         Task.Run(async () =>

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Entities;
-using Microsoft.SemanticKernel.Embeddings;
+using Microsoft.Extensions.AI;
 using Services.Repositories;
 
 namespace Services.Memory;
@@ -16,11 +16,14 @@ namespace Services.Memory;
 public class VectorMemoryPersistenceService
 {
     private readonly IVectorMemoryRepository _repository;
-    private readonly ITextEmbeddingGenerationService _embeddingService;
-    
+    private readonly IEmbeddingGenerator<string, Embedding<float>> _embeddingService;
+
+    /// <summary>The underlying vector memory repository, for callers that need direct access (e.g. table management).</summary>
+    public IVectorMemoryRepository Repository => _repository;
+
     public VectorMemoryPersistenceService(
         IVectorMemoryRepository repository,
-        ITextEmbeddingGenerationService embeddingService)
+        IEmbeddingGenerator<string, Embedding<float>> embeddingService)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _embeddingService = embeddingService ?? throw new ArgumentNullException(nameof(embeddingService));
@@ -57,7 +60,7 @@ public class VectorMemoryPersistenceService
         Console.WriteLine($"?  Strategy: Category (40%) + Content (30%) + Combined (30%)");
         Console.WriteLine($"???????????????????????????????????????????????????????\n");
         
-        var startTime = DateTime.Now;
+        var startTime = System.Diagnostics.Stopwatch.StartNew();
         var categoryEmbeddings = new List<ReadOnlyMemory<float>>();
         var contentEmbeddings = new List<ReadOnlyMemory<float>>();
         var combinedEmbeddings = new List<ReadOnlyMemory<float>>();
@@ -67,7 +70,7 @@ public class VectorMemoryPersistenceService
             var fragment = fragments[i];
             
             // Calculate timing estimates
-            var elapsed = (DateTime.Now - startTime).TotalSeconds;
+            var elapsed = startTime.Elapsed.TotalSeconds;
             var embeddingsGenerated = i * 3; // 3 embeddings per fragment
             var avgTimePerEmbedding = embeddingsGenerated > 0 ? elapsed / embeddingsGenerated : 0;
             var remainingEmbeddings = (fragments.Count - (i + 1)) * 3;
@@ -109,49 +112,45 @@ public class VectorMemoryPersistenceService
             // 1. Category-only embedding (without ## markers for better semantic matching)
             var cleanCategory = fragment.Category.Replace("##", "").Trim();
             Console.Write($"  ?? [1/3] Category embedding... ");
-            var categoryStart = DateTime.Now;
-            var categoryEmbedding = await _embeddingService.GenerateEmbeddingAsync(cleanCategory);
+            var categoryStart = System.Diagnostics.Stopwatch.StartNew();
+            var categoryEmbedding = await _embeddingService.GenerateVectorAsync(cleanCategory);
             categoryEmbeddings.Add(categoryEmbedding);
-            Console.WriteLine($"Done ({(DateTime.Now - categoryStart).TotalSeconds:F2}s)");
-            
+            Console.WriteLine($"Done ({categoryStart.Elapsed.TotalSeconds:F2}s)");
+
             // 2. Content-only embedding
             Console.Write($"  ?? [2/3] Content embedding... ");
-            var contentStart = DateTime.Now;
-            var contentEmbedding = await _embeddingService.GenerateEmbeddingAsync(fragment.Content);
+            var contentStart = System.Diagnostics.Stopwatch.StartNew();
+            var contentEmbedding = await _embeddingService.GenerateVectorAsync(fragment.Content);
             contentEmbeddings.Add(contentEmbedding);
-            Console.WriteLine($"Done ({(DateTime.Now - contentStart).TotalSeconds:F2}s)");
-            
+            Console.WriteLine($"Done ({contentStart.Elapsed.TotalSeconds:F2}s)");
+
             // 3. Combined embedding (category + content for balance)
             Console.Write($"  ?? [3/3] Combined embedding... ");
-            var combinedStart = DateTime.Now;
+            var combinedStart = System.Diagnostics.Stopwatch.StartNew();
             var combinedText = $"{cleanCategory}\n\n{fragment.Content}";
-            var combinedEmbedding = await _embeddingService.GenerateEmbeddingAsync(combinedText);
+            var combinedEmbedding = await _embeddingService.GenerateVectorAsync(combinedText);
             combinedEmbeddings.Add(combinedEmbedding);
-            Console.WriteLine($"Done ({(DateTime.Now - combinedStart).TotalSeconds:F2}s)");
+            Console.WriteLine($"Done ({combinedStart.Elapsed.TotalSeconds:F2}s)");
             
             Console.WriteLine();
             
-            // Force garbage collection every 2 fragments to control memory (6 embeddings total)
+            // Report memory usage every 2 fragments (6 embeddings total); the .NET GC manages
+            // collection timing on its own rather than forcing it here.
             if ((i + 1) % 2 == 0)
             {
-                Console.WriteLine($"  ??? Running garbage collection...");
-                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-                GC.WaitForPendingFinalizers();
-                GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
-                
                 currentProcess.Refresh();
                 memoryMB = currentProcess.WorkingSet64 / 1024.0 / 1024.0;
-                Console.WriteLine($"  ? After GC: {memoryMB:F0} MB");
+                Console.WriteLine($"  ?? Memory: {memoryMB:F0} MB");
                 Console.WriteLine();
             }
         }
         
-        var totalTime = (DateTime.Now - startTime).TotalSeconds;
+        var totalTime = startTime.Elapsed.TotalSeconds;
         var totalEmbeddings = fragments.Count * 3;
         Console.WriteLine($"???????????????????????????????????????????????????????");
         Console.WriteLine($"?  ? ALL EMBEDDINGS GENERATED");
         Console.WriteLine($"?");
-        Console.WriteLine($"?  Total Embeddings: {totalEmbeddings} ({fragments.Count} × 3)");
+        Console.WriteLine($"?  Total Embeddings: {totalEmbeddings} ({fragments.Count} Ã— 3)");
         Console.WriteLine($"?  Total Time: {totalTime:F1}s");
         Console.WriteLine($"?  Average: {totalTime / totalEmbeddings:F2}s per embedding");
         Console.WriteLine($"???????????????????????????????????????????????????????");

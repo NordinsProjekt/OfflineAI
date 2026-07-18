@@ -19,58 +19,55 @@ public static class TextNormalizer
     {
         if (string.IsNullOrEmpty(text))
             return text;
-        
+
         // Replace backticks and grave accents (these can cause tokenizer issues)
         text = text.Replace('`', '\''); // Backtick to single quote
-        text = text.Replace('�', '\''); // Acute accent to single quote
-        text = text.Replace('?', '\''); // Modifier letter grave accent to single quote
-        
+        text = text.Replace('´', '\''); // Acute accent to single quote
+        text = text.Replace('ˋ', '\''); // Modifier letter grave accent to single quote
+
         // Replace smart/curly quotes with straight quotes
-        text = text.Replace('\u201C', '"'); // " (left double quotation mark)
-        text = text.Replace('\u201D', '"'); // " (right double quotation mark)
-        text = text.Replace('\u2018', '\''); // ' (left single quotation mark)
-        text = text.Replace('\u2019', '\''); // ' (right single quotation mark)
-        text = text.Replace('\u201B', '\''); // ? (single high-reversed-9 quotation mark)
-        
+        text = text.Replace('“', '"'); // " (left double quotation mark)
+        text = text.Replace('”', '"'); // " (right double quotation mark)
+        text = text.Replace('‘', '\''); // ' (left single quotation mark)
+        text = text.Replace('’', '\''); // ' (right single quotation mark)
+        text = text.Replace('‛', '\''); // single high-reversed-9 quotation mark
+
         // Replace em dash and en dash with regular dash
-        text = text.Replace('\u2013', '-'); // � (en dash)
-        text = text.Replace('\u2014', '-'); // � (em dash)
-        text = text.Replace('\u2212', '-'); // ? (minus sign)
-        
+        text = text.Replace('–', '-'); // en dash
+        text = text.Replace('—', '-'); // em dash
+        text = text.Replace('−', '-'); // minus sign
+
         // Replace ellipsis (multi-char replacement needs string version)
-        text = text.Replace("\u2026", "..."); // � (horizontal ellipsis)
-        
+        text = text.Replace("…", "..."); // horizontal ellipsis
+
         // Remove or replace other problematic Unicode characters
-        text = text.Replace('\u00A0', ' '); // Non-breaking space
+        text = text.Replace(' ', ' '); // Non-breaking space
         text = text.Replace("\u200B", ""); // Zero-width space
         text = text.Replace("\u200C", ""); // Zero-width non-joiner
         text = text.Replace("\u200D", ""); // Zero-width joiner
         text = text.Replace("\uFEFF", ""); // Zero-width no-break space (BOM)
-        
+
         // Replace other quotation-like characters
-        text = text.Replace('�', '"'); // Left-pointing double angle quotation mark
-        text = text.Replace('�', '"'); // Right-pointing double angle quotation mark
-        text = text.Replace('�', '\''); // Single left-pointing angle quotation mark
-        text = text.Replace('�', '\''); // Single right-pointing angle quotation mark
-        
+        text = text.Replace('«', '"'); // Left-pointing double angle quotation mark
+        text = text.Replace('»', '"'); // Right-pointing double angle quotation mark
+        text = text.Replace('‹', '\''); // Single left-pointing angle quotation mark
+        text = text.Replace('›', '\''); // Single right-pointing angle quotation mark
+
         // Remove control characters except common whitespace
         var normalized = new StringBuilder(text.Length);
-        foreach (char c in text)
+        // Keep: letters, digits, punctuation, symbols, and common whitespace; skip other control characters and rare Unicode
+        foreach (var c in text.Where(c =>
+            char.IsLetterOrDigit(c) ||
+            char.IsPunctuation(c) ||
+            char.IsSymbol(c) ||
+            c == ' ' || c == '\t' || c == '\r' || c == '\n'))
         {
-            // Keep: letters, digits, punctuation, symbols, and common whitespace
-            if (char.IsLetterOrDigit(c) || 
-                char.IsPunctuation(c) || 
-                char.IsSymbol(c) ||
-                c == ' ' || c == '\t' || c == '\r' || c == '\n')
-            {
-                normalized.Append(c);
-            }
-            // Skip other control characters and rare Unicode
+            normalized.Append(c);
         }
-        
+
         return normalized.ToString();
     }
-    
+
     /// <summary>
     /// Normalizes text with length limits and additional safety checks.
     /// </summary>
@@ -82,19 +79,19 @@ public static class TextNormalizer
     {
         // Normalize first
         text = Normalize(text);
-        
+
         // Safety check: ensure we have valid text after normalization
         if (string.IsNullOrWhiteSpace(text))
         {
             return fallbackText;
         }
-        
+
         // Ensure text is not too long
         if (text.Length > maxLength)
         {
             text = text.Substring(0, maxLength);
         }
-        
+
         return text;
     }
 }
