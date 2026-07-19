@@ -1,4 +1,4 @@
-namespace Services.FileAgent;
+namespace AgentKit.Skills.Files;
 
 /// <summary>
 /// The kind of change a <see cref="LineEdit"/> represents.

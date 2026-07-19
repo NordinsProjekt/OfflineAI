@@ -1,8 +1,9 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using AgentKit.Skills.Files;
+using AgentKit.Skills.Qb64;
+using AgentKit.ToolLoop;
 using Entities;
-using Services.AgentTools;
-using Services.FileAgent;
 using Services.Repositories;
 
 namespace Services.GoalAgent;

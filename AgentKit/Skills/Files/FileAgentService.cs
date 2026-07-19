@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using UglyToad.PdfPig;
 
-namespace Services.FileAgent;
+namespace AgentKit.Skills.Files;
 
 /// <summary>
 /// Implementation of <see cref="IFileAgentService"/> that manages text files in a

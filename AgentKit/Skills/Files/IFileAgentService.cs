@@ -1,4 +1,4 @@
-namespace Services.FileAgent;
+namespace AgentKit.Skills.Files;
 
 /// <summary>
 /// Handles file agent slash commands (/skapa, /fyll, /läs, /läs-pdf, /redigera, /lista) in the chat input.

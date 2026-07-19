@@ -1,9 +1,12 @@
+using AgentKit.Skills.External;
+using AgentKit.Skills.Files;
+using AgentKit.Skills.Qb64;
+using AgentKit.Skills.Utility;
+using AgentKit.Tests.TestHelpers;
+using AgentKit.ToolLoop;
 using FluentAssertions;
-using Services.AgentTools;
-using Services.FileAgent;
-using Services.Tests.TestHelpers;
 
-namespace Services.Tests.AgentTools;
+namespace AgentKit.Tests.ToolLoop;
 
 /// <summary>
 /// Unit tests for <see cref="AgenticChatService"/>: the lightweight, text-based tool-calling

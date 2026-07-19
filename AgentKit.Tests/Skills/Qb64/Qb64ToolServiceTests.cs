@@ -1,9 +1,8 @@
+using AgentKit.Skills.Files;
+using AgentKit.Skills.Qb64;
 using FluentAssertions;
-using Services.AgentTools;
-using Services.Configuration;
-using Services.FileAgent;
 
-namespace Services.Tests.AgentTools;
+namespace AgentKit.Tests.Skills.Qb64;
 
 /// <summary>
 /// Unit tests for <see cref="Qb64ToolService"/>: the QB64 compiler tool that lets the LLM
@@ -41,17 +40,17 @@ public sealed class Qb64ToolServiceTests : IDisposable
         int runTimeoutMs = 0,
         int maxOutputLength = 0)
     {
-        var config = new AppConfiguration();
-        config.AgentTools.Qb64.CompilerPath = compilerPath ?? string.Empty;
+        var options = new Qb64Options();
+        options.CompilerPath = compilerPath ?? string.Empty;
         if (compilerArguments is not null)
-            config.AgentTools.Qb64.CompilerArguments = compilerArguments;
+            options.CompilerArguments = compilerArguments;
         if (compileTimeoutMs > 0)
-            config.AgentTools.Qb64.CompileTimeoutMs = compileTimeoutMs;
+            options.CompileTimeoutMs = compileTimeoutMs;
         if (runTimeoutMs > 0)
-            config.AgentTools.Qb64.RunTimeoutMs = runTimeoutMs;
+            options.RunTimeoutMs = runTimeoutMs;
         if (maxOutputLength > 0)
-            config.AgentTools.Qb64.MaxOutputLength = maxOutputLength;
-        return new Qb64ToolService(config, _fileAgent);
+            options.MaxOutputLength = maxOutputLength;
+        return new Qb64ToolService(options, _fileAgent);
     }
 
     private async Task<string> CreateBasFileAsync(string name = "spel.bas")

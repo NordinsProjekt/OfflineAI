@@ -4,6 +4,7 @@
     <Project Path="Types/Types.csproj" Id="8e013c47-93b1-4905-835a-4e7ccb335e75" />
   </Folder>
   <Folder Name="/2. Application/">
+    <Project Path="AgentKit/AgentKit.csproj" />
     <Project Path="AI/AI.csproj" Id="92289308-2ae0-4c05-b3d7-44ae55221e1f" />
     <Project Path="Factories/Factories.csproj" />
     <Project Path="Services/Services.csproj" />
@@ -17,6 +18,7 @@
   </Folder>
   <Folder Name="/98. Benchmarks/" />
   <Folder Name="/99. UnitTests/">
+    <Project Path="AgentKit.Tests/AgentKit.Tests.csproj" />
     <Project Path="Application.AI.Tests/Application.AI.Tests.csproj" Id="4bdb3278-a091-4162-869b-d4f44dbff38f" />
     <Project Path="Presentation.AiDashboard.Tests/Presentation.AiDashboard.Tests.csproj" Id="03b48d4e-dcc9-40b5-ac13-957373a23ec5" />
   </Folder>

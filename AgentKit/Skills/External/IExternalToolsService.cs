@@ -1,4 +1,6 @@
-namespace Services.AgentTools;
+using AgentKit.Skills.Utility;
+
+namespace AgentKit.Skills.External;
 
 /// <summary>
 /// Handles operator-configured "external tool" slash commands: each tool is a local executable

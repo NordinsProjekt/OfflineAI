@@ -1,17 +1,17 @@
 using System.Diagnostics;
 using System.Text;
-using Services.Configuration;
-using Services.FileAgent;
+using AgentKit.Skills.Files;
+using AgentKit.Skills.Utility;
 
-namespace Services.AgentTools;
+namespace AgentKit.Skills.Qb64;
 
 /// <inheritdoc/>
 /// <remarks>
-/// The compiler is resolved exclusively from <see cref="AppConfiguration.AgentTools"/>
-/// (<c>Qb64Settings.CompilerPath</c>) — the LLM only ever supplies a bare .bas filename, which
-/// is resolved inside the file agent's base directory (the active workspace) with the same
-/// path-traversal protection as <c>FileAgentService</c>. The produced executable is written
-/// next to the source file in the workspace and is the only executable this service will run.
+/// The compiler is resolved exclusively from <see cref="Qb64Options.CompilerPath"/> — the LLM
+/// only ever supplies a bare .bas filename, which is resolved inside the file agent's base
+/// directory (the active workspace) with the same path-traversal protection as
+/// <c>FileAgentService</c>. The produced executable is written next to the source file in the
+/// workspace and is the only executable this service will run.
 /// </remarks>
 public sealed class Qb64ToolService : IQb64ToolService
 {
@@ -20,21 +20,21 @@ public sealed class Qb64ToolService : IQb64ToolService
     private const string RunCommand = "/qb64";
     private const string CompileOnlyCommand = "/qb64-kompilera";
 
-    private readonly AppConfiguration _appConfig;
+    private readonly Qb64Options _options;
     private readonly IFileAgentService _fileAgent;
 
-    /// <param name="appConfig">Supplies <c>AgentTools.Qb64</c> (compiler path, timeouts, output cap).</param>
+    /// <param name="options">Compiler path, argument template, timeouts, and output cap.</param>
     /// <param name="fileAgent">
     /// Supplies the base directory (active workspace) in which .bas files are resolved, so the
     /// QB64 tool always works on the same files the LLM creates with /skapa and /fyll.
     /// </param>
-    public Qb64ToolService(AppConfiguration appConfig, IFileAgentService fileAgent)
+    public Qb64ToolService(Qb64Options options, IFileAgentService fileAgent)
     {
-        _appConfig = appConfig ?? throw new ArgumentNullException(nameof(appConfig));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
         _fileAgent = fileAgent ?? throw new ArgumentNullException(nameof(fileAgent));
     }
 
-    private Qb64Settings Settings => _appConfig.AgentTools.Qb64;
+    private Qb64Options Settings => _options;
 
     private bool IsConfigured => !string.IsNullOrWhiteSpace(Settings.CompilerPath);
 

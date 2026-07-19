@@ -1,4 +1,4 @@
-namespace Services.FileAgent;
+namespace AgentKit.Skills.Files;
 
 /// <summary>
 /// Describes the outcome type of a file agent command.

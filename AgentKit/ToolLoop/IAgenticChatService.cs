@@ -1,6 +1,6 @@
-using Services.FileAgent;
+using AgentKit.Skills.Files;
 
-namespace Services.AgentTools;
+namespace AgentKit.ToolLoop;
 
 /// <summary>
 /// Describes a single tool invocation performed automatically by <see cref="IAgenticChatService"/>

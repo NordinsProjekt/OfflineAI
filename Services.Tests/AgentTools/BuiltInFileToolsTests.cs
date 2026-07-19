@@ -1,6 +1,6 @@
 using FluentAssertions;
 using Services.AgentTools;
-using Services.FileAgent;
+using AgentKit.Skills.Files;
 using Services.Tests.TestHelpers;
 
 namespace Services.Tests.AgentTools;
@@ -9,7 +9,7 @@ namespace Services.Tests.AgentTools;
 /// Unit tests for <see cref="BuiltInFileTools"/>: the Semantic Kernel plugin exposing
 /// <see cref="IFileAgentService"/> operations as <c>[KernelFunction]</c> methods. Uses a real
 /// <see cref="FileAgentService"/> rooted at a temp directory, mirroring the convention in
-/// <see cref="Services.Tests.FileAgent.FileAgentServiceTests"/>.
+/// <c>FileAgentServiceTests</c> (AgentKit.Tests).
 /// </summary>
 public sealed class BuiltInFileToolsTests : IDisposable
 {

@@ -1,6 +1,9 @@
 using Entities;
 using FluentAssertions;
-using Services.AgentTools;
+using AgentKit.Skills.Files;
+using AgentKit.Skills.Qb64;
+using AgentKit.Skills.Utility;
+using AgentKit.ToolLoop;
 using Services.GoalAgent;
 using Services.Repositories;
 
@@ -537,7 +540,7 @@ public class GoalAgentServiceTests
         var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));
         try
         {
-            var fileAgent = new Services.FileAgent.FileAgentService(workspaceDir);
+            var fileAgent = new FileAgentService(workspaceDir);
             // The first requirement ("Filen recept.txt finns...") is now checked directly on
             // disk, so the file must actually exist for the run to complete green.
             Directory.CreateDirectory(workspaceDir);
@@ -917,7 +920,7 @@ public class GoalAgentServiceTests
         {
             Directory.CreateDirectory(workspaceDir);
             await File.WriteAllTextAsync(Path.Combine(workspaceDir, "a.txt"), "innehåll");
-            var fileAgent = new Services.FileAgent.FileAgentService(workspaceDir);
+            var fileAgent = new FileAgentService(workspaceDir);
             var fake = new FakeAgenticChatService(msg =>
                 IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
             var sut = new GoalAgentService(fake, fileAgent, maxIterations: 1);
@@ -943,7 +946,7 @@ public class GoalAgentServiceTests
         try
         {
             Directory.CreateDirectory(workspaceDir);
-            var fileAgent = new Services.FileAgent.FileAgentService(workspaceDir);
+            var fileAgent = new FileAgentService(workspaceDir);
             var fake = new FakeAgenticChatService(msg =>
                 IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
             var sut = new GoalAgentService(fake, fileAgent, maxIterations: 1);
@@ -973,7 +976,7 @@ public class GoalAgentServiceTests
         {
             Directory.CreateDirectory(workspaceDir);
             await File.WriteAllTextAsync(Path.Combine(workspaceDir, "fil.txt"), "UNIKT_INNEHALL_123");
-            var fileAgent = new Services.FileAgent.FileAgentService(workspaceDir);
+            var fileAgent = new FileAgentService(workspaceDir);
             var fake = new FakeAgenticChatService(msg =>
                 IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
             var sut = new GoalAgentService(fake, fileAgent, maxIterations: 1);

@@ -3,7 +3,7 @@ namespace Services.GoalAgent;
 /// <summary>
 /// TDD-style goal agent for the active workspace: the user describes the desired end result
 /// in free text, the LLM breaks that down into concrete, checkable requirements ("tests"),
-/// the agent does file work through <see cref="Services.AgentTools.IAgenticChatService"/> to
+/// the agent does file work through <see cref="AgentKit.ToolLoop.IAgenticChatService"/> to
 /// satisfy them, verifies each requirement against the workspace files, and repeats the
 /// work → verify cycle until every requirement passes or the iteration cap is reached.
 /// <para>

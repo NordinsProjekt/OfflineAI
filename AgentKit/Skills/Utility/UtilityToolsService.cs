@@ -1,15 +1,12 @@
-using System.Net.Http.Headers;
 using System.Text;
-using Services.Configuration;
 
-namespace Services.AgentTools;
+namespace AgentKit.Skills.Utility;
 
 /// <inheritdoc/>
 /// <remarks>
-/// Endpoints are resolved exclusively from <see cref="AppConfiguration.AgentTools"/> — the LLM
+/// Endpoints are resolved exclusively from <see cref="UtilityToolsOptions.Endpoints"/> — the LLM
 /// selects a configured endpoint by name and can never supply an arbitrary URL, so outbound
-/// calls made by this service are limited to destinations the user has explicitly configured
-/// in <c>appsettings.json</c> (or user secrets).
+/// calls made by this service are limited to destinations the host has explicitly configured.
 /// </remarks>
 public sealed class UtilityToolsService : IUtilityToolsService
 {
@@ -19,13 +16,19 @@ public sealed class UtilityToolsService : IUtilityToolsService
     private const string DateCommand = "/datum";
     private const string ApiCommand = "/api ";
 
-    private readonly AppConfiguration _appConfig;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly UtilityToolsOptions _options;
+    private readonly Func<HttpClient> _httpClientProvider;
 
-    public UtilityToolsService(AppConfiguration appConfig, IHttpClientFactory httpClientFactory)
+    /// <param name="options">The whitelisted API endpoints available to the <c>/api</c> tool.</param>
+    /// <param name="httpClientProvider">
+    /// Returns the <see cref="HttpClient"/> to use for one <c>/api</c> call. Must return a fresh
+    /// (or per-call safe) instance since the per-endpoint timeout is applied to it — hosts using
+    /// <c>IHttpClientFactory</c> pass <c>() =&gt; factory.CreateClient("AgentApiTools")</c>.
+    /// </param>
+    public UtilityToolsService(UtilityToolsOptions options, Func<HttpClient> httpClientProvider)
     {
-        _appConfig = appConfig ?? throw new ArgumentNullException(nameof(appConfig));
-        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
+        _httpClientProvider = httpClientProvider ?? throw new ArgumentNullException(nameof(httpClientProvider));
     }
 
     /// <inheritdoc/>
@@ -97,14 +100,14 @@ public sealed class UtilityToolsService : IUtilityToolsService
         if (string.IsNullOrWhiteSpace(endpointName))
             return UtilityToolResult.Failure("Ange namnet på en konfigurerad slutpunkt.");
 
-        var endpoint = _appConfig.AgentTools.Endpoints
+        var endpoint = _options.Endpoints
             .FirstOrDefault(e => string.Equals(e.Name, endpointName, Cmp));
 
         if (endpoint is null)
         {
-            var available = _appConfig.AgentTools.Endpoints.Count == 0
+            var available = _options.Endpoints.Count == 0
                 ? "Inga slutpunkter är konfigurerade."
-                : "Tillgängliga slutpunkter: " + string.Join(", ", _appConfig.AgentTools.Endpoints.Select(e => e.Name));
+                : "Tillgängliga slutpunkter: " + string.Join(", ", _options.Endpoints.Select(e => e.Name));
             return UtilityToolResult.Failure($"Okänd slutpunkt: \"{endpointName}\". {available}");
         }
 
@@ -113,7 +116,7 @@ public sealed class UtilityToolsService : IUtilityToolsService
 
         try
         {
-            var client = _httpClientFactory.CreateClient("AgentApiTools");
+            var client = _httpClientProvider();
             client.Timeout = TimeSpan.FromMilliseconds(endpoint.TimeoutMs > 0 ? endpoint.TimeoutMs : 15_000);
 
             var url = endpoint.Url.Replace("{input}", Uri.EscapeDataString(instruction), Cmp);
@@ -159,7 +162,7 @@ public sealed class UtilityToolsService : IUtilityToolsService
 
     /// <inheritdoc/>
     public IReadOnlyList<string> GetApiEndpointNames() =>
-        _appConfig.AgentTools.Endpoints.Select(e => e.Name).ToList();
+        _options.Endpoints.Select(e => e.Name).ToList();
 
     /// <inheritdoc/>
     public IReadOnlyDictionary<string, string> GetToolDescriptions()
@@ -170,9 +173,9 @@ public sealed class UtilityToolsService : IUtilityToolsService
             ["/datum"] = "Returnerar dagens datum."
         };
 
-        if (_appConfig.AgentTools.Endpoints.Count > 0)
+        if (_options.Endpoints.Count > 0)
         {
-            var names = string.Join(", ", _appConfig.AgentTools.Endpoints.Select(e => e.Name));
+            var names = string.Join(", ", _options.Endpoints.Select(e => e.Name));
             descriptions["/api <slutpunkt> <instruktion>"] =
                 $"Anropar en fördefinierad API-slutpunkt och skickar svaret tillsammans med instruktionen till dig. Tillgängliga slutpunkter: {names}.";
         }

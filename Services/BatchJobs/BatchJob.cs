@@ -20,7 +20,7 @@ public enum BatchJobStatus
 
 /// <summary>
 /// A single natural-language task in the batch queue (e.g. "Read rules.txt and write 10
-/// questions to QA.txt"), processed via <see cref="Services.AgentTools.IAgenticChatService"/> so
+/// questions to QA.txt"), processed via <see cref="AgentKit.ToolLoop.IAgenticChatService"/> so
 /// it can use the existing file-agent tools (/läs, /skapa, /fyll, /läs-pdf, /redigera, /lista).
 /// </summary>
 public class BatchJob

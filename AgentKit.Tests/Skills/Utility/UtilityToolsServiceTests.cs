@@ -2,17 +2,16 @@ using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using AgentKit.Skills.Utility;
 using FluentAssertions;
-using Services.AgentTools;
-using Services.Configuration;
 
-namespace Services.Tests.AgentTools;
+namespace AgentKit.Tests.Skills.Utility;
 
 /// <summary>
 /// Unit tests for <see cref="UtilityToolsService"/>: the built-in /tid, /datum, and /api
 /// utility commands. HTTP calls are exercised against a fake <see cref="HttpMessageHandler"/> so
 /// no real network access happens; endpoint scoping is verified so the LLM can only reach
-/// destinations explicitly configured in <see cref="AppConfiguration.AgentTools"/>.
+/// destinations explicitly configured in <see cref="UtilityToolsOptions.Endpoints"/>.
 /// </summary>
 public class UtilityToolsServiceTests
 {
@@ -42,47 +41,48 @@ public class UtilityToolsServiceTests
 
     /// <summary>
     /// Fake factory that hands out a new <see cref="HttpClient"/> per call (mirroring real
-    /// <see cref="IHttpClientFactory"/> semantics) backed by the same shared fake handler, so
+    /// <c>IHttpClientFactory</c> semantics) backed by the same shared fake handler, so
     /// <c>UtilityToolsService</c> can freely set <see cref="HttpClient.Timeout"/> on each call.
+    /// Pass <see cref="CreateClient"/> as the service's <c>Func&lt;HttpClient&gt;</c> provider.
     /// </summary>
-    private sealed class FakeHttpClientFactory : IHttpClientFactory
+    private sealed class FakeHttpClientFactory
     {
         private readonly HttpMessageHandler _handler;
 
         public FakeHttpClientFactory(HttpMessageHandler handler) => _handler = handler;
 
-        public HttpClient CreateClient(string name) => new(_handler, disposeHandler: false);
+        public HttpClient CreateClient() => new(_handler, disposeHandler: false);
     }
 
     private static UtilityToolsService CreateSut(
-        AppConfiguration? appConfig = null,
+        UtilityToolsOptions? options = null,
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>? responder = null)
     {
-        appConfig ??= new AppConfiguration();
+        options ??= new UtilityToolsOptions();
         responder ??= (_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(string.Empty) });
         var factory = new FakeHttpClientFactory(new FakeHttpMessageHandler(responder));
-        return new UtilityToolsService(appConfig, factory);
+        return new UtilityToolsService(options, factory.CreateClient);
     }
 
-    private static AppConfiguration CreateConfigWithEndpoint(ApiEndpointSettings endpoint) =>
-        new() { AgentTools = new AgentToolsSettings { Endpoints = new List<ApiEndpointSettings> { endpoint } } };
+    private static UtilityToolsOptions CreateOptionsWithEndpoint(ApiEndpointOptions endpoint) =>
+        new() { Endpoints = new List<ApiEndpointOptions> { endpoint } };
 
     // ── Constructor guards ───────────────────────────────────────────────
 
     [Fact]
-    public void Constructor_NullAppConfig_ThrowsArgumentNullException()
+    public void Constructor_NullOptions_ThrowsArgumentNullException()
     {
         var factory = new FakeHttpClientFactory(new FakeHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage())));
 
-        var act = () => new UtilityToolsService(null!, factory);
+        var act = () => new UtilityToolsService(null!, factory.CreateClient);
 
         act.Should().Throw<ArgumentNullException>();
     }
 
     [Fact]
-    public void Constructor_NullHttpClientFactory_ThrowsArgumentNullException()
+    public void Constructor_NullHttpClientProvider_ThrowsArgumentNullException()
     {
-        var act = () => new UtilityToolsService(new AppConfiguration(), null!);
+        var act = () => new UtilityToolsService(new UtilityToolsOptions(), null!);
 
         act.Should().Throw<ArgumentNullException>();
     }
@@ -168,9 +168,9 @@ public class UtilityToolsServiceTests
     [Fact]
     public async Task ExecuteAsync_ApiCommand_ParsesEndpointAndInstruction_CallsConfiguredEndpoint()
     {
-        var endpoint = new ApiEndpointSettings { Name = "weather", Url = "https://api.example.com/weather?q={input}" };
-        var appConfig = CreateConfigWithEndpoint(endpoint);
-        var sut = CreateSut(appConfig, (_, _) =>
+        var endpoint = new ApiEndpointOptions { Name = "weather", Url = "https://api.example.com/weather?q={input}" };
+        var options = CreateOptionsWithEndpoint(endpoint);
+        var sut = CreateSut(options, (_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("Soligt, 20 grader") }));
 
         var result = await sut.ExecuteAsync("/api weather Hur är vädret i Stockholm?");
@@ -211,8 +211,8 @@ public class UtilityToolsServiceTests
     [Fact]
     public async Task CallNamedApiAsync_UnknownEndpoint_ListsAvailableEndpoints()
     {
-        var appConfig = CreateConfigWithEndpoint(new ApiEndpointSettings { Name = "weather", Url = "https://api.example.com" });
-        var sut = CreateSut(appConfig);
+        var options = CreateOptionsWithEndpoint(new ApiEndpointOptions { Name = "weather", Url = "https://api.example.com" });
+        var sut = CreateSut(options);
 
         var result = await sut.CallNamedApiAsync("news");
 
@@ -223,8 +223,8 @@ public class UtilityToolsServiceTests
     [Fact]
     public async Task CallNamedApiAsync_EndpointWithEmptyUrl_ReturnsFailure()
     {
-        var appConfig = CreateConfigWithEndpoint(new ApiEndpointSettings { Name = "broken", Url = "" });
-        var sut = CreateSut(appConfig);
+        var options = CreateOptionsWithEndpoint(new ApiEndpointOptions { Name = "broken", Url = "" });
+        var sut = CreateSut(options);
 
         var result = await sut.CallNamedApiAsync("broken");
 
@@ -237,9 +237,9 @@ public class UtilityToolsServiceTests
     [Fact]
     public async Task CallNamedApiAsync_SuccessfulCall_ReturnsBodyAndInstructionAsInjectedContext()
     {
-        var endpoint = new ApiEndpointSettings { Name = "weather", Url = "https://api.example.com/weather" };
-        var appConfig = CreateConfigWithEndpoint(endpoint);
-        var sut = CreateSut(appConfig, (_, _) =>
+        var endpoint = new ApiEndpointOptions { Name = "weather", Url = "https://api.example.com/weather" };
+        var options = CreateOptionsWithEndpoint(endpoint);
+        var sut = CreateSut(options, (_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("Soligt") }));
 
         var result = await sut.CallNamedApiAsync("weather", "Hur är vädret?");
@@ -253,11 +253,11 @@ public class UtilityToolsServiceTests
     [Fact]
     public async Task CallNamedApiAsync_UrlContainsInputPlaceholder_SubstitutesEscapedInstruction()
     {
-        var endpoint = new ApiEndpointSettings { Name = "weather", Url = "https://api.example.com/weather?q={input}" };
-        var appConfig = CreateConfigWithEndpoint(endpoint);
+        var endpoint = new ApiEndpointOptions { Name = "weather", Url = "https://api.example.com/weather?q={input}" };
+        var options = CreateOptionsWithEndpoint(endpoint);
         var handler = new FakeHttpMessageHandler((_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") }));
-        var sut = new UtilityToolsService(appConfig, new FakeHttpClientFactory(handler));
+        var sut = new UtilityToolsService(options, new FakeHttpClientFactory(handler).CreateClient);
 
         await sut.CallNamedApiAsync("weather", "Stockholm väder");
 
@@ -268,10 +268,10 @@ public class UtilityToolsServiceTests
     [Fact]
     public async Task CallNamedApiAsync_ResponseLongerThanMaxLength_TruncatesBody()
     {
-        var endpoint = new ApiEndpointSettings { Name = "big", Url = "https://api.example.com/big", MaxResponseLength = 10 };
-        var appConfig = CreateConfigWithEndpoint(endpoint);
+        var endpoint = new ApiEndpointOptions { Name = "big", Url = "https://api.example.com/big", MaxResponseLength = 10 };
+        var options = CreateOptionsWithEndpoint(endpoint);
         var longBody = new string('x', 50);
-        var sut = CreateSut(appConfig, (_, _) =>
+        var sut = CreateSut(options, (_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(longBody) }));
 
         var result = await sut.CallNamedApiAsync("big");
@@ -284,16 +284,16 @@ public class UtilityToolsServiceTests
     [Fact]
     public async Task CallNamedApiAsync_CustomHeadersConfigured_AreSentWithRequest()
     {
-        var endpoint = new ApiEndpointSettings
+        var endpoint = new ApiEndpointOptions
         {
             Name = "secure",
             Url = "https://api.example.com/secure",
             Headers = new Dictionary<string, string> { ["X-Api-Key"] = "secret-123" }
         };
-        var appConfig = CreateConfigWithEndpoint(endpoint);
+        var options = CreateOptionsWithEndpoint(endpoint);
         var handler = new FakeHttpMessageHandler((_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") }));
-        var sut = new UtilityToolsService(appConfig, new FakeHttpClientFactory(handler));
+        var sut = new UtilityToolsService(options, new FakeHttpClientFactory(handler).CreateClient);
 
         await sut.CallNamedApiAsync("secure");
 
@@ -304,11 +304,11 @@ public class UtilityToolsServiceTests
     [Fact]
     public async Task CallNamedApiAsync_ConfiguredMethodPost_UsesPostVerb()
     {
-        var endpoint = new ApiEndpointSettings { Name = "poster", Url = "https://api.example.com/post", Method = "POST" };
-        var appConfig = CreateConfigWithEndpoint(endpoint);
+        var endpoint = new ApiEndpointOptions { Name = "poster", Url = "https://api.example.com/post", Method = "POST" };
+        var options = CreateOptionsWithEndpoint(endpoint);
         var handler = new FakeHttpMessageHandler((_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") }));
-        var sut = new UtilityToolsService(appConfig, new FakeHttpClientFactory(handler));
+        var sut = new UtilityToolsService(options, new FakeHttpClientFactory(handler).CreateClient);
 
         await sut.CallNamedApiAsync("poster");
 
@@ -320,9 +320,9 @@ public class UtilityToolsServiceTests
     [Fact]
     public async Task CallNamedApiAsync_NonSuccessStatusCode_ReturnsFailureWithStatusCode()
     {
-        var endpoint = new ApiEndpointSettings { Name = "weather", Url = "https://api.example.com/weather" };
-        var appConfig = CreateConfigWithEndpoint(endpoint);
-        var sut = CreateSut(appConfig, (_, _) =>
+        var endpoint = new ApiEndpointOptions { Name = "weather", Url = "https://api.example.com/weather" };
+        var options = CreateOptionsWithEndpoint(endpoint);
+        var sut = CreateSut(options, (_, _) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("error") }));
 
         var result = await sut.CallNamedApiAsync("weather");
@@ -334,9 +334,9 @@ public class UtilityToolsServiceTests
     [Fact]
     public async Task CallNamedApiAsync_HttpRequestException_ReturnsNetworkErrorFailure()
     {
-        var endpoint = new ApiEndpointSettings { Name = "weather", Url = "https://api.example.com/weather" };
-        var appConfig = CreateConfigWithEndpoint(endpoint);
-        var sut = CreateSut(appConfig, (_, _) => throw new HttpRequestException("DNS failure"));
+        var endpoint = new ApiEndpointOptions { Name = "weather", Url = "https://api.example.com/weather" };
+        var options = CreateOptionsWithEndpoint(endpoint);
+        var sut = CreateSut(options, (_, _) => throw new HttpRequestException("DNS failure"));
 
         var result = await sut.CallNamedApiAsync("weather");
 
@@ -347,9 +347,9 @@ public class UtilityToolsServiceTests
     [Fact]
     public async Task CallNamedApiAsync_RequestExceedsTimeout_ReturnsTimeoutFailure()
     {
-        var endpoint = new ApiEndpointSettings { Name = "slow", Url = "https://api.example.com/slow", TimeoutMs = 50 };
-        var appConfig = CreateConfigWithEndpoint(endpoint);
-        var sut = CreateSut(appConfig, async (_, ct) =>
+        var endpoint = new ApiEndpointOptions { Name = "slow", Url = "https://api.example.com/slow", TimeoutMs = 50 };
+        var options = CreateOptionsWithEndpoint(endpoint);
+        var sut = CreateSut(options, async (_, ct) =>
         {
             await Task.Delay(2000, ct);
             return new HttpResponseMessage(HttpStatusCode.OK);
@@ -366,18 +366,15 @@ public class UtilityToolsServiceTests
     [Fact]
     public void GetApiEndpointNames_ReturnsConfiguredNames()
     {
-        var appConfig = new AppConfiguration
+        var options = new UtilityToolsOptions
         {
-            AgentTools = new AgentToolsSettings
+            Endpoints = new List<ApiEndpointOptions>
             {
-                Endpoints = new List<ApiEndpointSettings>
-                {
-                    new() { Name = "weather", Url = "https://a" },
-                    new() { Name = "news", Url = "https://b" }
-                }
+                new() { Name = "weather", Url = "https://a" },
+                new() { Name = "news", Url = "https://b" }
             }
         };
-        var sut = CreateSut(appConfig);
+        var sut = CreateSut(options);
 
         sut.GetApiEndpointNames().Should().Equal("weather", "news");
     }
@@ -397,8 +394,8 @@ public class UtilityToolsServiceTests
     [Fact]
     public void GetToolDescriptions_WithEndpoints_IncludesApiDescriptionListingNames()
     {
-        var appConfig = CreateConfigWithEndpoint(new ApiEndpointSettings { Name = "weather", Url = "https://a" });
-        var sut = CreateSut(appConfig);
+        var options = CreateOptionsWithEndpoint(new ApiEndpointOptions { Name = "weather", Url = "https://a" });
+        var sut = CreateSut(options);
 
         var descriptions = sut.GetToolDescriptions();
 

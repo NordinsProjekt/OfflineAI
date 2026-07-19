@@ -1,31 +1,31 @@
 using System.Diagnostics;
 using System.Text;
-using Services.Configuration;
+using AgentKit.Skills.Utility;
 
-namespace Services.AgentTools;
+namespace AgentKit.Skills.External;
 
 /// <inheritdoc/>
 /// <remarks>
-/// Tools are resolved exclusively from <see cref="AppConfiguration.AgentTools"/> — the LLM
-/// selects a configured tool by its command name and can never supply a path, so this service
-/// can only ever start executables the user has explicitly whitelisted in configuration
-/// (appsettings.json or user secrets). The LLM's argument text is passed to the process as-is
-/// (after any configured fixed arguments) with no shell involved, so no shell-metacharacter
-/// expansion can occur.
+/// Tools are resolved exclusively from the configured <see cref="ExternalToolOptions"/> list —
+/// the LLM selects a configured tool by its command name and can never supply a path, so this
+/// service can only ever start executables the host has explicitly whitelisted in its
+/// configuration. The LLM's argument text is passed to the process as-is (after any configured
+/// fixed arguments) with no shell involved, so no shell-metacharacter expansion can occur.
 /// </remarks>
 public sealed class ExternalToolsService : IExternalToolsService
 {
     private static readonly StringComparison Cmp = StringComparison.OrdinalIgnoreCase;
 
-    private readonly AppConfiguration _appConfig;
+    private readonly IReadOnlyList<ExternalToolOptions> _tools;
 
-    public ExternalToolsService(AppConfiguration appConfig)
+    /// <param name="tools">The whitelisted external tools the LLM may run by slash command.</param>
+    public ExternalToolsService(IReadOnlyList<ExternalToolOptions> tools)
     {
-        _appConfig = appConfig ?? throw new ArgumentNullException(nameof(appConfig));
+        _tools = tools ?? throw new ArgumentNullException(nameof(tools));
     }
 
-    private IEnumerable<ExternalToolSettings> ConfiguredTools =>
-        _appConfig.AgentTools.ExternalTools.Where(t =>
+    private IEnumerable<ExternalToolOptions> ConfiguredTools =>
+        _tools.Where(t =>
             !string.IsNullOrWhiteSpace(t.Command) && !string.IsNullOrWhiteSpace(t.ExecutablePath));
 
     /// <summary>Normalizes a configured command name to its slash form ("/väder").</summary>
@@ -67,7 +67,7 @@ public sealed class ExternalToolsService : IExternalToolsService
     /// Matches the input line against the configured tools and splits off the LLM-supplied
     /// argument text (everything after the command name).
     /// </summary>
-    private ExternalToolSettings? FindTool(string trimmedInput, out string arguments)
+    private ExternalToolOptions? FindTool(string trimmedInput, out string arguments)
     {
         foreach (var tool in ConfiguredTools)
         {
@@ -88,7 +88,7 @@ public sealed class ExternalToolsService : IExternalToolsService
         return null;
     }
 
-    private static async Task<UtilityToolResult> RunProcessAsync(ExternalToolSettings tool, string llmArguments)
+    private static async Task<UtilityToolResult> RunProcessAsync(ExternalToolOptions tool, string llmArguments)
     {
         var slash = ToSlashCommand(tool.Command);
         var allArguments = string.Join(' ',

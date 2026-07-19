@@ -3,7 +3,7 @@ using AiDashboard.State;
 using Bunit;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
-using Services.FileAgent;
+using AgentKit.Skills.Files;
 using ChatArea = AiDashboard.Components.Pages.Components.ChatArea;
 using ChatTopBar = AiDashboard.Components.Pages.Components.ChatTopBar;
 using ChatMessages = AiDashboard.Components.Pages.Components.ChatMessages;

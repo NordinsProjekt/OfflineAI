@@ -1,8 +1,7 @@
+using AgentKit.Skills.External;
 using FluentAssertions;
-using Services.AgentTools;
-using Services.Configuration;
 
-namespace Services.Tests.AgentTools;
+namespace AgentKit.Tests.Skills.External;
 
 /// <summary>
 /// Unit tests for <see cref="ExternalToolsService"/>: operator-configured local executables the
@@ -16,14 +15,12 @@ public sealed class ExternalToolsServiceTests
     private static readonly string CmdExe =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
 
-    private static ExternalToolsService CreateSut(params ExternalToolSettings[] tools)
+    private static ExternalToolsService CreateSut(params ExternalToolOptions[] tools)
     {
-        var config = new AppConfiguration();
-        config.AgentTools.ExternalTools.AddRange(tools);
-        return new ExternalToolsService(config);
+        return new ExternalToolsService(tools);
     }
 
-    private static ExternalToolSettings EchoTool(string command = "eko") => new()
+    private static ExternalToolOptions EchoTool(string command = "eko") => new()
     {
         Command        = command,
         ExecutablePath = CmdExe,
@@ -102,8 +99,8 @@ public sealed class ExternalToolsServiceTests
     public void GetToolDescriptions_SkipsToolsWithoutCommandOrPath()
     {
         var sut = CreateSut(
-            new ExternalToolSettings { Command = "", ExecutablePath = CmdExe },
-            new ExternalToolSettings { Command = "utanpath", ExecutablePath = "" });
+            new ExternalToolOptions { Command = "", ExecutablePath = CmdExe },
+            new ExternalToolOptions { Command = "utanpath", ExecutablePath = "" });
 
         sut.GetToolDescriptions().Should().BeEmpty();
     }
@@ -125,7 +122,7 @@ public sealed class ExternalToolsServiceTests
     [Fact]
     public async Task ExecuteAsync_ToolWithoutArguments_Runs()
     {
-        var tool = new ExternalToolSettings
+        var tool = new ExternalToolOptions
         {
             Command        = "version",
             ExecutablePath = CmdExe,
@@ -143,7 +140,7 @@ public sealed class ExternalToolsServiceTests
     [Fact]
     public async Task ExecuteAsync_NonZeroExitCode_ReturnsFailureWithCode()
     {
-        var tool = new ExternalToolSettings
+        var tool = new ExternalToolOptions
         {
             Command        = "fel",
             ExecutablePath = CmdExe,
@@ -161,7 +158,7 @@ public sealed class ExternalToolsServiceTests
     [Fact]
     public async Task ExecuteAsync_MissingExecutable_ReturnsFailureNamingPath()
     {
-        var tool = new ExternalToolSettings
+        var tool = new ExternalToolOptions
         {
             Command        = "saknas",
             ExecutablePath = @"C:\finns\inte\alls.exe",
@@ -188,7 +185,7 @@ public sealed class ExternalToolsServiceTests
     [Fact]
     public async Task ExecuteAsync_ProcessExceedingTimeout_IsKilledAndReturnsFailure()
     {
-        var tool = new ExternalToolSettings
+        var tool = new ExternalToolOptions
         {
             Command        = "seg",
             ExecutablePath = CmdExe,

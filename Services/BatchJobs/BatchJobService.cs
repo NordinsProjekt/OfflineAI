@@ -1,4 +1,4 @@
-using Services.AgentTools;
+using AgentKit.ToolLoop;
 
 namespace Services.BatchJobs;
 

@@ -14,6 +14,8 @@ Before saying any task is complete, always:
    ```
    If you're not sure what else might be affected, build all projects:
    ```
+   AgentKit/AgentKit.csproj
+   AgentKit.Tests/AgentKit.Tests.csproj
    AI/AI.csproj
    AiDashboard/AiDashboard.csproj
    Application.AI.Tests/Application.AI.Tests.csproj
@@ -31,6 +33,7 @@ Before saying any task is complete, always:
 2. **Run the full unit test suite** for every affected test project, not just the tests you
    added:
    ```
+   dotnet test AgentKit.Tests/AgentKit.Tests.csproj
    dotnet test Services.Tests/Services.Tests.csproj
    dotnet test Presentation.AiDashboard.Tests/Presentation.AiDashboard.Tests.csproj
    dotnet test Application.AI.Tests/Application.AI.Tests.csproj

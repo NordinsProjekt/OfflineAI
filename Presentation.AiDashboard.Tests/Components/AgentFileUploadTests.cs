@@ -1,7 +1,7 @@
 using Bunit;
 using Microsoft.AspNetCore.Components.Forms;
 using Microsoft.Extensions.DependencyInjection;
-using Services.FileAgent;
+using AgentKit.Skills.Files;
 using AgentFileUpload = AiDashboard.Components.Shared.AgentFileUpload;
 
 namespace Presentation.AiDashboard.Tests.Components;

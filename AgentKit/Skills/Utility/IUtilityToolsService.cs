@@ -1,4 +1,4 @@
-namespace Services.AgentTools;
+namespace AgentKit.Skills.Utility;
 
 /// <summary>
 /// Result of a <see cref="IUtilityToolsService"/> command.

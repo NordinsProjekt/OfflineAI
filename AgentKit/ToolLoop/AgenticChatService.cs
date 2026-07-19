@@ -1,6 +1,9 @@
-using Services.FileAgent;
+using AgentKit.Skills.External;
+using AgentKit.Skills.Files;
+using AgentKit.Skills.Qb64;
+using AgentKit.Skills.Utility;
 
-namespace Services.AgentTools;
+namespace AgentKit.ToolLoop;
 
 /// <inheritdoc/>
 public sealed class AgenticChatService : IAgenticChatService

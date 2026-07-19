@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Moq;
 using OfflineAI.Api.Controllers;
 using OfflineAI.Api.Models;
-using Services.FileAgent;
+using AgentKit.Skills.Files;
 using Xunit;
 
 namespace OfflineAI.Api.Tests.Controllers;

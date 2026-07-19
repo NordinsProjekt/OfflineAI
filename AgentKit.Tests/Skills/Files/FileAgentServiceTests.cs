@@ -1,9 +1,9 @@
+using AgentKit.Skills.Files;
+using AgentKit.Tests.TestHelpers;
 using FluentAssertions;
-using Services.FileAgent;
-using Services.Tests.TestHelpers;
 using Xunit.Abstractions;
 
-namespace Services.Tests.FileAgent;
+namespace AgentKit.Tests.Skills.Files;
 
 /// <summary>
 /// Unit tests for the <c>/redigera</c> line-editing workflow in <see cref="FileAgentService"/>:

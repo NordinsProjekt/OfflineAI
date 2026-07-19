@@ -1,4 +1,6 @@
-namespace Services.AgentTools;
+using AgentKit.Skills.Utility;
+
+namespace AgentKit.Skills.Qb64;
 
 /// <summary>
 /// Handles the QB64 (QBasic) compiler slash commands:
