@@ -147,7 +147,11 @@ public static class Program
                 sp.GetRequiredService<IAgenticChatService>(),
                 sp.GetRequiredService<IFileAgentService>(),
                 appConfig.AgentTools.MaxGoalIterations,
-                sp.GetService<IAgentRunRepository>()));
+                sp.GetService<IAgentRunRepository>(),
+                // Lets the requirement generator emit "compiles via /qb64"-style requirements
+                // when a compiler is configured — without it, "test that the app works" in a
+                // goal silently degrades to file-content checks.
+                sp.GetRequiredService<IQb64ToolService>()));
 
         // Register Gemma 4 CLI service. Prefer an explicit Gemma4Cli section, but when its
         // ModelPath is empty fall back to the main Llm model *if that model is itself a Gemma

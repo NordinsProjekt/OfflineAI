@@ -66,6 +66,12 @@ public interface IGoalAgentService
     /// Callers should start a fresh conversation per run, or the run's turns will be
     /// indistinguishable from ordinary chat.
     /// </param>
+    /// <param name="verifySendToLlm">
+    /// Optional. Separate LLM delegate used for the verification steps only, so a caller can
+    /// run reviews with different sampling than the creative work steps (verification wants
+    /// deterministic verdicts — empty/garbled replies cluster at high temperature). When null,
+    /// <paramref name="sendToLlm"/> is used for everything.
+    /// </param>
     /// <remarks>
     /// When the service was constructed with a file agent, the complete raw transcript of the
     /// run (every prompt, every LLM reply including internal tool-call rounds, executed tool
@@ -80,7 +86,8 @@ public interface IGoalAgentService
         Action<string>? onToolStatus = null,
         CancellationToken cancellationToken = default,
         string? modelName = null,
-        Guid? conversationId = null);
+        Guid? conversationId = null,
+        Func<string, Task<string>>? verifySendToLlm = null);
 
     /// <summary>
     /// Requests the run stop at the next step boundary (between work items or verifications).

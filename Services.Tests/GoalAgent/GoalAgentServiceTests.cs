@@ -314,10 +314,12 @@ public class GoalAgentServiceTests
         sut.GoalDescription.Should().Be("Skapa ett recept på pannkakor i recept.txt");
         sut.Requirements.Should().HaveCount(2);
         sut.Requirements.Should().OnlyContain(r => r.Status == RequirementStatus.Passed);
-        // 2 work calls + 2 verify calls, work before verify.
-        fake.ReceivedMessages.Should().HaveCount(4);
-        fake.ReceivedMessages.Take(2).Should().OnlyContain(m => IsWorkPrompt(m));
-        fake.ReceivedMessages.Skip(2).Should().OnlyContain(m => IsVerifyPrompt(m));
+        // 1 combined work call (all unmet requirements in one step) + 2 verify calls.
+        fake.ReceivedMessages.Should().HaveCount(3);
+        fake.ReceivedMessages.Take(1).Should().OnlyContain(m => IsWorkPrompt(m));
+        fake.ReceivedMessages.Skip(1).Should().OnlyContain(m => IsVerifyPrompt(m));
+        // The combined work prompt carries both requirements.
+        fake.ReceivedMessages[0].Should().Contain("recept.txt finns").And.Contain("ingredienslista");
     }
 
     // ── RunAsync: red → green feedback loop ───────────────────────────────
@@ -536,6 +538,10 @@ public class GoalAgentServiceTests
         try
         {
             var fileAgent = new Services.FileAgent.FileAgentService(workspaceDir);
+            // The first requirement ("Filen recept.txt finns...") is now checked directly on
+            // disk, so the file must actually exist for the run to complete green.
+            Directory.CreateDirectory(workspaceDir);
+            await File.WriteAllTextAsync(Path.Combine(workspaceDir, "recept.txt"), "Pannkakor: mjölk, ägg, mjöl");
             var fake = new FakeAgenticChatService(msg =>
                 IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
             var sut = new GoalAgentService(fake, fileAgent);
@@ -813,5 +819,244 @@ public class GoalAgentServiceTests
         await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
 
         sut.Phase.Should().Be(GoalAgentPhase.Completed);
+    }
+
+    // ── ScrubLeakedModelTokens ────────────────────────────────────────────
+
+    [Fact]
+    public void ScrubLeakedModelTokens_PlainReply_IsUnchanged()
+    {
+        GoalAgentService.ScrubLeakedModelTokens("RESULTAT: GODKÄNT\nAllt ser bra ut.")
+            .Should().Be("RESULTAT: GODKÄNT\nAllt ser bra ut.");
+    }
+
+    [Fact]
+    public void ScrubLeakedModelTokens_UnclosedReasoningChannel_BecomesEmpty()
+    {
+        // Observed leak in a real run: the reply was only "<|channel>thought" — unterminated
+        // reasoning, no answer. It must scrub to empty so the retry loop treats it as such.
+        GoalAgentService.ScrubLeakedModelTokens("<|channel>thought").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ScrubLeakedModelTokens_ClosedReasoningChannel_KeepsOnlyTheAnswer()
+    {
+        GoalAgentService.ScrubLeakedModelTokens("<|channel>tänker högt...<channel|>RESULTAT: GODKÄNT")
+            .Should().Be("RESULTAT: GODKÄNT");
+    }
+
+    [Fact]
+    public void ScrubLeakedModelTokens_DanglingToolCall_IsCutAway()
+    {
+        // Observed leak: "<|tool_call>call: /lista <tool_call|><|tool_response>" — tool plumbing
+        // with nothing wired to service it is not an answer.
+        GoalAgentService.ScrubLeakedModelTokens("<|tool_call>call: /lista <tool_call|><|tool_response>")
+            .Should().BeEmpty();
+
+        GoalAgentService.ScrubLeakedModelTokens("RESULTAT: GODKÄNT\n<|tool_call>call: /lista <tool_call|>")
+            .Should().Be("RESULTAT: GODKÄNT");
+    }
+
+    // ── Empty-reply retry (call level) ────────────────────────────────────
+
+    [Fact]
+    public async Task RunAsync_EmptyLlmReplies_AreRetriedBeforeParsing()
+    {
+        // Empty replies are intermittent at temperature 1.0. The first two requirement-
+        // generation attempts return nothing; the third returns a real KRAV line — the run
+        // must recover instead of falling back to the whole goal as a single requirement.
+        var llmCalls = 0;
+        Task<string> FlakyLlm(string prompt)
+        {
+            llmCalls++;
+            return Task.FromResult(llmCalls < 3 ? string.Empty : "KRAV: Filen a.txt finns i arbetsytan.");
+        }
+
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 1);
+
+        await sut.RunAsync("Skapa filen a.txt", FlakyLlm);
+
+        llmCalls.Should().Be(3, "two empty replies should each trigger a retry of the same prompt");
+        sut.Requirements.Should().ContainSingle()
+            .Which.Description.Should().Be("Filen a.txt finns i arbetsytan.");
+        sut.ActivityLog.Should().Contain(line => line.Contains("tomt"));
+    }
+
+    // ── TryParseFileExistenceRequirement ──────────────────────────────────
+
+    [Theory]
+    [InlineData("Filen calc.bas finns i arbetsytan.", "calc.bas")]
+    [InlineData("1. Filen calc.bas finns i arbetsytan", "calc.bas")]
+    [InlineData("filen notes.txt finns.", "notes.txt")]
+    [InlineData("The file notes.txt exists in the workspace.", "notes.txt")]
+    public void TryParseFileExistenceRequirement_PureExistenceShapes_AreParsed(string description, string expected)
+    {
+        GoalAgentService.TryParseFileExistenceRequirement(description, out var filename).Should().BeTrue();
+        filename.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("Filen calc.bas finns och innehåller kod.")]           // content condition
+    [InlineData("calc.bas innehåller en miniräknare.")]                // content requirement
+    [InlineData("Filen finns i arbetsytan.")]                          // no filename
+    [InlineData("The file readme.md contains a heading and exists.")]  // content condition (en)
+    public void TryParseFileExistenceRequirement_NonPureShapes_AreRejected(string description)
+    {
+        GoalAgentService.TryParseFileExistenceRequirement(description, out _).Should().BeFalse();
+    }
+
+    // ── Deterministic file-existence verification ─────────────────────────
+
+    [Fact]
+    public async Task RunAsync_FileExistenceRequirement_IsCheckedOnDiskWithoutLlmReview()
+    {
+        var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(workspaceDir);
+            await File.WriteAllTextAsync(Path.Combine(workspaceDir, "a.txt"), "innehåll");
+            var fileAgent = new Services.FileAgent.FileAgentService(workspaceDir);
+            var fake = new FakeAgenticChatService(msg =>
+                IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+            var sut = new GoalAgentService(fake, fileAgent, maxIterations: 1);
+
+            await sut.RunAsync("Skapa filen a.txt", _ => Task.FromResult("KRAV: Filen a.txt finns i arbetsytan."));
+
+            sut.Phase.Should().Be(GoalAgentPhase.Completed);
+            fake.ReceivedMessages.Should().NotContain(m => IsVerifyPrompt(m),
+                "a pure existence requirement should never reach the LLM reviewer");
+            sut.ActivityLog.Should().Contain(line => line.Contains("direktkontroll"));
+        }
+        finally
+        {
+            if (Directory.Exists(workspaceDir))
+                Directory.Delete(workspaceDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_FileExistenceRequirementFileMissing_FailsDeterministically()
+    {
+        var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(workspaceDir);
+            var fileAgent = new Services.FileAgent.FileAgentService(workspaceDir);
+            var fake = new FakeAgenticChatService(msg =>
+                IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+            var sut = new GoalAgentService(fake, fileAgent, maxIterations: 1);
+
+            await sut.RunAsync("Skapa filen b.txt", _ => Task.FromResult("KRAV: Filen b.txt finns i arbetsytan."));
+
+            sut.Phase.Should().Be(GoalAgentPhase.MaxIterationsReached);
+            var requirement = sut.Requirements.Should().ContainSingle().Subject;
+            requirement.Status.Should().Be(RequirementStatus.Failed);
+            requirement.LastVerdict.Should().Contain("saknas");
+            fake.ReceivedMessages.Should().NotContain(m => IsVerifyPrompt(m));
+        }
+        finally
+        {
+            if (Directory.Exists(workspaceDir))
+                Directory.Delete(workspaceDir, recursive: true);
+        }
+    }
+
+    // ── Workspace snapshot injection ──────────────────────────────────────
+
+    [Fact]
+    public async Task RunAsync_WithFileAgent_WorkAndVerifyPromptsCarryReferencedFileContent()
+    {
+        var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(workspaceDir);
+            await File.WriteAllTextAsync(Path.Combine(workspaceDir, "fil.txt"), "UNIKT_INNEHALL_123");
+            var fileAgent = new Services.FileAgent.FileAgentService(workspaceDir);
+            var fake = new FakeAgenticChatService(msg =>
+                IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+            var sut = new GoalAgentService(fake, fileAgent, maxIterations: 1);
+
+            await sut.RunAsync(
+                "Fyll fil.txt med en hälsning",
+                _ => Task.FromResult("KRAV: fil.txt innehåller en hälsning."));
+
+            // The model must see the current file content without having to call /läs — the
+            // old blind work steps kept rewriting files they had never read.
+            var workPrompt = fake.ReceivedMessages.Should().ContainSingle(m => IsWorkPrompt(m)).Subject;
+            workPrompt.Should().Contain("Ögonblicksbild").And.Contain("UNIKT_INNEHALL_123");
+
+            var verifyPrompt = fake.ReceivedMessages.Should().ContainSingle(m => IsVerifyPrompt(m)).Subject;
+            verifyPrompt.Should().Contain("UNIKT_INNEHALL_123");
+        }
+        finally
+        {
+            if (Directory.Exists(workspaceDir))
+                Directory.Delete(workspaceDir, recursive: true);
+        }
+    }
+
+    // ── QB64 awareness ────────────────────────────────────────────────────
+
+    private sealed class FakeQb64ToolService : IQb64ToolService
+    {
+        public bool Configured { get; init; } = true;
+
+        public bool IsCommand(string input) => false;
+
+        public Task<UtilityToolResult> ExecuteAsync(string input) =>
+            throw new NotSupportedException("Not used by these tests.");
+
+        public IReadOnlyDictionary<string, string> GetToolDescriptions() =>
+            Configured
+                ? new Dictionary<string, string> { ["/qb64 <fil.bas>"] = "Kompilerar och kör en QBasic-fil." }
+                : new Dictionary<string, string>();
+
+        public bool TryFindCommand(string llmResponse, out string command)
+        {
+            command = string.Empty;
+            return false;
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_WithConfiguredQb64_RequirementsPromptMentionsCompilation()
+    {
+        string? requirementsPrompt = null;
+        Task<string> CapturingLlm(string prompt)
+        {
+            requirementsPrompt ??= prompt;
+            return Task.FromResult("KRAV: Filen calc.bas innehåller en miniräknare.");
+        }
+
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 1, qb64Tools: new FakeQb64ToolService());
+
+        await sut.RunAsync("Skapa en miniräknare i QBasic och testa den", CapturingLlm);
+
+        requirementsPrompt.Should().NotBeNull();
+        requirementsPrompt.Should().Contain("kompilerar", "the requirement generator must know compiling is checkable");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithoutConfiguredQb64_RequirementsPromptOmitsCompilation()
+    {
+        string? requirementsPrompt = null;
+        Task<string> CapturingLlm(string prompt)
+        {
+            requirementsPrompt ??= prompt;
+            return Task.FromResult("KRAV: Filen calc.bas innehåller en miniräknare.");
+        }
+
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 1, qb64Tools: new FakeQb64ToolService { Configured = false });
+
+        await sut.RunAsync("Skapa en miniräknare i QBasic", CapturingLlm);
+
+        requirementsPrompt.Should().NotBeNull();
+        requirementsPrompt.Should().NotContain("kompilerar");
     }
 }

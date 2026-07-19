@@ -657,14 +657,18 @@ public sealed class FileAgentServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ExecuteAsync_SkapaExistingFile_OverwritesWithEmptyContent()
+    public async Task ExecuteAsync_SkapaExistingFile_LeavesExistingContentUntouched()
     {
+        // /skapa must never truncate: in a real goal-agent run the model re-issued
+        // "/skapa calc.bas" on a file it had already filled, and every call wiped the file.
         await CreateFileAsync("notes.txt", "gammalt innehåll");
 
         var result = await _sut.ExecuteAsync("/skapa notes.txt");
 
         result.IsSuccess.Should().BeTrue();
-        (await File.ReadAllTextAsync(Path.Combine(_tempDir, "notes.txt"))).Should().BeEmpty();
+        result.Message.Should().Contain("finns redan");
+        (await File.ReadAllTextAsync(Path.Combine(_tempDir, "notes.txt"))).TrimEnd()
+            .Should().Be("gammalt innehåll");
     }
 
     [Fact]

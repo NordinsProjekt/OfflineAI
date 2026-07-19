@@ -955,6 +955,101 @@ public class Person
         Assert.Contains("&lt;", result); // encoded angle brackets present
     }
 
+    // ----- Generic code fences (any language tag, or none) -----
+
+    [Fact]
+    public void FormatResponse_WithQBasicCodeBlock_FormatsAsCodeBlock()
+    {
+        // Arrange - a language outside the known reformatting list must still become a code block
+        var input = "Här är programmet:\n```qbasic\nCLS\nINPUT \"Ange text: \", originalText\nFOR i = 1 TO LEN(originalText)\n    krypteradText = krypteradText + CHR$(kod)\nNEXT i\n```\nKlart.";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("[QBasic Code]", result);
+        Assert.Contains("[End QBasic Code]", result);
+        Assert.Contains("<pre class=\"code-block\">", result);
+        Assert.Contains("CHR$(kod)", result);
+        // Content of unknown languages is preserved verbatim, including indentation
+        Assert.Contains("    krypteradText", result);
+        Assert.Contains("Klart.", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithUnknownLanguageTag_UsesCapitalizedLanguageName()
+    {
+        // Arrange
+        var input = "```zig\nconst x = 1;\n```";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("[Zig Code]", result);
+        Assert.Contains("[End Zig Code]", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithNoLanguageTag_FormatsAsPlainCodeBlock()
+    {
+        // Arrange
+        var input = "Kör detta:\n```\nPRINT \"HEJ\"\n```\nKlart.";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains(">[Code]<", result);
+        Assert.Contains(">[End Code]<", result);
+        Assert.Contains("PRINT &quot;HEJ&quot;", result);
+        Assert.Contains("Klart.", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithCodeOnFenceLine_DoesNotMistakeItForLanguage()
+    {
+        // Arrange - first word of the code sits directly after ``` and must not become the language
+        var input = "```var x = 1;\n```";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.DoesNotContain("[Var Code]", result);
+        Assert.Contains(">[Code]<", result);
+        Assert.Contains("var x = 1;", result);
+    }
+
+    [Fact]
+    public void FormatResponse_WithAcuteAccentFences_NormalizesAndFormatsCodeBlock()
+    {
+        // Arrange - ´ (U+00B4) fences instead of backticks, a Nordic-keyboard/LLM artifact
+        var input = "´´´qbasic\nPRINT \"HEJ\"\n´´´";
+
+        // Act
+        var result = _formatter.FormatResponse(input);
+
+        // Assert
+        Assert.Contains("[QBasic Code]", result);
+        Assert.DoesNotContain("´´´", result);
+    }
+
+    [Fact]
+    public void ExtractCodeBlocks_WithQBasicFence_ExtractsBlock()
+    {
+        // Arrange
+        var input = "```qbasic\nCLS\nPRINT \"HEJ\"\n```";
+
+        // Act
+        var blocks = _formatter.ExtractCodeBlocks(input);
+
+        // Assert
+        Assert.Single(blocks);
+        Assert.Equal("QBasic", blocks[0].Language);
+        Assert.Contains("PRINT", blocks[0].RawCode);
+    }
+
     [Fact]
     public void FormatResponse_WithNumberedListAndBoldText_BothFormatCorrectly()
     {

@@ -99,11 +99,18 @@ public sealed class Gemma4CliService : IGemma4CliService
 
     /// <inheritdoc/>
     public Task<string> ChatAsync(string userMessage, CancellationToken cancellationToken = default)
+        => ChatAsync(userMessage, temperatureOverride: null, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<string> ChatAsync(
+        string userMessage,
+        double? temperatureOverride,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userMessage);
 
         var prompt = BuildPrompt(BuildTurns(userMessage, toolDefinitions: null));
-        return RunAndExtractAsync(prompt, imagePath: null, cancellationToken);
+        return RunAndExtractAsync(prompt, imagePath: null, cancellationToken, temperatureOverride);
     }
 
     /// <inheritdoc/>
@@ -255,9 +262,10 @@ public sealed class Gemma4CliService : IGemma4CliService
     private async Task<string> RunAndExtractAsync(
         string prompt,
         string? imagePath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        double? temperatureOverride = null)
     {
-        var raw = await RunAsync(prompt, imagePath, cancellationToken);
+        var raw = await RunAsync(prompt, imagePath, cancellationToken, temperatureOverride);
         var region = ExtractModelRegion(raw);
 
         return region is null
@@ -268,7 +276,8 @@ public sealed class Gemma4CliService : IGemma4CliService
     private async Task<string> RunAsync(
         string prompt,
         string? imagePath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        double? temperatureOverride = null)
     {
         var tempPromptFile = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
         try
@@ -299,7 +308,7 @@ public sealed class Gemma4CliService : IGemma4CliService
             // comma and reads it as 0 — silently forcing temp/top-p to zero.
             psi.Arguments += $" -c {_options.ContextSize}";
             psi.Arguments += $" -n {_options.MaxTokens}";
-            psi.Arguments += string.Create(CultureInfo.InvariantCulture, $" --temp {_options.Temperature:F2}");
+            psi.Arguments += string.Create(CultureInfo.InvariantCulture, $" --temp {temperatureOverride ?? _options.Temperature:F2}");
             psi.Arguments += string.Create(CultureInfo.InvariantCulture, $" --top-p {_options.TopP:F2}");
             psi.Arguments += $" --top-k {_options.TopK}";
 

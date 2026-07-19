@@ -124,6 +124,11 @@
 @code {
     private string _goalDescription = string.Empty;
 
+    // Verification wants deterministic verdicts, not creativity: Gemma's recommended 1.0 gives
+    // intermittent empty/garbled replies, which in a real run burned a third of all reviews.
+    // Only applies to the Gemma 4 CLI backend; the classic backend keeps its own settings.
+    private const double VerificationTemperature = 0.3;
+
     protected override void OnInitialized()
     {
         GoalAgent.OnChange += Refresh;
@@ -150,7 +155,8 @@
             status => Dashboard.StatusMessage = status,
             CancellationToken.None,
             Dashboard.ActiveModelName,
-            Dashboard.CurrentConversationId);
+            Dashboard.CurrentConversationId,
+            verifySendToLlm: msg => Dashboard.SendQuickAskActiveAsync(msg, VerificationTemperature));
     }
 
     private static string PhaseText(GoalAgentPhase phase) => phase switch

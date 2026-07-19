@@ -530,11 +530,23 @@ public class DashboardState
             ? SendViaGemma4Async(message)
             : SendQuickAskAsync(message);
 
-    private async Task<string> SendViaGemma4Async(string message)
+    /// <summary>
+    /// QuickAsk variant with a Gemma 4 temperature override, used by the goal agent to run
+    /// verification steps at a low temperature (deterministic verdicts, far fewer empty
+    /// replies) while ordinary calls keep the configured sampling. The override only applies
+    /// to the Gemma 4 CLI backend — the classic backend already runs at its configured
+    /// Generation temperature.
+    /// </summary>
+    public Task<string> SendQuickAskActiveAsync(string message, double? gemma4Temperature)
+        => SelectedBackend == LlmBackend.Gemma4Cli && Gemma4CliService != null
+            ? SendViaGemma4Async(message, gemma4Temperature)
+            : SendQuickAskAsync(message);
+
+    private async Task<string> SendViaGemma4Async(string message, double? temperatureOverride = null)
     {
         try
         {
-            var response = await Gemma4CliService!.ChatAsync(message);
+            var response = await Gemma4CliService!.ChatAsync(message, temperatureOverride);
 
             // Persist the turn (grouped under the current conversation/session) so
             // Gemma 4 responses are saved just like the classic backend's.

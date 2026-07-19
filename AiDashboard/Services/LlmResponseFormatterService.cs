@@ -6,10 +6,31 @@ namespace AiDashboard.Services;
 
 /// <summary>
 /// Formats LLM responses by detecting and formatting code blocks with proper indentation and syntax highlighting.
-/// Supports C#, Python, Java, JavaScript, HTML, and other common languages with IDE-like formatting.
+/// Any fenced code block (```language ... ```) becomes a code block regardless of language; languages the
+/// formatter knows (C#, Python, Java, JavaScript, HTML, etc.) additionally get re-indentation and highlighting.
 /// </summary>
 public class LlmResponseFormatterService : ILlmResponseFormatterService
 {
+    /// <summary>
+    /// Languages the formatter knows how to re-indent/reflow (and possibly highlight). Fences with
+    /// any other language tag — or none — still become code blocks, but their content is preserved
+    /// exactly as the model wrote it, since the reformatting heuristics assume brace/colon syntax.
+    /// Ordered longest-first so the regex alternation prefers "csharp" over "cs".
+    /// </summary>
+    private static readonly string[] ReformattableLanguages =
+        { "javascript", "typescript", "powershell", "csharp", "python", "bash", "html", "razor", "cshtml", "java", "json", "css", "sql", "xml", "php", "c#", "ts", "js", "py", "cs", "sh", "ps1" };
+
+    /// <summary>
+    /// Matches a fenced code block with any language tag, or none. Known language names may be glued
+    /// directly to the code (```csharpvar x = 1; — a common LLM artifact); an arbitrary tag is only
+    /// treated as a language when it sits alone on the fence line, so ```qbasic works without a
+    /// hardcoded list while ```var x = 1 is not mistaken for a language called "var".
+    /// Groups: 1 = known language, 2 = generic language tag, 3 = code.
+    /// </summary>
+    private static readonly Regex FenceRegex = new(
+        $@"```(?:({string.Join("|", ReformattableLanguages.Select(Regex.Escape))})|([A-Za-z][A-Za-z0-9#+._-]*)(?=[ \t]*\r?\n))?[ \t]*\r?\n?(.*?)```",
+        RegexOptions.Singleline | RegexOptions.IgnoreCase);
+
     /// <summary>
     /// Formats an LLM response by detecting and formatting code blocks.
     /// Handles both markdown-style code blocks (```language) and inline code markers.
@@ -75,6 +96,11 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
     /// </summary>
     private static string StripLlmArtifacts(string response)
     {
+        // Code fences typed/echoed with acute accents (´´´, U+00B4) instead of backticks — a common
+        // artifact around Nordic keyboard layouts. Normalized here, before the HTML-encoding step,
+        // because WebUtility.HtmlEncode would turn ´ into &#180; and hide it from the fence regex.
+        response = Regex.Replace(response, @"´{3,}", "```");
+
         // Llama / Mistral / Qwen instruction tokens: [INST], [/INST], <<SYS>> ... <</SYS>>
         response = Regex.Replace(response, @"\[/?INST\]", string.Empty, RegexOptions.IgnoreCase);
         response = Regex.Replace(response, @"<<SYS>>.*?<</SYS>>", string.Empty,
@@ -165,8 +191,8 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         if (string.IsNullOrWhiteSpace(text))
             return false;
 
-        // Check for markdown code blocks
-        if (Regex.IsMatch(text, @"```\w+"))
+        // Check for markdown code blocks: a language-tagged fence or any paired fence
+        if (Regex.IsMatch(text, @"```\w+") || Regex.IsMatch(text, @"```[\s\S]*?```"))
             return true;
 
         // Check for common code patterns (brackets, semicolons, etc.)
@@ -194,26 +220,23 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
         if (string.IsNullOrWhiteSpace(text))
             return codeBlocks;
 
-        // Pattern to match markdown code blocks using known language names
-        // Order languages by length (longest first) to ensure proper matching
-        var languages = new[] { "javascript", "typescript", "powershell", "csharp", "python", "bash", "html", "razor", "cshtml", "java", "json", "css", "sql", "xml", "php", "c#", "ts", "js", "py", "cs", "sh", "ps1" };
-        var pattern = $@"```({string.Join("|", languages.Select(Regex.Escape))})(.*?)```";
-        var matches = Regex.Matches(text, pattern, RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        // Match any fenced code block (known language, arbitrary tag, or none)
+        var matches = FenceRegex.Matches(text);
 
         foreach (Match match in matches)
         {
-            var language = match.Groups[1].Value.ToLowerInvariant();
-            var rawCode = match.Groups[2].Value.Trim();
-            
+            var language = (match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value).ToLowerInvariant();
+            var rawCode = match.Groups[3].Value.Trim();
+
             // Skip empty code blocks
             if (string.IsNullOrWhiteSpace(rawCode))
                 continue;
-            
+
             var codeBlock = new CodeBlock
             {
-                Language = NormalizeLanguageName(language),
+                Language = string.IsNullOrEmpty(language) ? "Code" : NormalizeLanguageName(language),
                 RawCode = rawCode,
-                FormattedCode = FormatCode(rawCode, language),
+                FormattedCode = IsReformattableLanguage(language) ? FormatCode(rawCode, language) : rawCode,
                 StartIndex = match.Index,
                 EndIndex = match.Index + match.Length
             };
@@ -236,31 +259,37 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
 
     private static string FormatMarkdownCodeBlocks(string response)
     {
-        // Pattern to match ```language code``` where language is one of our known languages
-        // Order languages by length (longest first) to ensure proper matching
-        var languages = new[] { "javascript", "typescript", "powershell", "csharp", "python", "bash", "html", "razor", "cshtml", "java", "json", "css", "sql", "xml", "php", "c#", "ts", "js", "py", "cs", "sh", "ps1" };
-        var pattern = $@"```({string.Join("|", languages.Select(Regex.Escape))})(.*?)```";
-        
-        return Regex.Replace(response, pattern, match =>
+        return FenceRegex.Replace(response, match =>
         {
-            var language = match.Groups[1].Value.ToLowerInvariant();
-            var rawCode = match.Groups[2].Value;
-            
-            // Remove leading/trailing whitespace from code
-            rawCode = rawCode.Trim();
-            
+            var language = (match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value).ToLowerInvariant();
+            var rawCode = match.Groups[3].Value.Trim();
+
             // Skip if no code content
             if (string.IsNullOrWhiteSpace(rawCode))
                 return match.Value;
-            
-            var formattedCode = FormatCode(rawCode, language);
+
+            // Unknown languages keep their content verbatim — the reformatting heuristics would
+            // otherwise strip indentation from syntaxes they don't understand (e.g. QBasic).
+            var formattedCode = IsReformattableLanguage(language) ? FormatCode(rawCode, language) : rawCode;
             var highlightedCode = ApplySyntaxHighlighting(formattedCode, language);
-            
+
             // Return formatted code block with language header wrapped in <pre> tag
             // <pre> preserves whitespace and line breaks
-            var languageDisplay = NormalizeLanguageName(language);
-            return $"<br><br><div class=\"code-block-header\">[{languageDisplay} Code]</div><pre class=\"code-block\">{highlightedCode}</pre><div class=\"code-block-footer\">[End {languageDisplay} Code]</div><br><br>";
-        }, RegexOptions.Singleline | RegexOptions.IgnoreCase);
+            var (header, footer) = CodeBlockLabels(language);
+            return $"<br><br><div class=\"code-block-header\">{header}</div><pre class=\"code-block\">{highlightedCode}</pre><div class=\"code-block-footer\">{footer}</div><br><br>";
+        });
+    }
+
+    private static bool IsReformattableLanguage(string language) =>
+        ReformattableLanguages.Contains(language);
+
+    private static (string Header, string Footer) CodeBlockLabels(string language)
+    {
+        if (string.IsNullOrEmpty(language))
+            return ("[Code]", "[End Code]");
+
+        var display = NormalizeLanguageName(language);
+        return ($"[{display} Code]", $"[End {display} Code]");
     }
 
     private string FormatInlineCodePatterns(string response)
@@ -300,7 +329,7 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
                 return match.Value;
 
             var language = languageRaw.ToLowerInvariant();
-            var formattedCode = FormatCode(rawCode, language);
+            var formattedCode = IsReformattableLanguage(language) ? FormatCode(rawCode, language) : rawCode;
             var highlightedCode = ApplySyntaxHighlighting(formattedCode, language);
             var languageDisplay = NormalizeLanguageName(language);
 
@@ -1182,6 +1211,14 @@ public class LlmResponseFormatterService : ILlmResponseFormatterService
             "powershell" or "ps1" => "PowerShell",
             "razor" or "cshtml" => "Razor",
             "php" => "PHP",
+            "qbasic" or "qb" => "QBasic",
+            "qb64" => "QB64",
+            "basic" => "BASIC",
+            "c" => "C",
+            "cpp" or "c++" => "C++",
+            "go" or "golang" => "Go",
+            "rust" or "rs" => "Rust",
+            "yaml" or "yml" => "YAML",
             _ => char.ToUpper(language[0]) + language.Substring(1).ToLower()
         };
     }

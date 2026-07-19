@@ -185,6 +185,13 @@ public class FileAgentService : IFileAgentService
         if (path is null)
             return FileAgentResult.Failure($"Ogiltigt filnamn: \"{filename}\".");
 
+        // /skapa on an existing file must never wipe it. In a real goal-agent run the model
+        // called /skapa on a file it had already filled — every call truncated the file to
+        // empty and hours of work-verify iterations went to rebuilding the same content.
+        if (File.Exists(path))
+            return FileAgentResult.Success(FileAgentResultType.FileCreated,
+                $"✓ Filen finns redan: {Path.GetFileName(path)} — innehållet lämnades orört. Använd /redigera för att ändra i den.");
+
         await File.WriteAllTextAsync(path, string.Empty);
         return FileAgentResult.Success(FileAgentResultType.FileCreated, $"✓ Fil skapad: {Path.GetFileName(path)}");
     }
@@ -839,8 +846,8 @@ public class FileAgentService : IFileAgentService
     {
         ["/läs <filnamn> <instruktion>"] = "Läser innehållet i en fil i agentkatalogen och skickar det tillsammans med instruktionen till dig, t.ex. \"/läs text.txt Sammanfatta innehållet.\"",
         ["/läs-pdf <filnamn> <instruktion>"] = "Extraherar texten ur en PDF-fil i agentkatalogen och skickar den tillsammans med instruktionen till dig, t.ex. \"/läs-pdf rapport.pdf Sammanfatta innehållet och föreslå en åtgärd.\"",
-        ["/skapa <filnamn>"] = "Skapar en ny, tom fil med angivet namn i agentkatalogen.",
-        ["/fyll <filnamn> <beskrivning>"] = "Genererar innehåll utifrån beskrivningen och sparar det i filen.",
+        ["/skapa <filnamn>"] = "Skapar en ny, tom fil med angivet namn i agentkatalogen. En fil som redan finns lämnas orörd.",
+        ["/fyll <filnamn> <beskrivning>"] = "Genererar innehåll utifrån beskrivningen och sparar det i filen. OBS: ersätter HELA filens innehåll — använd /redigera för att ändra eller utöka en befintlig fil.",
         ["/redigera <filnamn> <instruktion>"] = "Läser en fil med radnummer, ber dig ange exakt vilka rader som ska ersättas och med vad (eller var ny kod, t.ex. en ny funktion, ska infogas utan att skriva över något), och uppdaterar sedan filen automatiskt utifrån ditt svar.",
         ["/lista"] = "Listar alla filer som just nu finns i agentkatalogen."
     };
