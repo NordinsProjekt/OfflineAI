@@ -77,6 +77,12 @@ public interface IGoalAgentService
     /// null falls back to the cap the service was constructed with (typically
     /// <c>AppConfiguration.AgentTools.MaxGoalIterations</c>).
     /// </param>
+    /// <param name="runId">
+    /// Optional. Id to use for the persisted run row instead of a randomly generated one — lets
+    /// a caller that already handed out an id for this run before calling <see cref="RunAsync"/>
+    /// (e.g. a job id an API returned to its caller before the run started) look the same row up
+    /// later by that id. Ignored when the service was constructed without a run repository.
+    /// </param>
     /// <remarks>
     /// When the service was constructed with a file agent, the complete raw transcript of the
     /// run (every prompt, every LLM reply including internal tool-call rounds, executed tool
@@ -93,7 +99,8 @@ public interface IGoalAgentService
         string? modelName = null,
         Guid? conversationId = null,
         Func<string, Task<string>>? verifySendToLlm = null,
-        int? maxIterations = null);
+        int? maxIterations = null,
+        Guid? runId = null);
 
     /// <summary>
     /// Requests the run stop at the next step boundary (between work items or verifications).

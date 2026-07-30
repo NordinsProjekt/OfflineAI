@@ -52,6 +52,25 @@ public class AppConfiguration
     /// <c>AgentKit.Skills.Utility.UtilityToolsService</c>), plus the agentic tool-calling loop settings.
     /// </summary>
     public AgentToolsSettings AgentTools { get; set; } = new();
+
+    /// <summary>
+    /// Settings for headless goal-agent jobs (see <c>AgentKit.Api</c>'s job API).
+    /// </summary>
+    public JobsSettings Jobs { get; set; } = new();
+}
+
+/// <summary>
+/// Settings for headless goal-agent jobs run through an HTTP job API rather than the interactive
+/// dashboard. Each job gets its own subdirectory under <see cref="RootFolder"/> so concurrent
+/// jobs never share a workspace.
+/// </summary>
+public class JobsSettings
+{
+    /// <summary>
+    /// Root directory under which each job gets its own <c>{jobId}</c> subdirectory as its
+    /// workspace. Defaults to Documents\OfflineAI\AgentJobs when left empty.
+    /// </summary>
+    public string RootFolder { get; set; } = string.Empty;
 }
 
 public class AgentToolsSettings

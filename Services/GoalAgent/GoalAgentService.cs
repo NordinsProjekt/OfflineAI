@@ -232,7 +232,8 @@ public sealed class GoalAgentService : IGoalAgentService
         string? modelName = null,
         Guid? conversationId = null,
         Func<string, Task<string>>? verifySendToLlm = null,
-        int? maxIterations = null)
+        int? maxIterations = null,
+        Guid? runId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(goalDescription);
         ArgumentNullException.ThrowIfNull(sendToLlm);
@@ -253,7 +254,7 @@ public sealed class GoalAgentService : IGoalAgentService
         GoalDescription = goalDescription;
         CurrentIteration = 0;
 
-        await StartRunRecordAsync(goalDescription, modelName, conversationId);
+        await StartRunRecordAsync(goalDescription, modelName, conversationId, runId);
         StartTranscript(goalDescription);
 
         // Every LLM round trip — including the internal tool-call rounds AgenticChatService
@@ -1066,7 +1067,13 @@ public sealed class GoalAgentService : IGoalAgentService
     /// Inserts the run row. On success <see cref="_runId"/> is set, which is what enables all
     /// other recording — so a failure here simply means this run isn't recorded.
     /// </summary>
-    private async Task StartRunRecordAsync(string goalDescription, string? modelName, Guid? conversationId)
+    /// <param name="runId">
+    /// Optional caller-supplied id for the run row (falls back to a new random id via
+    /// <see cref="AgentRunEntity"/>'s default). Lets a caller that already handed out an id for
+    /// this run before <see cref="RunAsync"/> was called (e.g. a job id returned from an API
+    /// before the run starts) look the same row up later by that id.
+    /// </param>
+    private async Task StartRunRecordAsync(string goalDescription, string? modelName, Guid? conversationId, Guid? runId)
     {
         _runId = null;
         if (_runRepository is null)
@@ -1083,6 +1090,8 @@ public sealed class GoalAgentService : IGoalAgentService
             Phase = GoalAgentPhase.GeneratingRequirements.ToString(),
             StartedAt = DateTime.UtcNow
         };
+        if (runId is not null)
+            run.Id = runId.Value;
 
         try
         {
