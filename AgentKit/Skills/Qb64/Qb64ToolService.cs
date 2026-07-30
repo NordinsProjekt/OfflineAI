@@ -131,6 +131,15 @@ public sealed class Qb64ToolService : IQb64ToolService
         if (sourcePath is null)
             return UtilityToolResult.Failure(error!);
 
+        // Cheap, instant structural pre-check before spending a slow compiler invocation. Unlike
+        // the real compiler — which stops at its first error — this reports every structural
+        // problem it can find in one pass, so the LLM doesn't burn one iteration per latent bug.
+        var structuralIssues = await DescribeStructuralIssuesAsync(sourcePath);
+        if (structuralIssues is not null)
+            return UtilityToolResult.Failure(
+                $"⚠ Strukturkontroll (innan kompilering) hittade problem i {Path.GetFileName(sourcePath)} — " +
+                $"rätta ALLA nedan och försök igen:\n{structuralIssues}");
+
         var outputPath = Path.ChangeExtension(sourcePath, ".exe");
 
         // Remove any stale executable from a previous compile so a failed compile can never be
@@ -203,6 +212,26 @@ public sealed class Qb64ToolService : IQb64ToolService
         }
 
         return fullPath;
+    }
+
+    /// <summary>
+    /// Runs <see cref="QBasicStructureLinter"/> over the source file and returns its formatted
+    /// issue list, or <c>null</c> when the file is unreadable (left for the real compiler to
+    /// report) or has no detected structural issues.
+    /// </summary>
+    private static async Task<string?> DescribeStructuralIssuesAsync(string sourcePath)
+    {
+        string source;
+        try
+        {
+            source = await File.ReadAllTextAsync(sourcePath);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        return QBasicStructureLinter.DescribeIssues(source);
     }
 
     /// <summary>

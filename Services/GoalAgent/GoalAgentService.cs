@@ -394,14 +394,18 @@ public sealed class GoalAgentService : IGoalAgentService
             $"Arbete (iteration {CurrentIteration}): {actionable.Count} krav i ett samlat arbetssteg\n" +
             string.Join("\n", actionable.Select(r => $"- {r.Description}")));
 
-        var snapshot = BuildWorkspaceSnapshot(
-            actionable.Select(r => r.Description).Prepend(goalDescription));
+        var referenceTexts = actionable.Select(r => r.Description).Prepend(goalDescription).ToList();
+        var snapshot = BuildWorkspaceSnapshot(referenceTexts);
 
         var result = await _agenticChat.SendWithToolsAsync(
             BuildWorkPrompt(goalDescription, actionable, snapshot),
             sendToLlm,
             cancellationToken,
             onToolStatus);
+
+        var recovered = await TryRecoverUnappliedFileWriteAsync(referenceTexts, result.FinalResponse);
+        if (recovered is not null)
+            result = result with { ToolInvocations = result.ToolInvocations.Append(recovered).ToList() };
 
         LogToolInvocations(result,
             noToolsMessage: "⚠ Inga verktygskommandon kördes under arbetssteget — inga filer kan ha ändrats.");
@@ -413,6 +417,100 @@ public sealed class GoalAgentService : IGoalAgentService
         NotifyChange();
 
         return true;
+    }
+
+    /// <summary>
+    /// Minimum non-blank lines a recovered code block must have before
+    /// <see cref="TryRecoverUnappliedFileWriteAsync"/> treats it as a full file rewrite rather
+    /// than a small inline example quoted in prose.
+    /// </summary>
+    private const int MinRecoveredContentLines = 3;
+
+    /// <summary>
+    /// Recovers the specific failure mode where a work step's final reply contains a complete
+    /// file rewrite (typically a Markdown code fence) but never issued a <c>/fyll</c> or
+    /// <c>/redigera</c> command to apply it — so nothing in the workspace actually changed. A real
+    /// run hit this exactly: the model correctly diagnosed and rewrote a broken file, then
+    /// delivered the fix as plain chat text instead of a tool command, and the iteration cap was
+    /// reached one exchange later with the (still broken) old file untouched.
+    /// <para>
+    /// Only fires when exactly one file referenced by the goal/requirements already exists in the
+    /// workspace — with zero or multiple candidates there is no safe way to guess which file the
+    /// content belongs to, so nothing is written. This mirrors (and reuses) the same file
+    /// reference/extraction machinery as <see cref="BuildWorkspaceSnapshot"/> and the
+    /// <c>/fyll</c> inline-content shortcut in <c>AgenticChatService</c>, just applied
+    /// after the fact to a reply that never named a command at all.
+    /// </para>
+    /// </summary>
+    private async Task<ToolInvocation?> TryRecoverUnappliedFileWriteAsync(
+        IReadOnlyList<string> referenceTexts, string finalResponse)
+    {
+        if (_fileAgent is null)
+            return null;
+
+        if (!_fileAgent.TryExtractFileContent(finalResponse, out var content))
+            return null;
+
+        if (content.Split('\n').Count(l => !string.IsNullOrWhiteSpace(l)) < MinRecoveredContentLines)
+            return null; // too small to confidently treat as a full-file rewrite
+
+        var candidates = GetReferencedExistingFiles(referenceTexts);
+        if (candidates.Count != 1)
+            return null; // ambiguous or no target — guessing wrong would be worse than doing nothing
+
+        var target = candidates[0];
+        await _fileAgent.WriteExtractedContentAsync(target, content);
+
+        return new ToolInvocation(
+            "(räddad filskrivning)",
+            $"✓ Fil sparad: {target} — svaret innehöll ett fullständigt filinnehåll men inget verktygskommando, så det tillämpades automatiskt.");
+    }
+
+    /// <summary>
+    /// Returns the distinct, existing, non-binary workspace filenames mentioned across
+    /// <paramref name="referenceTexts"/> (goal + requirement descriptions) — the same filename
+    /// extraction <see cref="BuildWorkspaceSnapshot"/> uses to decide which files to inline.
+    /// </summary>
+    private IReadOnlyList<string> GetReferencedExistingFiles(IEnumerable<string> referenceTexts)
+    {
+        if (_fileAgent is null)
+            return Array.Empty<string>();
+
+        string[] paths;
+        try
+        {
+            paths = Directory.GetFiles(_fileAgent.BaseDirectory);
+        }
+        catch (Exception)
+        {
+            return Array.Empty<string>();
+        }
+
+        var existing = new HashSet<string>(
+            paths.Select(Path.GetFileName).Where(n => n is not null)!,
+            StringComparer.OrdinalIgnoreCase);
+
+        var referenced = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Each match branches into multiple continue/skip paths below, so this isn't a simple
+        // filter+project that reads better as a LINQ chain (same rationale as FileAgentService's
+        // TryExtractLineEdits, which disables S3267 for the same shape of loop).
+#pragma warning disable S3267
+        foreach (var text in referenceTexts)
+        {
+            foreach (Match match in FilenamePattern.Matches(text ?? string.Empty))
+            {
+                var name = match.Value;
+                if (!existing.Contains(name)) continue;
+                if (name.Equals(TranscriptFileName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (SnapshotSkippedExtensions.Contains(Path.GetExtension(name))) continue;
+                if (seen.Add(name))
+                    referenced.Add(name);
+            }
+        }
+#pragma warning restore S3267
+
+        return referenced;
     }
 
     /// <summary>

@@ -559,6 +559,143 @@ public class GoalAgentServiceTests
         sut.ActivityLog.Should().Contain(line => line.Contains("Inga verktygskommandon kördes"));
     }
 
+    // ── Recovery: full-file content delivered without a tool command ──────
+
+    /// <summary>
+    /// Reproduces the exact tail-end failure of a real run: after diagnosing a broken file, the
+    /// model's final reply contained a complete, correct rewrite — but as a plain Markdown code
+    /// fence instead of a <c>/fyll</c> or <c>/redigera</c> command. Nothing in the workspace
+    /// tools recognises "no command at all", so the fix was silently discarded and the run hit
+    /// its iteration cap one exchange later with the old, still-broken file untouched.
+    /// </summary>
+    private const string FencedGameRewrite =
+        "Har ar den uppdaterade koden:\n```qbasic\nSCREEN 0\nPRINT \"UPPDATERAD\"\nPRINT \"INNEHALL\"\n```\n";
+
+    [Fact]
+    public async Task RunAsync_WorkReplyHasFullFileCodeFenceButNoToolCommand_RecoversAndAppliesIt()
+    {
+        var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(workspaceDir);
+            await File.WriteAllTextAsync(Path.Combine(workspaceDir, "game.bas"), "GAMMALT INNEHALL");
+            var fileAgent = new FileAgentService(workspaceDir);
+            var fake = new FakeAgenticChatService(msg =>
+                IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result(FencedGameRewrite));
+            var sut = new GoalAgentService(fake, fileAgent, maxIterations: 1);
+
+            await sut.RunAsync(
+                "Fixa game.bas",
+                _ => Task.FromResult("KRAV: game.bas innehåller ett fungerande spel."));
+
+            var written = await File.ReadAllTextAsync(Path.Combine(workspaceDir, "game.bas"));
+            written.Should().Contain("UPPDATERAD").And.Contain("INNEHALL").And.NotContain("GAMMALT");
+
+            sut.ActivityLog.Should().Contain(line => line.Contains("räddad filskrivning") && line.Contains("game.bas"));
+            sut.ActivityLog.Should().NotContain(line => line.Contains("Inga verktygskommandon kördes"));
+            sut.Phase.Should().Be(GoalAgentPhase.Completed);
+        }
+        finally
+        {
+            if (Directory.Exists(workspaceDir))
+                Directory.Delete(workspaceDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_WorkReplyHasCodeFence_ButTwoCandidateFilesExist_DoesNotGuessAndSkipsRecovery()
+    {
+        var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(workspaceDir);
+            await File.WriteAllTextAsync(Path.Combine(workspaceDir, "a.bas"), "A");
+            await File.WriteAllTextAsync(Path.Combine(workspaceDir, "b.bas"), "B");
+            var fileAgent = new FileAgentService(workspaceDir);
+            var fake = new FakeAgenticChatService(msg =>
+                IsVerifyPrompt(msg) ? Result("RESULTAT: UNDERKÄNT - fel") : Result(FencedGameRewrite));
+            var sut = new GoalAgentService(fake, fileAgent, maxIterations: 1);
+
+            await sut.RunAsync(
+                "Fixa a.bas och b.bas",
+                _ => Task.FromResult("KRAV: a.bas och b.bas innehåller fungerande kod."));
+
+            (await File.ReadAllTextAsync(Path.Combine(workspaceDir, "a.bas"))).Should().Be("A");
+            (await File.ReadAllTextAsync(Path.Combine(workspaceDir, "b.bas"))).Should().Be("B");
+            sut.ActivityLog.Should().Contain(line => line.Contains("Inga verktygskommandon kördes"));
+        }
+        finally
+        {
+            if (Directory.Exists(workspaceDir))
+                Directory.Delete(workspaceDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_WorkReplyHasTinyInlineSnippet_IsNotTreatedAsFullFileRewrite()
+    {
+        var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(workspaceDir);
+            await File.WriteAllTextAsync(Path.Combine(workspaceDir, "game.bas"), "GAMMALT INNEHALL");
+            var fileAgent = new FileAgentService(workspaceDir);
+            // Only one non-blank line inside the fence — too small to confidently treat as a
+            // full-file rewrite rather than a small illustrative example.
+            var fake = new FakeAgenticChatService(msg =>
+                IsVerifyPrompt(msg) ? Result("RESULTAT: UNDERKÄNT - fel") : Result("Till exempel:\n```\nPRINT 1\n```\n"));
+            var sut = new GoalAgentService(fake, fileAgent, maxIterations: 1);
+
+            await sut.RunAsync(
+                "Fixa game.bas",
+                _ => Task.FromResult("KRAV: game.bas innehåller ett fungerande spel."));
+
+            (await File.ReadAllTextAsync(Path.Combine(workspaceDir, "game.bas"))).Should().Be("GAMMALT INNEHALL");
+            sut.ActivityLog.Should().Contain(line => line.Contains("Inga verktygskommandon kördes"));
+        }
+        finally
+        {
+            if (Directory.Exists(workspaceDir))
+                Directory.Delete(workspaceDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_ToolAlreadyRanButFinalReplyAlsoHasFullFileFence_StillRecoversOnTop()
+    {
+        // Mirrors the real run exactly: a /redigera call already executed earlier in the same
+        // work step, and the model's subsequent final answer (no further command) contained a
+        // complete replacement — which must still be recovered rather than discarded just
+        // because *some* tool already ran this round.
+        var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(workspaceDir);
+            await File.WriteAllTextAsync(Path.Combine(workspaceDir, "game.bas"), "GAMMALT INNEHALL");
+            var fileAgent = new FileAgentService(workspaceDir);
+            var fake = new FakeAgenticChatService(msg =>
+                IsVerifyPrompt(msg)
+                    ? Result("RESULTAT: GODKÄNT")
+                    : new AgenticChatResult(FencedGameRewrite, new[] { new ToolInvocation("/redigera game.bas ...", "✓ Fil redigerad: game.bas (rad 1)") }));
+            var sut = new GoalAgentService(fake, fileAgent, maxIterations: 1);
+
+            await sut.RunAsync(
+                "Fixa game.bas",
+                _ => Task.FromResult("KRAV: game.bas innehåller ett fungerande spel."));
+
+            var written = await File.ReadAllTextAsync(Path.Combine(workspaceDir, "game.bas"));
+            written.Should().Contain("UPPDATERAD");
+
+            sut.ActivityLog.Should().Contain(line => line.Contains("/redigera game.bas"));
+            sut.ActivityLog.Should().Contain(line => line.Contains("räddad filskrivning"));
+        }
+        finally
+        {
+            if (Directory.Exists(workspaceDir))
+                Directory.Delete(workspaceDir, recursive: true);
+        }
+    }
+
     // ── Workspace transcript ──────────────────────────────────────────────
 
     [Fact]

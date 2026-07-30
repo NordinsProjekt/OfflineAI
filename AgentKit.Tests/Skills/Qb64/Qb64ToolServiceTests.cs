@@ -211,6 +211,38 @@ public sealed class Qb64ToolServiceTests : IDisposable
         result.Message.Should().Contain("finnsinte.bas"); // resolved with the .bas default
     }
 
+    // ── Structural pre-check (QBasicStructureLinter) ──────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_StructuralIssue_ReturnsFailureWithoutInvokingCompiler()
+    {
+        // A compiler stub that would otherwise succeed (produces a runnable "exe") proves the
+        // real compiler was never invoked: the structural pre-check must short-circuit first.
+        var path = Path.Combine(_tempDir, "spel.bas");
+        await File.WriteAllTextAsync(path,
+            "FUNCTION MAX(a, b)\nEND FUNCTION\nSCREEN 13\n"); // statement after a procedure
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64-kompilera spel.bas");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("Strukturkontroll");
+        result.Message.Should().Contain("SUB/FUNCTION");
+        File.Exists(Path.Combine(_tempDir, "spel.exe")).Should().BeFalse("the real compiler must never run when the pre-check already found a problem");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NoStructuralIssue_StillInvokesRealCompiler()
+    {
+        await CreateBasFileAsync();
+        var sut = CreateSut(CmdExe, "/c echo Syntax error on line 3 & exit /b 1");
+
+        var result = await sut.ExecuteAsync("/qb64-kompilera spel.bas");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("Syntax error on line 3"); // proves the real compiler ran
+    }
+
     // ── Compile ──────────────────────────────────────────────────────────────
 
     [Fact]
