@@ -30,6 +30,22 @@ public interface IGemma4CliService
     Task<string> ChatAsync(string userMessage, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Text-only chat with a per-call temperature override. Each call spawns its own
+    /// llama-completion process, so sampling can differ per call without restarting anything —
+    /// the goal agent uses this to run verification at a low temperature (deterministic
+    /// verdicts, far fewer empty replies) while work steps keep the model's recommended 1.0.
+    /// <para>
+    /// Default implementation ignores the override, so existing implementations and test fakes
+    /// keep working unchanged; <c>Gemma4CliService</c> overrides it for real.
+    /// </para>
+    /// </summary>
+    Task<string> ChatAsync(
+        string userMessage,
+        double? temperatureOverride,
+        CancellationToken cancellationToken = default)
+        => ChatAsync(userMessage, cancellationToken);
+
+    /// <summary>
     /// Multimodal chat using an image file already on disk.
     /// Passes the path directly to llama-cli via <c>--image &lt;path&gt;</c>.
     /// <para>

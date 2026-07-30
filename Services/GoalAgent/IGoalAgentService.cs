@@ -3,7 +3,7 @@ namespace Services.GoalAgent;
 /// <summary>
 /// TDD-style goal agent for the active workspace: the user describes the desired end result
 /// in free text, the LLM breaks that down into concrete, checkable requirements ("tests"),
-/// the agent does file work through <see cref="Services.AgentTools.IAgenticChatService"/> to
+/// the agent does file work through <see cref="AgentKit.ToolLoop.IAgenticChatService"/> to
 /// satisfy them, verifies each requirement against the workspace files, and repeats the
 /// work → verify cycle until every requirement passes or the iteration cap is reached.
 /// <para>
@@ -66,6 +66,23 @@ public interface IGoalAgentService
     /// Callers should start a fresh conversation per run, or the run's turns will be
     /// indistinguishable from ordinary chat.
     /// </param>
+    /// <param name="verifySendToLlm">
+    /// Optional. Separate LLM delegate used for the verification steps only, so a caller can
+    /// run reviews with different sampling than the creative work steps (verification wants
+    /// deterministic verdicts — empty/garbled replies cluster at high temperature). When null,
+    /// <paramref name="sendToLlm"/> is used for everything.
+    /// </param>
+    /// <param name="maxIterations">
+    /// Optional. Overrides the work → verify iteration cap for this run only. Non-positive or
+    /// null falls back to the cap the service was constructed with (typically
+    /// <c>AppConfiguration.AgentTools.MaxGoalIterations</c>).
+    /// </param>
+    /// <param name="runId">
+    /// Optional. Id to use for the persisted run row instead of a randomly generated one — lets
+    /// a caller that already handed out an id for this run before calling <see cref="RunAsync"/>
+    /// (e.g. a job id an API returned to its caller before the run started) look the same row up
+    /// later by that id. Ignored when the service was constructed without a run repository.
+    /// </param>
     /// <remarks>
     /// When the service was constructed with a file agent, the complete raw transcript of the
     /// run (every prompt, every LLM reply including internal tool-call rounds, executed tool
@@ -80,7 +97,10 @@ public interface IGoalAgentService
         Action<string>? onToolStatus = null,
         CancellationToken cancellationToken = default,
         string? modelName = null,
-        Guid? conversationId = null);
+        Guid? conversationId = null,
+        Func<string, Task<string>>? verifySendToLlm = null,
+        int? maxIterations = null,
+        Guid? runId = null);
 
     /// <summary>
     /// Requests the run stop at the next step boundary (between work items or verifications).

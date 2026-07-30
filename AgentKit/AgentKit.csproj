@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>AgentKit</PackageId>
+    <Version>0.1.0-preview.1</Version>
+    <Authors>Markus Nordin</Authors>
+    <Description>Tool-calling agent loop and skills (file editing, external tool/API calls, QB64 compilation) for building local-LLM-driven coding agents.</Description>
+    <PackageTags>agent;llm;tool-calling;ai</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Not published anywhere yet — nuget.org already has an unrelated package under this
+         exact id, so this PackageId will need to change before any public/private publish.
+         Prerelease because UglyToad.PdfPig's own published version (1.7.0-custom-5) is itself
+         a prerelease — NuGet's NU5104 rejects a stable package depending on one. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
+  </ItemGroup>
+
+</Project>

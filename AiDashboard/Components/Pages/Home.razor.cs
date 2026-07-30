@@ -3,8 +3,8 @@ using Microsoft.AspNetCore.Components.Web;
 using AiDashboard.State;
 using AiDashboard.Models;
 using AiDashboard.Services.Interfaces;
-using Services.FileAgent;
-using Services.AgentTools;
+using AgentKit.Skills.Files;
+using AgentKit.ToolLoop;
 
 namespace AiDashboard.Components.Pages;
 

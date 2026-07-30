@@ -2,7 +2,7 @@ namespace Services.Workspace;
 
 /// <summary>
 /// Describes a single user-defined workspace: a friendly name paired with the absolute
-/// directory that the file agent (<see cref="Services.FileAgent.IFileAgentService"/>) is
+/// directory that the file agent (<see cref="AgentKit.Skills.Files.IFileAgentService"/>) is
 /// confined to while that workspace is active. All file creation, reading, and editing
 /// performed by the LLM — whether via slash commands or Semantic Kernel tool calling — is
 /// restricted to this directory; the LLM can never read or write outside of it.

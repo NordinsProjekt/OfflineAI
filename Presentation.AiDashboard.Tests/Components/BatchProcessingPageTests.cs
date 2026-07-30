@@ -2,7 +2,7 @@ using AiDashboard.Services.Interfaces;
 using AiDashboard.State;
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
-using Services.AgentTools;
+using AgentKit.ToolLoop;
 using Services.BatchJobs;
 using BatchProcessingPage = AiDashboard.Components.Pages.BatchProcessingPage;
 using LlmResponseFormatterService = AiDashboard.Services.LlmResponseFormatterService;

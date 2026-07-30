@@ -1,6 +1,9 @@
+using System.Text;
+using System.Text.RegularExpressions;
+using AgentKit.Skills.Files;
+using AgentKit.Skills.Qb64;
+using AgentKit.ToolLoop;
 using Entities;
-using Services.AgentTools;
-using Services.FileAgent;
 using Services.Repositories;
 
 namespace Services.GoalAgent;
@@ -28,6 +31,47 @@ public sealed class GoalAgentService : IGoalAgentService
     private static readonly string[] RequirementMarkers = { "KRAV:", "REQUIREMENT:" };
 
     /// <summary>
+    /// How many times an empty/unreadable LLM reply is re-sent before giving up. Empty replies
+    /// are intermittent at Gemma's recommended temperature 1.0 — in a real 20-iteration run a
+    /// third of all verifications died on them — so retrying at the call level (instead of only
+    /// at the verify-verdict level) recovers work steps and requirement generation too.
+    /// </summary>
+    private const int MaxEmptyReplyRetries = 2;
+
+    /// <summary>Cap on how much of a single file the workspace snapshot inlines into a prompt.</summary>
+    private const int SnapshotMaxCharsPerFile = 4000;
+
+    /// <summary>Cap on the total file content a single workspace snapshot may inline (the
+    /// deploy machine runs at context size 8192, so prompts must stay lean).</summary>
+    private const int SnapshotMaxTotalChars = 10000;
+
+    /// <summary>
+    /// File extensions the workspace snapshot never inlines as text (binary or bulk formats —
+    /// the reviewer can still reach a PDF via /läs-pdf).
+    /// </summary>
+    private static readonly HashSet<string> SnapshotSkippedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    { ".pdf", ".exe", ".dll", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".zip", ".gguf" };
+
+    /// <summary>Matches a filename-looking token (name.ext) inside free text, so the workspace
+    /// snapshot can inline exactly the files a requirement or goal actually talks about.</summary>
+    private static readonly Regex FilenamePattern = new(@"[\w\-]+\.[A-Za-z0-9]{1,8}", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Matches pure file-existence requirements ("Filen calc.bas finns i arbetsytan." /
+    /// "The file x.txt exists...") so they can be checked directly on disk instead of spending
+    /// an LLM round trip on something a File.Exists answers with certainty.
+    /// </summary>
+    private static readonly Regex FileExistsRequirementPattern = new(
+        @"^\s*(?:\d+[.)]\s*)?(?:filen|the file)\s+(?<name>[\w\-]+\.[A-Za-z0-9]{1,8})\s+(?:finns|exists)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Gemma 4 special-token spellings that occasionally leak into replies (reasoning channel,
+    /// native tool calls). See <see cref="ScrubLeakedModelTokens"/>.
+    /// </summary>
+    private static readonly string[] LeakedTokenOpeners = { "<|channel>", "<|tool_call>", "<|tool_response>", "<|turn>" };
+
+    /// <summary>
     /// Verdict tokens searched fail-first so an ambiguous reply is never green by accident.
     /// Deliberately stem-shaped (UNDERKÄN matches UNDERKÄNT/UNDERKÄND/UNDERKÄNDA...) with
     /// ASCII fallbacks for models that drop diacritics, plus English forms for models that
@@ -40,7 +84,18 @@ public sealed class GoalAgentService : IGoalAgentService
     private readonly IAgenticChatService _agenticChat;
     private readonly IFileAgentService? _fileAgent;
     private readonly IAgentRunRepository? _runRepository;
-    private readonly int _maxIterations;
+    private readonly IQb64ToolService? _qb64Tools;
+
+    /// <summary>Cap used when a run doesn't request its own override — set at construction time,
+    /// typically from <c>AppConfiguration.AgentTools.MaxGoalIterations</c>.</summary>
+    private readonly int _defaultMaxIterations;
+
+    /// <summary>
+    /// The cap actually in effect. Equal to <see cref="_defaultMaxIterations"/> until a run
+    /// overrides it via <see cref="RunAsync"/>'s <c>maxIterations</c> parameter; re-derived at
+    /// the start of every run, so it never mixes one run's override into the next.
+    /// </summary>
+    private int _maxIterations;
     private readonly List<GoalRequirement> _requirements = new();
     private readonly List<string> _activityLog = new();
     private readonly List<AgentRunEventEntity> _pendingEvents = new();
@@ -67,8 +122,8 @@ public sealed class GoalAgentService : IGoalAgentService
     /// workspace) so a run can be debugged after the fact. When null, no transcript is written.
     /// </param>
     /// <param name="maxIterations">
-    /// Cap on work → verify iterations. Non-positive values fall back to
-    /// <see cref="DefaultMaxIterations"/>.
+    /// Default cap on work → verify iterations, used whenever a run doesn't supply its own via
+    /// <see cref="RunAsync"/>. Non-positive values fall back to <see cref="DefaultMaxIterations"/>.
     /// </param>
     /// <param name="runRepository">
     /// Optional. When provided, each run is recorded as history (the run, its requirements, and
@@ -77,17 +132,31 @@ public sealed class GoalAgentService : IGoalAgentService
     /// interrupting it. When null, a run leaves no database trace beyond the question/answer
     /// turns its LLM calls produce.
     /// </param>
+    /// <param name="qb64Tools">
+    /// Optional. When provided and a compiler is configured, the requirement generator is told
+    /// that .bas files can be compiled and run, so "the program compiles" can become a real
+    /// requirement (the tool itself is offered to the LLM by <see cref="IAgenticChatService"/>).
+    /// Without this, a goal like "test that the app works" silently degrades to file-content
+    /// checks only.
+    /// </param>
     public GoalAgentService(
         IAgenticChatService agenticChat,
         IFileAgentService? fileAgent = null,
         int maxIterations = DefaultMaxIterations,
-        IAgentRunRepository? runRepository = null)
+        IAgentRunRepository? runRepository = null,
+        IQb64ToolService? qb64Tools = null)
     {
         _agenticChat = agenticChat ?? throw new ArgumentNullException(nameof(agenticChat));
         _fileAgent = fileAgent;
-        _maxIterations = maxIterations > 0 ? maxIterations : DefaultMaxIterations;
+        _defaultMaxIterations = maxIterations > 0 ? maxIterations : DefaultMaxIterations;
+        _maxIterations = _defaultMaxIterations;
         _runRepository = runRepository;
+        _qb64Tools = qb64Tools;
     }
+
+    /// <summary>True when a QB64 compiler is configured, i.e. the /qb64 commands are actually
+    /// offered to the LLM (an unconfigured tool service exposes no commands).</summary>
+    private bool Qb64Available => _qb64Tools is not null && _qb64Tools.GetToolDescriptions().Count > 0;
 
     /// <inheritdoc/>
     public GoalAgentPhase Phase { get; private set; } = GoalAgentPhase.Idle;
@@ -161,7 +230,10 @@ public sealed class GoalAgentService : IGoalAgentService
         Action<string>? onToolStatus = null,
         CancellationToken cancellationToken = default,
         string? modelName = null,
-        Guid? conversationId = null)
+        Guid? conversationId = null,
+        Func<string, Task<string>>? verifySendToLlm = null,
+        int? maxIterations = null,
+        Guid? runId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(goalDescription);
         ArgumentNullException.ThrowIfNull(sendToLlm);
@@ -171,6 +243,7 @@ public sealed class GoalAgentService : IGoalAgentService
 
         _isRunning = true;
         _stopRequested = false;
+        _maxIterations = maxIterations is > 0 ? maxIterations.Value : _defaultMaxIterations;
         lock (_lock)
         {
             _requirements.Clear();
@@ -181,20 +254,18 @@ public sealed class GoalAgentService : IGoalAgentService
         GoalDescription = goalDescription;
         CurrentIteration = 0;
 
-        await StartRunRecordAsync(goalDescription, modelName, conversationId);
+        await StartRunRecordAsync(goalDescription, modelName, conversationId, runId);
         StartTranscript(goalDescription);
 
         // Every LLM round trip — including the internal tool-call rounds AgenticChatService
         // performs on our behalf — goes through this wrapper so the transcript captures the
         // complete raw conversation. This is the primary debugging aid when a model ignores
-        // the KRAV:/RESULTAT: format or never emits a tool command.
-        Func<string, Task<string>> loggingSendToLlm = async prompt =>
-        {
-            Transcript("PROMPT →", prompt);
-            var reply = await sendToLlm(prompt);
-            Transcript("SVAR ←", reply);
-            return reply;
-        };
+        // the KRAV:/RESULTAT: format or never emits a tool command. The wrapper also scrubs
+        // leaked special tokens and retries empty replies before they reach any parsing.
+        var loggingSendToLlm = WrapWithLoggingAndRetry(sendToLlm);
+        var loggingVerifySendToLlm = verifySendToLlm is null
+            ? loggingSendToLlm
+            : WrapWithLoggingAndRetry(verifySendToLlm);
 
         try
         {
@@ -207,7 +278,7 @@ public sealed class GoalAgentService : IGoalAgentService
                 if (!await WorkOnUnmetRequirementsAsync(goalDescription, loggingSendToLlm, onToolStatus, cancellationToken))
                     return; // stop requested mid-work
 
-                if (!await VerifyAllRequirementsAsync(loggingSendToLlm, onToolStatus, cancellationToken))
+                if (!await VerifyAllRequirementsAsync(loggingVerifySendToLlm, onToolStatus, cancellationToken))
                     return; // stop requested mid-verification
 
                 if (Requirements.All(r => r.Status == RequirementStatus.Passed))
@@ -275,12 +346,15 @@ public sealed class GoalAgentService : IGoalAgentService
 
     /// <summary>
     /// Phase 2a: lets the agent do file work (via the tool-calling chat loop) for every
-    /// requirement that isn't currently passed. A requirement that failed its last
-    /// verification gets the failure motivation included in the prompt — the "failing test
-    /// message" that steers the next attempt — except when the verdict was inconclusive
-    /// (unparseable review reply), in which case the requirement is skipped entirely: there is
-    /// no defect to steer by, and blind edits have wrecked a good file before. Every executed
-    /// tool command is surfaced in the
+    /// requirement that isn't currently passed — in ONE combined work step per iteration, so
+    /// the model sees all remaining requirements at once. The earlier one-step-per-requirement
+    /// design made each step optimize its single requirement in isolation: a real run kept
+    /// replacing the whole file with content that satisfied only the requirement at hand,
+    /// failing all the others again. A requirement that failed its last verification gets the
+    /// failure motivation included in the prompt — the "failing test message" that steers the
+    /// next attempt — except when the verdict was inconclusive (unparseable review reply), in
+    /// which case the requirement is excluded: there is no defect to steer by, and blind edits
+    /// have wrecked a good file before. Every executed tool command is surfaced in the
     /// activity log, and a work step that executed no tool at all logs a warning (nothing can
     /// have changed in the workspace). Returns false if a stop was requested.
     /// </summary>
@@ -292,42 +366,51 @@ public sealed class GoalAgentService : IGoalAgentService
     {
         SetPhase(GoalAgentPhase.Working, $"🔧 Iteration {CurrentIteration}/{_maxIterations}: arbetar med ouppfyllda krav...");
 
-        foreach (var requirement in Requirements.Where(r => r.Status != RequirementStatus.Passed))
+        if (_stopRequested)
         {
-            if (_stopRequested)
-            {
-                SetPhase(GoalAgentPhase.Stopped, "⏹ Stoppad av användaren.");
-                return false;
-            }
-
-            // An inconclusive verdict (the review reply couldn't be parsed) names no concrete
-            // defect, so there is nothing sensible to fix — and blind rework is how a good file
-            // gets ruined. Leave the workspace alone; the next verify pass re-checks the
-            // requirement (with a retry) and real work resumes once a readable verdict exists.
-            if (requirement.VerdictInconclusive)
-            {
-                Log($"⏭ Ingen åtgärd för \"{Shorten(requirement.Description, 60)}\" — förra granskningen gav inget tolkbart utslag, så det finns ingen konkret brist att åtgärda. Kravet granskas om i nästa kontrollpass.");
-                continue;
-            }
-
-            requirement.Status = RequirementStatus.Working;
-            NotifyChange();
-            Transcript("STEG", $"Arbete (iteration {CurrentIteration}): {requirement.Description}");
-
-            var result = await _agenticChat.SendWithToolsAsync(
-                BuildWorkPrompt(goalDescription, requirement),
-                sendToLlm,
-                cancellationToken,
-                onToolStatus);
-
-            LogToolInvocations(result,
-                noToolsMessage: $"⚠ Inga verktygskommandon kördes under arbetet med kravet \"{Shorten(requirement.Description, 60)}\" — inga filer kan ha ändrats.");
-
-            // New work invalidates the old verdict — the upcoming verification pass decides.
-            requirement.Status = RequirementStatus.Unverified;
-            await FlushEventsAsync();
-            NotifyChange();
+            SetPhase(GoalAgentPhase.Stopped, "⏹ Stoppad av användaren.");
+            return false;
         }
+
+        // An inconclusive verdict (the review reply couldn't be parsed) names no concrete
+        // defect, so there is nothing sensible to fix — and blind rework is how a good file
+        // gets ruined. Such requirements are left out of the work step; the next verify pass
+        // re-checks them (with a retry) and real work resumes once a readable verdict exists.
+        var actionable = Requirements
+            .Where(r => r.Status != RequirementStatus.Passed && !r.VerdictInconclusive)
+            .ToList();
+
+        if (actionable.Count == 0)
+        {
+            Log("⏭ Ingen åtgärd i denna iteration — de kvarvarande kraven saknar tolkbara granskningsutslag, så det finns ingen konkret brist att åtgärda. Kraven granskas om i nästa kontrollpass.");
+            return true;
+        }
+
+        foreach (var requirement in actionable)
+            requirement.Status = RequirementStatus.Working;
+        NotifyChange();
+
+        Transcript("STEG",
+            $"Arbete (iteration {CurrentIteration}): {actionable.Count} krav i ett samlat arbetssteg\n" +
+            string.Join("\n", actionable.Select(r => $"- {r.Description}")));
+
+        var snapshot = BuildWorkspaceSnapshot(
+            actionable.Select(r => r.Description).Prepend(goalDescription));
+
+        var result = await _agenticChat.SendWithToolsAsync(
+            BuildWorkPrompt(goalDescription, actionable, snapshot),
+            sendToLlm,
+            cancellationToken,
+            onToolStatus);
+
+        LogToolInvocations(result,
+            noToolsMessage: "⚠ Inga verktygskommandon kördes under arbetssteget — inga filer kan ha ändrats.");
+
+        // New work invalidates the old verdicts — the upcoming verification pass decides.
+        foreach (var requirement in actionable)
+            requirement.Status = RequirementStatus.Unverified;
+        await FlushEventsAsync();
+        NotifyChange();
 
         return true;
     }
@@ -359,12 +442,27 @@ public sealed class GoalAgentService : IGoalAgentService
                 return false;
             }
 
+            // Pure existence requirements ("Filen X finns i arbetsytan") are answered with
+            // certainty by the file system — no LLM round trip, no chance of a garbled verdict.
+            if (TryCheckFileExistenceDirectly(requirement))
+            {
+                await PersistRequirementStatusAsync(requirement);
+                await FlushEventsAsync();
+                NotifyChange();
+                continue;
+            }
+
             requirement.Status = RequirementStatus.Verifying;
             NotifyChange();
             Transcript("STEG", $"Granskning (iteration {CurrentIteration}): {requirement.Description}");
 
+            var verifyPrompt = BuildVerifyPrompt(
+                requirement.Description,
+                BuildWorkspaceSnapshot(new[] { requirement.Description }),
+                Qb64Available);
+
             var result = await _agenticChat.SendWithToolsAsync(
-                BuildVerifyPrompt(requirement.Description),
+                verifyPrompt,
                 sendToLlm,
                 cancellationToken,
                 onToolStatus);
@@ -378,7 +476,7 @@ public sealed class GoalAgentService : IGoalAgentService
                 Transcript("STEG", $"Granskning (iteration {CurrentIteration}, nytt försök): {requirement.Description}");
 
                 result = await _agenticChat.SendWithToolsAsync(
-                    BuildVerifyPrompt(requirement.Description),
+                    verifyPrompt,
                     sendToLlm,
                     cancellationToken,
                     onToolStatus);
@@ -422,6 +520,50 @@ public sealed class GoalAgentService : IGoalAgentService
     }
 
     /// <summary>
+    /// Deterministic pre-check for pure file-existence requirements: when the requirement is of
+    /// the shape "Filen X finns ..." (and carries no content condition) and a file agent is
+    /// available, the verdict is decided directly against the file system and the requirement's
+    /// status/verdict/log/transcript are all updated. Returns true when the requirement was
+    /// handled here (the caller skips the LLM verification), false when it needs a real review.
+    /// </summary>
+    private bool TryCheckFileExistenceDirectly(GoalRequirement requirement)
+    {
+        if (_fileAgent is null || !TryParseFileExistenceRequirement(requirement.Description, out var filename))
+            return false;
+
+        bool exists;
+        try
+        {
+            exists = File.Exists(Path.Combine(_fileAgent.BaseDirectory, filename));
+        }
+        catch (Exception)
+        {
+            return false; // fall back to the LLM review rather than guessing
+        }
+
+        Transcript("STEG", $"Granskning (iteration {CurrentIteration}, direktkontroll): {requirement.Description}");
+
+        if (exists)
+        {
+            requirement.Status = RequirementStatus.Passed;
+            requirement.LastVerdict = null;
+            requirement.VerdictInconclusive = false;
+            Log($"✅ Godkänt (direktkontroll): {requirement.Description}", AgentRunEventTypes.Verdict);
+            Transcript("BEDÖMNING", "GODKÄNT (direktkontroll: filen finns)");
+        }
+        else
+        {
+            requirement.Status = RequirementStatus.Failed;
+            requirement.LastVerdict = $"Filen {filename} saknas i arbetsytan.";
+            requirement.VerdictInconclusive = false;
+            Log($"❌ Underkänt (direktkontroll): {requirement.Description} — filen saknas.", AgentRunEventTypes.Verdict);
+            Transcript("BEDÖMNING", $"UNDERKÄNT — Filen {filename} saknas i arbetsytan (direktkontroll).");
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Surfaces the tool commands a work/verify step actually executed in both the activity
     /// log and the transcript. When the step executed no tool and <paramref name="noToolsMessage"/>
     /// is set, that warning is logged instead — the key signal that the model talked about the
@@ -450,53 +592,108 @@ public sealed class GoalAgentService : IGoalAgentService
 
     // ── Prompts (Swedish, matching the AgenticChatService tool-loop prompts) ──
 
-    private static string BuildRequirementsPrompt(string goalDescription) =>
-        "Du agerar kravanalytiker. Användaren beskriver ett önskat slutresultat för filerna i en arbetsyta.\n" +
-        "Bryt ner beskrivningen i konkreta krav (högst 7 stycken) som vart och ett kan kontrolleras genom att " +
-        "titta på filerna i arbetsytan (t.ex. att en viss fil finns eller att en fil innehåller något specifikt).\n" +
-        // "Spelet får ha enbart text" once became the requirement "innehåller endast textbaserat
-        // innehåll", which a reviewer read as "must not contain code" — an unsatisfiable demand
-        // for a program file. Permissions and wishes must not harden into requirements.
-        "Ta bara med sådant som beskrivningen faktiskt kräver. Det som bara är tillåtet eller önskvärt " +
-        "(uttryck som \"får\", \"kan\", \"gärna\", \"hade varit fint\") ska INTE bli egna krav.\n" +
-        "Svara ENDAST med kraven, ett per rad, där varje rad börjar med exakt \"KRAV:\". Svara på svenska.\n" +
-        "Exempel på svarsformat:\n" +
-        "KRAV: Filen recept.txt finns i arbetsytan.\n" +
-        "KRAV: recept.txt innehåller en ingredienslista.\n\n" +
-        $"Önskat slutresultat:\n{goalDescription}";
-
-    private static string BuildWorkPrompt(string goalDescription, GoalRequirement requirement)
+    private string BuildRequirementsPrompt(string goalDescription)
     {
-        // An inconclusive "verdict" is a parse diagnostic, not a review motivation — feeding it
-        // to the model as if the file were at fault provokes nonsense edits.
-        var feedback = string.IsNullOrWhiteSpace(requirement.LastVerdict) || requirement.VerdictInconclusive
-            ? string.Empty
-            : $"\nVid senaste kontrollen underkändes kravet med motiveringen: \"{requirement.LastVerdict}\". Åtgärda det som saknas.\n";
+        // Without this the "test that the app works" part of a goal silently disappears:
+        // the requirement generator is otherwise told everything must be checkable by
+        // looking at files, which excludes compiling/running by definition.
+        var qb64Hint = Qb64Available
+            ? "Arbetsytan har ett verktyg som kan kompilera och köra QBasic-program (.bas-filer). " +
+              "Om målet gäller ett QBasic-program ska du ta med ett krav om att filen kompilerar utan fel, " +
+              "och — om målet uttryckligen ber om test av programmet — ett krav om att programmet fungerar när det körs.\n"
+            : string.Empty;
 
         return
-            $"Du arbetar med filerna i en arbetsyta. Det övergripande målet är: {goalDescription}\n\n" +
-            $"Ditt uppdrag just nu är att uppfylla exakt detta krav:\n{requirement.Description}\n" +
-            feedback +
-            "\nSå här arbetar du med filen:\n" +
-            "• Finns filen inte ännu? Skapa den med /fyll <filnamn> <beskrivning> — beskriv vad som ska genereras " +
-            "(skriv INTE själva koden i kommandot).\n" +
-            "• Finns filen redan och du ska LÄGGA TILL mer (t.ex. fler rader kod)? Använd /redigera <filnamn> " +
-            "<beskrivning> — det visar dig filen med radnummer och du infogar ny kod med ett <REDIGERA INFOGA_EFTER=sista_radnumret>-block.\n" +
-            "  Använd INTE /fyll för att utöka en befintlig fil — /fyll ERSÄTTER hela filen och raderar allt som redan " +
-            "finns, så filen kan aldrig växa. För att bygga upp en stor fil steg för steg måste du infoga med /redigera.\n" +
-            "\nDu MÅSTE använda ett av verktygskommandona på en egen rad — att bara beskriva innehållet i text ändrar ingenting i arbetsytan.";
+            "Du agerar kravanalytiker. Användaren beskriver ett önskat slutresultat för filerna i en arbetsyta.\n" +
+            "Bryt ner beskrivningen i konkreta krav (högst 5 stycken) som vart och ett kan kontrolleras genom att " +
+            "titta på filerna i arbetsytan eller köra tillgängliga verktyg (t.ex. att en viss fil finns eller att " +
+            "en fil innehåller något specifikt).\n" +
+            // Seven fine-grained requirements over one file made a real run rewrite the same
+            // file over and over, each work step satisfying only its own sliver. Few and broad
+            // beats many and narrow.
+            "Skapa hellre få och breda krav än många smala: dela INTE upp innehållet i en och samma fil i flera " +
+            "krav. Ett krav får gärna räkna upp allt en fil ska innehålla, t.ex. " +
+            "\"KRAV: calc.bas innehåller en komplett miniräknare med addition, subtraktion, multiplikation och division.\"\n" +
+            // "Spelet får ha enbart text" once became the requirement "innehåller endast textbaserat
+            // innehåll", which a reviewer read as "must not contain code" — an unsatisfiable demand
+            // for a program file. Permissions and wishes must not harden into requirements.
+            "Ta bara med sådant som beskrivningen faktiskt kräver. Det som bara är tillåtet eller önskvärt " +
+            "(uttryck som \"får\", \"kan\", \"gärna\", \"hade varit fint\") ska INTE bli egna krav.\n" +
+            qb64Hint +
+            "Svara ENDAST med kraven, ett per rad, där varje rad börjar med exakt \"KRAV:\". Svara på svenska.\n" +
+            "Exempel på svarsformat:\n" +
+            "KRAV: Filen recept.txt finns i arbetsytan.\n" +
+            "KRAV: recept.txt innehåller en ingredienslista.\n\n" +
+            $"Önskat slutresultat:\n{goalDescription}";
     }
 
-    private static string BuildVerifyPrompt(string requirementDescription) =>
-        "Du är en granskare. Kontrollera om följande krav är uppfyllt i arbetsytan:\n" +
-        $"{requirementDescription}\n\n" +
-        "Använd verktygen (t.ex. /lista för att se filerna och /läs <filnamn> <instruktion> för att läsa innehåll) " +
-        "för att kontrollera. Ändra inga filer.\n" +
+    private static string BuildWorkPrompt(
+        string goalDescription,
+        IReadOnlyList<GoalRequirement> requirements,
+        string workspaceSnapshot)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"Du arbetar med filerna i en arbetsyta. Det övergripande målet är: {goalDescription}\n\n");
+        sb.Append("Ditt uppdrag just nu är att uppfylla följande krav. De beskriver samma slutresultat — lös dem tillsammans i samma fil(er) istället för ett i taget:\n");
+
+        for (var i = 0; i < requirements.Count; i++)
+        {
+            sb.Append($"{i + 1}. {requirements[i].Description}\n");
+
+            // An inconclusive "verdict" is a parse diagnostic, not a review motivation — feeding
+            // it to the model as if the file were at fault provokes nonsense edits (such
+            // requirements are already filtered out of the work step, so this is belt-and-braces).
+            if (!string.IsNullOrWhiteSpace(requirements[i].LastVerdict) && !requirements[i].VerdictInconclusive)
+                sb.Append($"   Vid senaste kontrollen underkändes detta krav med motiveringen: \"{requirements[i].LastVerdict}\". Åtgärda det som saknas.\n");
+        }
+
+        if (workspaceSnapshot.Length > 0)
+            sb.Append('\n').Append(workspaceSnapshot);
+
+        sb.Append(
+            "\nSå här arbetar du med filerna:\n" +
+            "• Finns filen inte ännu (se ögonblicksbilden ovan)? Skapa den med /fyll <filnamn> <beskrivning> — " +
+            "beskriv HELA innehållet som ska genereras så att alla kraven ovan täcks på en gång (skriv INTE själva koden i kommandot).\n" +
+            "• Finns filen redan? Använd /redigera <filnamn> <instruktion> för att ändra eller lägga till — det visar dig filen " +
+            "med radnummer och du infogar ny kod med ett <REDIGERA INFOGA_EFTER=sista_radnumret>-block.\n" +
+            "  Använd INTE /fyll på en befintlig fil — /fyll ERSÄTTER hela filen och raderar allt som redan finns. " +
+            "För att bygga vidare på en fil måste du använda /redigera.\n" +
+            "\nDu MÅSTE använda ett av verktygskommandona på en egen rad — att bara beskriva innehållet i text ändrar ingenting i arbetsytan.");
+
+        return sb.ToString();
+    }
+
+    private static string BuildVerifyPrompt(
+        string requirementDescription,
+        string workspaceSnapshot,
+        bool qb64Available)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Du är en granskare. Kontrollera om följande krav är uppfyllt i arbetsytan:\n");
+        sb.Append(requirementDescription).Append("\n\n");
+
+        // Injecting the file content directly removes a whole tool round trip — and with it the
+        // failure mode where the reviewer judges without ever reading the file.
+        if (workspaceSnapshot.Length > 0)
+            sb.Append(workspaceSnapshot).Append('\n');
+
+        sb.Append("Basera din bedömning i första hand på ögonblicksbilden ovan. Använd verktygen bara om " +
+                  "ögonblicksbilden inte räcker (t.ex. /läs <filnamn> <instruktion> för en fil som inte visas där). " +
+                  "Ändra inga filer.\n");
+
+        if (qb64Available)
+            sb.Append("Om kravet gäller att ett QBasic-program kompilerar eller fungerar: kontrollera med " +
+                      "/qb64-kompilera <fil.bas> (enbart kompilering) eller /qb64 <fil.bas> (kompilerar och kör programmet).\n");
+
         // The verdict goes FIRST in the final reply so it survives even if the backend
         // truncates a long answer (low max-tokens settings cut from the end).
-        "När du är klar med kontrollen ska ditt slutgiltiga svar BÖRJA med exakt en rad i något av formaten:\n" +
-        "RESULTAT: GODKÄNT\n" +
-        "RESULTAT: UNDERKÄNT - <kort motivering>";
+        sb.Append(
+            "När du är klar med kontrollen ska ditt slutgiltiga svar BÖRJA med exakt en rad i något av formaten:\n" +
+            "RESULTAT: GODKÄNT\n" +
+            "RESULTAT: UNDERKÄNT - <kort motivering>");
+
+        return sb.ToString();
+    }
 
     // ── Parsing (public static so tests can exercise them directly, mirroring the plain
     //    string-search parsing style used for weak models throughout the codebase) ──
@@ -635,6 +832,177 @@ public sealed class GoalAgentService : IGoalAgentService
         return rest.Trim().TrimStart('-', '–', '—', ':', '.', ',', ' ').Trim();
     }
 
+    /// <summary>
+    /// Parses a pure file-existence requirement ("Filen calc.bas finns i arbetsytan." /
+    /// "The file x.txt exists in the workspace") and extracts the filename. Requirements that
+    /// also mention content ("finns och innehåller...") are rejected — those need a real review.
+    /// Public static so tests can exercise the pattern directly.
+    /// </summary>
+    public static bool TryParseFileExistenceRequirement(string description, out string filename)
+    {
+        filename = string.Empty;
+        if (string.IsNullOrWhiteSpace(description))
+            return false;
+
+        // A content condition anywhere in the text disqualifies the shortcut.
+        if (description.Contains("innehåll", StringComparison.OrdinalIgnoreCase)
+            || description.Contains("contain", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var match = FileExistsRequirementPattern.Match(description);
+        if (!match.Success)
+            return false;
+
+        filename = match.Groups["name"].Value;
+        return true;
+    }
+
+    /// <summary>
+    /// Removes Gemma 4 special tokens that occasionally leak into a reply (the reasoning
+    /// channel and native tool-call tokens): text after a closed reasoning channel is kept,
+    /// while everything from an unclosed opener onward is cut — it is reasoning or tool
+    /// plumbing, never the answer. A reply that consists only of leaked tokens becomes empty,
+    /// which the retry loop in <see cref="WrapWithLoggingAndRetry"/> then treats like any other
+    /// empty reply. The token spellings are Gemma-4-specific, so ordinary answers are untouched.
+    /// Public static so tests can exercise it directly.
+    /// </summary>
+    public static string ScrubLeakedModelTokens(string reply)
+    {
+        if (string.IsNullOrWhiteSpace(reply))
+            return string.Empty;
+
+        var text = reply;
+
+        // A closed reasoning channel: the answer is whatever follows the final close token.
+        const string channelEnd = "<channel|>";
+        var closeIdx = text.LastIndexOf(channelEnd, StringComparison.Ordinal);
+        if (closeIdx >= 0)
+            text = text[(closeIdx + channelEnd.Length)..];
+
+        foreach (var opener in LeakedTokenOpeners)
+        {
+            var openerIdx = text.IndexOf(opener, StringComparison.Ordinal);
+            if (openerIdx >= 0)
+                text = text[..openerIdx];
+        }
+
+        return text.Trim();
+    }
+
+    /// <summary>
+    /// Wraps an LLM call with the run transcript (raw prompt and reply), leaked-token
+    /// scrubbing, and an empty-reply retry: the same prompt is re-sent up to
+    /// <see cref="MaxEmptyReplyRetries"/> times when the scrubbed reply is empty. In a real run
+    /// the iteration cap was reached with the goal actually fulfilled, because the deciding
+    /// verification replies happened to be empty — retrying at the call level catches that for
+    /// every LLM round trip, including the tool-call rounds inside the agentic chat loop.
+    /// </summary>
+    private Func<string, Task<string>> WrapWithLoggingAndRetry(Func<string, Task<string>> sendToLlm) =>
+        async prompt =>
+        {
+            Transcript("PROMPT →", prompt);
+            var reply = await sendToLlm(prompt);
+            Transcript("SVAR ←", reply);
+
+            var cleaned = ScrubLeakedModelTokens(reply);
+            for (var attempt = 1; attempt <= MaxEmptyReplyRetries && cleaned.Length == 0; attempt++)
+            {
+                Log($"🔁 Modellen gav ett tomt eller oläsbart svar — skickar samma prompt igen (försök {attempt + 1}/{MaxEmptyReplyRetries + 1}).");
+                Transcript("STEG", $"Tomt/oläsbart svar — nytt försök {attempt + 1}/{MaxEmptyReplyRetries + 1}");
+
+                reply = await sendToLlm(prompt);
+                Transcript("SVAR ←", reply);
+                cleaned = ScrubLeakedModelTokens(reply);
+            }
+
+            return cleaned;
+        };
+
+    /// <summary>
+    /// Builds a deterministic snapshot of the workspace for prompt injection: the file listing,
+    /// plus the inlined content of every text file whose name appears in
+    /// <paramref name="referenceTexts"/> (the goal and requirement descriptions). This removes
+    /// the /lista and /läs tool round trips in the common case — and with them the failure mode
+    /// where a work step blindly rewrites a file it never read, or a reviewer judges a file it
+    /// never opened. Content is capped per file and in total (the deploy machine runs at
+    /// context size 8192). Returns an empty string when no file agent is available.
+    /// </summary>
+    private string BuildWorkspaceSnapshot(IEnumerable<string> referenceTexts)
+    {
+        if (_fileAgent is null)
+            return string.Empty;
+
+        string baseDirectory;
+        string[] paths;
+        try
+        {
+            baseDirectory = _fileAgent.BaseDirectory;
+            paths = Directory.GetFiles(baseDirectory);
+        }
+        catch (Exception)
+        {
+            return string.Empty; // a broken workspace just means no snapshot — tools still work
+        }
+
+        var names = paths
+            .Select(Path.GetFileName)
+            .Where(n => n is not null)
+            .Select(n => n!)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var sb = new StringBuilder();
+        sb.Append("Ögonblicksbild av arbetsytan (automatiskt inläst — du behöver inte använda /lista eller /läs för det som visas här):\n");
+        sb.Append(names.Count == 0
+            ? "Arbetsytan är tom — inga filer finns ännu.\n"
+            : $"Filer: {string.Join(", ", names)}\n");
+
+        var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var text in referenceTexts)
+        {
+            foreach (Match match in FilenamePattern.Matches(text ?? string.Empty))
+                referenced.Add(match.Value);
+        }
+
+        var remainingBudget = SnapshotMaxTotalChars;
+        foreach (var name in names)
+        {
+            if (!referenced.Contains(name))
+                continue;
+            if (name.Equals(TranscriptFileName, StringComparison.OrdinalIgnoreCase))
+                continue; // the run's own transcript would recursively bloat every prompt
+            if (SnapshotSkippedExtensions.Contains(Path.GetExtension(name)))
+                continue;
+
+            string content;
+            try
+            {
+                content = File.ReadAllText(Path.Combine(baseDirectory, name));
+            }
+            catch (Exception)
+            {
+                continue;
+            }
+
+            var cap = Math.Min(SnapshotMaxCharsPerFile, remainingBudget);
+            if (cap <= 0)
+                break;
+
+            var truncated = content.Length > cap;
+            if (truncated)
+                content = content[..cap];
+            remainingBudget -= content.Length;
+
+            sb.Append($"\n--- Innehåll i {name} ---\n");
+            sb.Append(content.Trim().Length == 0 ? "(filen är tom)\n" : content.TrimEnd() + "\n");
+            if (truncated)
+                sb.Append($"(… avkortat — använd /läs {name} <instruktion> för resten)\n");
+            sb.Append($"--- Slut på {name} ---\n");
+        }
+
+        return sb.ToString();
+    }
+
     private static string Shorten(string text, int maxLength)
     {
         var flattened = text.Replace('\n', ' ').Replace("\r", string.Empty).Trim();
@@ -699,7 +1067,13 @@ public sealed class GoalAgentService : IGoalAgentService
     /// Inserts the run row. On success <see cref="_runId"/> is set, which is what enables all
     /// other recording — so a failure here simply means this run isn't recorded.
     /// </summary>
-    private async Task StartRunRecordAsync(string goalDescription, string? modelName, Guid? conversationId)
+    /// <param name="runId">
+    /// Optional caller-supplied id for the run row (falls back to a new random id via
+    /// <see cref="AgentRunEntity"/>'s default). Lets a caller that already handed out an id for
+    /// this run before <see cref="RunAsync"/> was called (e.g. a job id returned from an API
+    /// before the run starts) look the same row up later by that id.
+    /// </param>
+    private async Task StartRunRecordAsync(string goalDescription, string? modelName, Guid? conversationId, Guid? runId)
     {
         _runId = null;
         if (_runRepository is null)
@@ -716,6 +1090,8 @@ public sealed class GoalAgentService : IGoalAgentService
             Phase = GoalAgentPhase.GeneratingRequirements.ToString(),
             StartedAt = DateTime.UtcNow
         };
+        if (runId is not null)
+            run.Id = runId.Value;
 
         try
         {

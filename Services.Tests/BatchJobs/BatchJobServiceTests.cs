@@ -1,5 +1,5 @@
 using FluentAssertions;
-using Services.AgentTools;
+using AgentKit.ToolLoop;
 using Services.BatchJobs;
 
 namespace Services.Tests.BatchJobs;

@@ -6,6 +6,12 @@
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "AiDashboard/AiDashboard.csproj", "--urls", "http://localhost:5083"],
       "port": 5083
+    },
+    {
+      "name": "AgentKit.Api",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "AgentKit.Api/AgentKit.Api.csproj", "--urls", "http://localhost:5119"],
+      "port": 5119
     }
   ]
 }

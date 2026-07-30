@@ -1,7 +1,7 @@
 using Bunit;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
-using Services.FileAgent;
+using AgentKit.Skills.Files;
 using ChatComposer = AiDashboard.Components.Pages.Components.ChatComposer;
 
 namespace Presentation.AiDashboard.Tests.Components;

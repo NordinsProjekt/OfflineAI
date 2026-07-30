@@ -2,7 +2,7 @@ namespace Services.BatchJobs;
 
 /// <summary>
 /// Queues natural-language batch tasks (e.g. "Read rules.txt and write 10 questions to QA.txt")
-/// and processes them one at a time through <see cref="Services.AgentTools.IAgenticChatService"/>,
+/// and processes them one at a time through <see cref="AgentKit.ToolLoop.IAgenticChatService"/>,
 /// so each job can freely use the existing file-agent tools. Registered as a singleton so the
 /// queue survives page navigation within the running app (but not an app restart).
 /// </summary>

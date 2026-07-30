@@ -5,6 +5,11 @@ using Application.AI.Pooling;
 using Application.AI.Management;
 using Application.AI.Embeddings;
 using Application.AI.Gemma4;
+using AgentKit.Skills.External;
+using AgentKit.Skills.Files;
+using AgentKit.Skills.Qb64;
+using AgentKit.Skills.Utility;
+using AgentKit.ToolLoop;
 using Services.Memory;
 using Services.Interfaces;
 using Services.Repositories;
@@ -14,7 +19,6 @@ using Infrastructure.Data.Dapper;
 using Services.Configuration;
 using Services.Management;
 using Services.Language;
-using Services.FileAgent;
 using Services.QuickAsk;
 using Services.Workspace;
 using Services.BatchJobs;
@@ -98,22 +102,33 @@ public static class Program
 
         // Register the utility tools service for /tid, /datum, and /api <slutpunkt> <instruktion>.
         // API endpoints are resolved only from AppConfiguration.AgentTools.Endpoints — the LLM can
-        // never supply an arbitrary URL.
+        // never supply an arbitrary URL. AgentKit takes plain options plus an HttpClient provider,
+        // so the host maps its configuration here.
         builder.Services.AddHttpClient("AgentApiTools");
-        builder.Services.AddSingleton<IUtilityToolsService, UtilityToolsService>();
+        builder.Services.AddSingleton<IUtilityToolsService>(sp =>
+        {
+            var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
+            return new UtilityToolsService(
+                MapUtilityToolsOptions(appConfig.AgentTools),
+                () => httpClientFactory.CreateClient("AgentApiTools"));
+        });
 
         // Register the external tools service: operator-configured local executables the LLM
         // may run by slash command. Tools are resolved only from
         // AppConfiguration.AgentTools.ExternalTools (appsettings/user secrets) — the LLM picks
         // a tool by name and supplies argument text; it can never specify a path.
-        builder.Services.AddSingleton<IExternalToolsService, ExternalToolsService>();
+        builder.Services.AddSingleton<IExternalToolsService>(_ =>
+            new ExternalToolsService(MapExternalToolOptions(appConfig.AgentTools.ExternalTools)));
 
         // Register the QB64 compiler tool: lets the LLM compile and run QBasic (.bas) files from
         // the active workspace via /qb64 and /qb64-kompilera, feeding compiler errors and program
         // output back into the tool-call loop so the model can fix its own code. The compiler
         // path comes only from AppConfiguration.AgentTools.Qb64 (empty = the commands are never
         // offered); the LLM supplies a bare filename that is confined to the active workspace.
-        builder.Services.AddSingleton<IQb64ToolService, Qb64ToolService>();
+        builder.Services.AddSingleton<IQb64ToolService>(sp =>
+            new Qb64ToolService(
+                MapQb64Options(appConfig.AgentTools.Qb64),
+                sp.GetRequiredService<IFileAgentService>()));
 
         // Register the lightweight, text-based agentic chat service used by QuickAsk and the
         // Dashboard chat: tells the LLM about the IFileAgentService/IUtilityToolsService slash
@@ -147,7 +162,11 @@ public static class Program
                 sp.GetRequiredService<IAgenticChatService>(),
                 sp.GetRequiredService<IFileAgentService>(),
                 appConfig.AgentTools.MaxGoalIterations,
-                sp.GetService<IAgentRunRepository>()));
+                sp.GetService<IAgentRunRepository>(),
+                // Lets the requirement generator emit "compiles via /qb64"-style requirements
+                // when a compiler is configured — without it, "test that the app works" in a
+                // goal silently degrades to file-content checks.
+                sp.GetRequiredService<IQb64ToolService>()));
 
         // Register Gemma 4 CLI service. Prefer an explicit Gemma4Cli section, but when its
         // ModelPath is empty fall back to the main Llm model *if that model is itself a Gemma
@@ -679,4 +698,46 @@ public static class Program
 
         app.Run();
     }
+
+    /// <summary>
+    /// Maps the host's <see cref="AgentToolsSettings"/> endpoint whitelist to AgentKit's
+    /// <see cref="UtilityToolsOptions"/> — AgentKit is configuration-system agnostic and only
+    /// takes plain options objects.
+    /// </summary>
+    private static UtilityToolsOptions MapUtilityToolsOptions(AgentToolsSettings agentTools) => new()
+    {
+        Endpoints = agentTools.Endpoints.Select(e => new ApiEndpointOptions
+        {
+            Name = e.Name,
+            Description = e.Description,
+            Url = e.Url,
+            Method = e.Method,
+            Headers = new Dictionary<string, string>(e.Headers),
+            TimeoutMs = e.TimeoutMs,
+            MaxResponseLength = e.MaxResponseLength
+        }).ToList()
+    };
+
+    /// <summary>Maps the host's QB64 settings to AgentKit's <see cref="Qb64Options"/>.</summary>
+    private static Qb64Options MapQb64Options(Qb64Settings settings) => new()
+    {
+        CompilerPath = settings.CompilerPath,
+        CompilerArguments = settings.CompilerArguments,
+        CompileTimeoutMs = settings.CompileTimeoutMs,
+        RunTimeoutMs = settings.RunTimeoutMs,
+        MaxOutputLength = settings.MaxOutputLength
+    };
+
+    /// <summary>Maps the host's external-tool whitelist to AgentKit's <see cref="ExternalToolOptions"/> list.</summary>
+    private static List<ExternalToolOptions> MapExternalToolOptions(IEnumerable<ExternalToolSettings> tools) =>
+        tools.Select(t => new ExternalToolOptions
+        {
+            Command = t.Command,
+            ExecutablePath = t.ExecutablePath,
+            Description = t.Description,
+            Usage = t.Usage,
+            FixedArguments = t.FixedArguments,
+            TimeoutMs = t.TimeoutMs,
+            MaxOutputLength = t.MaxOutputLength
+        }).ToList();
 }

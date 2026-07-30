@@ -49,9 +49,28 @@ public class AppConfiguration
 
     /// <summary>
     /// Named HTTP API endpoints the agent may call as a tool (see
-    /// <c>Services.AgentTools.ApiCallTool</c>), plus the agentic tool-calling loop settings.
+    /// <c>AgentKit.Skills.Utility.UtilityToolsService</c>), plus the agentic tool-calling loop settings.
     /// </summary>
     public AgentToolsSettings AgentTools { get; set; } = new();
+
+    /// <summary>
+    /// Settings for headless goal-agent jobs (see <c>AgentKit.Api</c>'s job API).
+    /// </summary>
+    public JobsSettings Jobs { get; set; } = new();
+}
+
+/// <summary>
+/// Settings for headless goal-agent jobs run through an HTTP job API rather than the interactive
+/// dashboard. Each job gets its own subdirectory under <see cref="RootFolder"/> so concurrent
+/// jobs never share a workspace.
+/// </summary>
+public class JobsSettings
+{
+    /// <summary>
+    /// Root directory under which each job gets its own <c>{jobId}</c> subdirectory as its
+    /// workspace. Defaults to Documents\OfflineAI\AgentJobs when left empty.
+    /// </summary>
+    public string RootFolder { get; set; } = string.Empty;
 }
 
 public class AgentToolsSettings
@@ -88,7 +107,7 @@ public class AgentToolsSettings
     public List<ExternalToolSettings> ExternalTools { get; set; } = new();
 
     /// <summary>
-    /// QB64 (QBasic) compiler integration (see <c>Services.AgentTools.Qb64ToolService</c>):
+    /// QB64 (QBasic) compiler integration (see <c>AgentKit.Skills.Qb64.Qb64ToolService</c>):
     /// lets the LLM compile and run .bas files from the active workspace via
     /// <c>/qb64</c> and <c>/qb64-kompilera</c>. Leave <see cref="Qb64Settings.CompilerPath"/>
     /// empty to disable.
@@ -97,7 +116,7 @@ public class AgentToolsSettings
 }
 
 /// <summary>
-/// Settings for the QB64 compiler tool (<c>Services.AgentTools.Qb64ToolService</c>). The LLM
+/// Settings for the QB64 compiler tool (<c>AgentKit.Skills.Qb64.Qb64ToolService</c>). The LLM
 /// only ever supplies a bare .bas filename that is resolved inside the active workspace — the
 /// compiler path and argument shape come exclusively from this configuration.
 /// </summary>
