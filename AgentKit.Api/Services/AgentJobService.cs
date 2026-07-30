@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO.Compression;
 using AgentKit.Api.Models;
 using AgentKit.Skills.External;
 using AgentKit.Skills.Files;
@@ -16,13 +17,22 @@ namespace AgentKit.Api.Services;
 /// <inheritdoc/>
 public sealed class AgentJobService : IAgentJobService
 {
-    /// <summary>Tracks a live job: the running agent plus the workspace directory it owns.</summary>
-    private sealed record JobEntry(GoalAgentService Agent, string WorkspacePath);
+    /// <summary>Marks a job tracked by this process: either running here, or forwarded to a peer.</summary>
+    private interface IJobEntry
+    {
+    }
 
-    private readonly ConcurrentDictionary<Guid, JobEntry> _jobs = new();
+    /// <summary>A job running locally: the agent plus the workspace directory it owns.</summary>
+    private sealed record LocalJobEntry(GoalAgentService Agent, string WorkspacePath) : IJobEntry;
+
+    /// <summary>A job forwarded to a peer node — proxied through <see cref="IClusterPeerClient"/> for everything.</summary>
+    private sealed record RemoteJobEntry(ClusterPeerSettings Peer, Guid PeerJobId) : IJobEntry;
+
+    private readonly ConcurrentDictionary<Guid, IJobEntry> _jobs = new();
 
     private readonly IModelInstancePool _modelPool;
     private readonly AppConfiguration _appConfig;
+    private readonly IClusterPeerClient _clusterPeerClient;
     private readonly IAgentRunRepository? _runRepository;
     private readonly IUtilityToolsService? _utilityTools;
     private readonly IExternalToolsService? _externalTools;
@@ -32,6 +42,7 @@ public sealed class AgentJobService : IAgentJobService
     public AgentJobService(
         IModelInstancePool modelPool,
         AppConfiguration appConfig,
+        IClusterPeerClient clusterPeerClient,
         ILogger<AgentJobService> logger,
         IAgentRunRepository? runRepository = null,
         IUtilityToolsService? utilityTools = null,
@@ -39,6 +50,7 @@ public sealed class AgentJobService : IAgentJobService
     {
         _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
         _appConfig = appConfig ?? throw new ArgumentNullException(nameof(appConfig));
+        _clusterPeerClient = clusterPeerClient ?? throw new ArgumentNullException(nameof(clusterPeerClient));
         _logger = logger;
         _runRepository = runRepository;
         _utilityTools = utilityTools;
@@ -52,10 +64,43 @@ public sealed class AgentJobService : IAgentJobService
     }
 
     /// <inheritdoc/>
-    public Guid StartJob(string goalDescription, int? maxIterations)
+    public async Task<Guid> StartJobAsync(string goalDescription, int? maxIterations, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(goalDescription);
 
+        var peers = _appConfig.Cluster.Peers;
+
+        // Skip every cluster check entirely when there's nothing to forward to, or when this
+        // node still has room — a single-node deployment (no peers configured) pays zero
+        // overhead beyond this one property read.
+        if (peers.Count > 0 && _modelPool.AvailableCount == 0)
+        {
+            foreach (var peer in peers)
+            {
+                var capacity = await _clusterPeerClient.GetAvailableCapacityAsync(peer, cancellationToken);
+                if (capacity is null or <= 0)
+                    continue;
+
+                var peerJobId = await _clusterPeerClient.ForwardJobAsync(peer, goalDescription, maxIterations, cancellationToken);
+                if (peerJobId is null)
+                    continue;
+
+                var forwardedJobId = Guid.NewGuid();
+                _jobs[forwardedJobId] = new RemoteJobEntry(peer, peerJobId.Value);
+                _logger.LogInformation(
+                    "Forwarded job {JobId} to peer {Peer} (peer's own id {PeerJobId})",
+                    forwardedJobId, peer.Name, peerJobId);
+                return forwardedJobId;
+            }
+
+            _logger.LogInformation("Local capacity saturated and no peer had room — running job locally, queued behind the local pool.");
+        }
+
+        return StartLocalJob(goalDescription, maxIterations);
+    }
+
+    private Guid StartLocalJob(string goalDescription, int? maxIterations)
+    {
         var jobId = Guid.NewGuid();
         var workspacePath = Path.Combine(_jobsRootFolder, jobId.ToString());
 
@@ -76,7 +121,7 @@ public sealed class AgentJobService : IAgentJobService
             maxIterations ?? _appConfig.AgentTools.MaxGoalIterations,
             _runRepository);
 
-        _jobs[jobId] = new JobEntry(goalAgent, workspacePath);
+        _jobs[jobId] = new LocalJobEntry(goalAgent, workspacePath);
 
         // Fire-and-forget from this singleton (not from the controller) so the run outlives the
         // HTTP request that started it — same pattern the dashboard uses from a button click.
@@ -126,26 +171,39 @@ public sealed class AgentJobService : IAgentJobService
     }
 
     /// <inheritdoc/>
-    public AgentJobStatus? GetStatus(Guid jobId)
+    public async Task<AgentJobStatus?> GetStatusAsync(Guid jobId, CancellationToken cancellationToken)
     {
-        if (!_jobs.TryGetValue(jobId, out var entry))
-            return null;
+        if (_jobs.TryGetValue(jobId, out var entry))
+        {
+            return entry switch
+            {
+                LocalJobEntry local => BuildLocalStatus(jobId, local.Agent),
+                RemoteJobEntry remote => await _clusterPeerClient.GetRemoteStatusAsync(remote.Peer, remote.PeerJobId, cancellationToken),
+                _ => null
+            };
+        }
 
-        var agent = entry.Agent;
-        return new AgentJobStatus(
-            jobId,
-            agent.Phase.ToString(),
-            agent.GoalDescription ?? string.Empty,
-            agent.CurrentIteration,
-            agent.MaxIterations,
-            agent.Requirements
-                .Select(r => new AgentJobRequirementStatus(r.Description, r.Status.ToString(), r.LastVerdict))
-                .ToList(),
-            agent.ActivityLog.ToList());
+        // Not tracked in this process — either an unknown id, or a locally-run job whose
+        // in-memory state was lost (e.g. this process restarted). Falls back to this node's own
+        // persisted history, which works for a job that ran HERE (same runId bridges the two —
+        // see GoalAgentService.RunAsync's runId parameter). A job this node had FORWARDED to a
+        // peer before restarting can't be recovered this way: the forwarding relationship itself
+        // only ever existed in memory. Accepted Phase 2 limitation, not solved here.
+        return await GetPersistedStatusAsync(jobId);
     }
 
-    /// <inheritdoc/>
-    public async Task<AgentJobStatus?> GetPersistedStatusAsync(Guid jobId)
+    private static AgentJobStatus BuildLocalStatus(Guid jobId, GoalAgentService agent) => new(
+        jobId,
+        agent.Phase.ToString(),
+        agent.GoalDescription ?? string.Empty,
+        agent.CurrentIteration,
+        agent.MaxIterations,
+        agent.Requirements
+            .Select(r => new AgentJobRequirementStatus(r.Description, r.Status.ToString(), r.LastVerdict))
+            .ToList(),
+        agent.ActivityLog.ToList());
+
+    private async Task<AgentJobStatus?> GetPersistedStatusAsync(Guid jobId)
     {
         if (_runRepository is null)
             return null;
@@ -171,21 +229,62 @@ public sealed class AgentJobService : IAgentJobService
     }
 
     /// <inheritdoc/>
-    public string? GetWorkspacePath(Guid jobId) =>
-        _jobs.TryGetValue(jobId, out var entry) ? entry.WorkspacePath : null;
+    public async Task<Stream?> GetResultZipAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        if (!_jobs.TryGetValue(jobId, out var entry))
+            return null;
+
+        return entry switch
+        {
+            LocalJobEntry local => BuildLocalResultZip(local.WorkspacePath),
+            RemoteJobEntry remote => await _clusterPeerClient.GetRemoteResultZipAsync(remote.Peer, remote.PeerJobId, cancellationToken),
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Built in memory rather than to a temp file — jobs are expected to produce at most a
+    /// handful of MB of text/code, well within what's reasonable to hold in memory for the
+    /// length of one response.
+    /// </summary>
+    private static Stream? BuildLocalResultZip(string workspacePath)
+    {
+        if (!Directory.Exists(workspacePath))
+            return null;
+
+        var buffer = new MemoryStream();
+        using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var file in Directory.GetFiles(workspacePath, "*", SearchOption.AllDirectories))
+            {
+                var entryName = Path.GetRelativePath(workspacePath, file);
+                zip.CreateEntryFromFile(file, entryName);
+            }
+        }
+        buffer.Position = 0;
+        return buffer;
+    }
 
     /// <inheritdoc/>
-    public bool RequestStop(Guid jobId)
+    public async Task<bool> RequestStopAsync(Guid jobId, CancellationToken cancellationToken)
     {
         if (!_jobs.TryGetValue(jobId, out var entry))
             return false;
 
-        entry.Agent.RequestStop();
-        return true;
+        switch (entry)
+        {
+            case LocalJobEntry local:
+                local.Agent.RequestStop();
+                return true;
+            case RemoteJobEntry remote:
+                return await _clusterPeerClient.RequestRemoteStopAsync(remote.Peer, remote.PeerJobId, cancellationToken);
+            default:
+                return false;
+        }
     }
 
     /// <inheritdoc/>
-    public async Task<IReadOnlyList<AgentJobSummary>> GetRecentJobsAsync(int count)
+    public async Task<IReadOnlyList<AgentJobSummary>> GetRecentJobsAsync(int count, CancellationToken cancellationToken)
     {
         if (_runRepository is null)
             return Array.Empty<AgentJobSummary>();

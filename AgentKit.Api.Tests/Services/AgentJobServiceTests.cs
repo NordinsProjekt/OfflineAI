@@ -1,3 +1,4 @@
+using AgentKit.Api.Models;
 using AgentKit.Api.Services;
 using Application.AI.Pooling;
 using Entities;
@@ -9,94 +10,198 @@ using Services.Repositories;
 namespace AgentKit.Api.Tests.Services;
 
 /// <summary>
-/// Unit tests for <see cref="AgentJobService"/>. Deliberately does NOT exercise
-/// <see cref="AgentJobService.StartJob"/>'s success path: that kicks off a real background run
-/// against the real <see cref="IModelInstancePool"/>/LLM backend, which must not happen in
-/// automated tests (see CLAUDE.md / project constraint: no real LLM calls). The goal-agent loop
-/// itself is already covered by <c>Services.Tests/GoalAgent/GoalAgentServiceTests.cs</c> with a
-/// fake LLM delegate — this class only tests the job-service plumbing around it: unknown-job
-/// handling, and the DB-backed status/summary mapping, none of which touch the LLM.
+/// Unit tests for <see cref="AgentJobService"/>. Deliberately does NOT exercise a job's actual
+/// execution: that kicks off a real background run against the real <see cref="IModelInstancePool"/>
+/// /LLM backend, which must not happen in automated tests (see CLAUDE.md / project constraint: no
+/// real LLM calls). The goal-agent loop itself is already covered by
+/// <c>Services.Tests/GoalAgent/GoalAgentServiceTests.cs</c> with a fake LLM delegate. This class
+/// covers everything AROUND that: unknown-job handling, DB-backed status/summary mapping, the
+/// local-vs-forward-to-peer routing decision (via a mocked <see cref="IClusterPeerClient"/>, so no
+/// real network call happens either), and proxying for a job tracked as remote.
 /// </summary>
-public class AgentJobServiceTests
+public sealed class AgentJobServiceTests : IDisposable
 {
     private readonly Mock<IModelInstancePool> _mockPool = new();
+    private readonly Mock<IClusterPeerClient> _mockPeerClient = new();
     private readonly AppConfiguration _appConfig = new();
+    private readonly List<string> _tempDirs = new();
+
+    public void Dispose()
+    {
+        foreach (var dir in _tempDirs)
+        {
+            if (Directory.Exists(dir))
+                Directory.Delete(dir, recursive: true);
+        }
+    }
 
     private AgentJobService CreateSut(IAgentRunRepository? repository = null) =>
-        new(_mockPool.Object, _appConfig, new Mock<ILogger<AgentJobService>>().Object, repository);
+        new(_mockPool.Object, _appConfig, _mockPeerClient.Object, new Mock<ILogger<AgentJobService>>().Object, repository);
+
+    private static ClusterPeerSettings MakePeer(string name) => new() { Name = name, BaseUrl = $"https://{name}:7016", ApiKey = "key" };
 
     // ── Constructor ─────────────────────────────────────────────────────
 
     [Fact]
     public void Constructor_NullModelPool_ThrowsArgumentNullException()
     {
-        var act = () => new AgentJobService(null!, _appConfig, new Mock<ILogger<AgentJobService>>().Object);
+        var act = () => new AgentJobService(null!, _appConfig, _mockPeerClient.Object, new Mock<ILogger<AgentJobService>>().Object);
         Assert.Throws<ArgumentNullException>(act);
     }
 
     [Fact]
     public void Constructor_NullAppConfig_ThrowsArgumentNullException()
     {
-        var act = () => new AgentJobService(_mockPool.Object, null!, new Mock<ILogger<AgentJobService>>().Object);
+        var act = () => new AgentJobService(_mockPool.Object, null!, _mockPeerClient.Object, new Mock<ILogger<AgentJobService>>().Object);
         Assert.Throws<ArgumentNullException>(act);
     }
 
-    // ── StartJob input validation (fires before anything touches the LLM) ──
+    [Fact]
+    public void Constructor_NullClusterPeerClient_ThrowsArgumentNullException()
+    {
+        var act = () => new AgentJobService(_mockPool.Object, _appConfig, null!, new Mock<ILogger<AgentJobService>>().Object);
+        Assert.Throws<ArgumentNullException>(act);
+    }
+
+    // ── StartJobAsync input validation (fires before anything touches the LLM or a peer) ──
 
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
-    public void StartJob_EmptyGoalDescription_ThrowsWithoutStartingAnything(string goalDescription)
+    public async Task StartJobAsync_EmptyGoalDescription_ThrowsWithoutStartingAnything(string goalDescription)
     {
         var sut = CreateSut();
-        Action act = () => sut.StartJob(goalDescription, null);
-        Assert.Throws<ArgumentException>(act);
+        await Assert.ThrowsAsync<ArgumentException>(() => sut.StartJobAsync(goalDescription, null, CancellationToken.None));
+        _mockPeerClient.Verify(c => c.GetAvailableCapacityAsync(It.IsAny<ClusterPeerSettings>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // ── Unknown-job behavior (no job was ever started, so this never touches the LLM) ──
+    // ── StartJobAsync routing decision ──────────────────────────────────
 
     [Fact]
-    public void GetStatus_UnknownJob_ReturnsNull()
+    public async Task StartJobAsync_NoPeersConfigured_NeverTouchesPeerClient()
     {
+        _mockPool.Setup(p => p.AvailableCount).Returns(0);
         var sut = CreateSut();
-        Assert.Null(sut.GetStatus(Guid.NewGuid()));
-    }
 
-    [Fact]
-    public void GetWorkspacePath_UnknownJob_ReturnsNull()
-    {
-        var sut = CreateSut();
-        Assert.Null(sut.GetWorkspacePath(Guid.NewGuid()));
+        await sut.StartJobAsync("Mål", null, CancellationToken.None);
+
+        _mockPeerClient.Verify(c => c.GetAvailableCapacityAsync(It.IsAny<ClusterPeerSettings>(), It.IsAny<CancellationToken>()), Times.Never);
+        _mockPeerClient.Verify(c => c.ForwardJobAsync(It.IsAny<ClusterPeerSettings>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public void RequestStop_UnknownJob_ReturnsFalse()
+    public async Task StartJobAsync_LocalHasRoom_NeverChecksPeersEvenIfConfigured()
     {
+        _appConfig.Cluster.Peers.Add(MakePeer("peer1"));
+        _mockPool.Setup(p => p.AvailableCount).Returns(2);
         var sut = CreateSut();
-        Assert.False(sut.RequestStop(Guid.NewGuid()));
+
+        await sut.StartJobAsync("Mål", null, CancellationToken.None);
+
+        _mockPeerClient.Verify(c => c.GetAvailableCapacityAsync(It.IsAny<ClusterPeerSettings>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // ── No repository configured ─────────────────────────────────────────
+    [Fact]
+    public async Task StartJobAsync_LocalSaturatedAndPeerHasCapacity_ForwardsToThatPeer()
+    {
+        var peer = MakePeer("peer1");
+        _appConfig.Cluster.Peers.Add(peer);
+        _mockPool.Setup(p => p.AvailableCount).Returns(0);
+        _mockPeerClient.Setup(c => c.GetAvailableCapacityAsync(peer, It.IsAny<CancellationToken>())).ReturnsAsync(3);
+        var forwardedPeerJobId = Guid.NewGuid();
+        _mockPeerClient
+            .Setup(c => c.ForwardJobAsync(peer, "Mål", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(forwardedPeerJobId);
+        var sut = CreateSut();
+
+        var jobId = await sut.StartJobAsync("Mål", null, CancellationToken.None);
+
+        _mockPeerClient.Verify(c => c.ForwardJobAsync(peer, "Mål", null, It.IsAny<CancellationToken>()), Times.Once);
+
+        // The job is now tracked as remote — GetStatusAsync must proxy to that same peer/id.
+        var remoteStatus = new AgentJobStatus(forwardedPeerJobId, "Working", "Mål", 1, 20, new List<AgentJobRequirementStatus>(), new List<string>());
+        _mockPeerClient.Setup(c => c.GetRemoteStatusAsync(peer, forwardedPeerJobId, It.IsAny<CancellationToken>())).ReturnsAsync(remoteStatus);
+
+        var status = await sut.GetStatusAsync(jobId, CancellationToken.None);
+        Assert.Same(remoteStatus, status);
+    }
 
     [Fact]
-    public async Task GetPersistedStatusAsync_NoRepositoryConfigured_ReturnsNull()
+    public async Task StartJobAsync_FirstPeerHasNoCapacity_TriesSecondPeer()
     {
-        var sut = CreateSut(repository: null);
-        Assert.Null(await sut.GetPersistedStatusAsync(Guid.NewGuid()));
+        var peer1 = MakePeer("peer1");
+        var peer2 = MakePeer("peer2");
+        _appConfig.Cluster.Peers.Add(peer1);
+        _appConfig.Cluster.Peers.Add(peer2);
+        _mockPool.Setup(p => p.AvailableCount).Returns(0);
+        _mockPeerClient.Setup(c => c.GetAvailableCapacityAsync(peer1, It.IsAny<CancellationToken>())).ReturnsAsync(0);
+        _mockPeerClient.Setup(c => c.GetAvailableCapacityAsync(peer2, It.IsAny<CancellationToken>())).ReturnsAsync(1);
+        _mockPeerClient
+            .Setup(c => c.ForwardJobAsync(peer2, It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+        var sut = CreateSut();
+
+        await sut.StartJobAsync("Mål", null, CancellationToken.None);
+
+        _mockPeerClient.Verify(c => c.ForwardJobAsync(peer1, It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _mockPeerClient.Verify(c => c.ForwardJobAsync(peer2, It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task StartJobAsync_EveryPeerUnreachableOrFull_FallsBackToLocalWithoutThrowing()
+    {
+        var peer1 = MakePeer("peer1");
+        var peer2 = MakePeer("peer2");
+        _appConfig.Cluster.Peers.Add(peer1);
+        _appConfig.Cluster.Peers.Add(peer2);
+        _mockPool.Setup(p => p.AvailableCount).Returns(0);
+        _mockPeerClient.Setup(c => c.GetAvailableCapacityAsync(peer1, It.IsAny<CancellationToken>())).ReturnsAsync(0);
+        _mockPeerClient.Setup(c => c.GetAvailableCapacityAsync(peer2, It.IsAny<CancellationToken>())).ReturnsAsync((int?)null); // unreachable
+        var sut = CreateSut();
+
+        // Must complete without throwing and without ever forwarding — falls back to a local
+        // (queued) run, exactly like Phase 1's only behavior.
+        var jobId = await sut.StartJobAsync("Mål", null, CancellationToken.None);
+
+        Assert.NotEqual(Guid.Empty, jobId);
+        _mockPeerClient.Verify(c => c.ForwardJobAsync(It.IsAny<ClusterPeerSettings>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── Unknown-job behavior (no job was ever started, so this never touches the LLM or a peer) ──
+
+    [Fact]
+    public async Task GetStatusAsync_UnknownJobAndNoRepository_ReturnsNull()
+    {
+        var sut = CreateSut();
+        Assert.Null(await sut.GetStatusAsync(Guid.NewGuid(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetResultZipAsync_UnknownJob_ReturnsNull()
+    {
+        var sut = CreateSut();
+        Assert.Null(await sut.GetResultZipAsync(Guid.NewGuid(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RequestStopAsync_UnknownJob_ReturnsFalse()
+    {
+        var sut = CreateSut();
+        Assert.False(await sut.RequestStopAsync(Guid.NewGuid(), CancellationToken.None));
     }
 
     [Fact]
     public async Task GetRecentJobsAsync_NoRepositoryConfigured_ReturnsEmpty()
     {
         var sut = CreateSut(repository: null);
-        var jobs = await sut.GetRecentJobsAsync(25);
+        var jobs = await sut.GetRecentJobsAsync(25, CancellationToken.None);
         Assert.Empty(jobs);
     }
 
-    // ── Persisted status / recent-jobs mapping (fake repository, no LLM involved) ──
+    // ── Persisted status / recent-jobs mapping (fake repository, no LLM or peer involved) ──
 
     [Fact]
-    public async Task GetPersistedStatusAsync_ExistingRun_MapsEntityFieldsToStatus()
+    public async Task GetStatusAsync_UnknownToProcessButPersisted_FallsBackToDatabase()
     {
         var runId = Guid.NewGuid();
         var repository = new FakeAgentRunRepository();
@@ -120,7 +225,7 @@ public class AgentJobServiceTests
         };
         var sut = CreateSut(repository);
 
-        var status = await sut.GetPersistedStatusAsync(runId);
+        var status = await sut.GetStatusAsync(runId, CancellationToken.None);
 
         Assert.NotNull(status);
         Assert.Equal("Skapa ett pannkaksrecept", status!.GoalDescription);
@@ -131,13 +236,6 @@ public class AgentJobServiceTests
         Assert.Equal(new[] { "krav A", "krav B" }, status.Requirements.Select(r => r.Description));
         Assert.Equal("saknas", status.Requirements[0].LastVerdict);
         Assert.Equal(new[] { "först", "sedan" }, status.ActivityLog);
-    }
-
-    [Fact]
-    public async Task GetPersistedStatusAsync_UnknownRun_ReturnsNull()
-    {
-        var sut = CreateSut(new FakeAgentRunRepository());
-        Assert.Null(await sut.GetPersistedStatusAsync(Guid.NewGuid()));
     }
 
     [Fact]
@@ -157,7 +255,7 @@ public class AgentJobServiceTests
         };
         var sut = CreateSut(repository);
 
-        var summaries = await sut.GetRecentJobsAsync(25);
+        var summaries = await sut.GetRecentJobsAsync(25, CancellationToken.None);
 
         var summary = Assert.Single(summaries);
         Assert.Equal(runId, summary.JobId);
@@ -165,6 +263,74 @@ public class AgentJobServiceTests
         Assert.Equal("Completed", summary.Phase);
         Assert.Equal(2, summary.Iterations);
         Assert.Equal(20, summary.MaxIterations);
+    }
+
+    // ── Remote job proxying (job tracked here as forwarded to a peer) ──
+
+    [Fact]
+    public async Task GetResultZipAsync_RemoteJob_ProxiesToThePeerItWasForwardedTo()
+    {
+        var peer = MakePeer("peer1");
+        _appConfig.Cluster.Peers.Add(peer);
+        _mockPool.Setup(p => p.AvailableCount).Returns(0);
+        _mockPeerClient.Setup(c => c.GetAvailableCapacityAsync(peer, It.IsAny<CancellationToken>())).ReturnsAsync(1);
+        var peerJobId = Guid.NewGuid();
+        _mockPeerClient.Setup(c => c.ForwardJobAsync(peer, It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(peerJobId);
+        var sut = CreateSut();
+        var jobId = await sut.StartJobAsync("Mål", null, CancellationToken.None);
+
+        using var expectedZip = new MemoryStream();
+        _mockPeerClient.Setup(c => c.GetRemoteResultZipAsync(peer, peerJobId, It.IsAny<CancellationToken>())).ReturnsAsync(expectedZip);
+
+        var zip = await sut.GetResultZipAsync(jobId, CancellationToken.None);
+
+        Assert.Same(expectedZip, zip);
+    }
+
+    [Fact]
+    public async Task RequestStopAsync_RemoteJob_ProxiesToThePeerItWasForwardedTo()
+    {
+        var peer = MakePeer("peer1");
+        _appConfig.Cluster.Peers.Add(peer);
+        _mockPool.Setup(p => p.AvailableCount).Returns(0);
+        _mockPeerClient.Setup(c => c.GetAvailableCapacityAsync(peer, It.IsAny<CancellationToken>())).ReturnsAsync(1);
+        var peerJobId = Guid.NewGuid();
+        _mockPeerClient.Setup(c => c.ForwardJobAsync(peer, It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(peerJobId);
+        var sut = CreateSut();
+        var jobId = await sut.StartJobAsync("Mål", null, CancellationToken.None);
+
+        _mockPeerClient.Setup(c => c.RequestRemoteStopAsync(peer, peerJobId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        var stopped = await sut.RequestStopAsync(jobId, CancellationToken.None);
+
+        Assert.True(stopped);
+        _mockPeerClient.Verify(c => c.RequestRemoteStopAsync(peer, peerJobId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ── Local job result zip (file I/O only — no LLM/peer involved) ──
+
+    [Fact]
+    public async Task GetResultZipAsync_LocalJobWithFiles_ReturnsZipContainingThem()
+    {
+        var jobsRoot = Path.Combine(Path.GetTempPath(), "AgentJobServiceTests_" + Guid.NewGuid());
+        _tempDirs.Add(jobsRoot);
+        _appConfig.Jobs.RootFolder = jobsRoot;
+        // Local path is taken because no peers are configured, regardless of pool capacity.
+        var sut = CreateSut();
+
+        var jobId = await sut.StartJobAsync("Mål", null, CancellationToken.None);
+
+        // StartJobAsync already created the job's workspace directory via FileAgentService's
+        // constructor; write a file into it directly rather than waiting on the (mocked-pool,
+        // LLM-touching) background run to produce one.
+        var workspaceDir = Path.Combine(jobsRoot, jobId.ToString());
+        await File.WriteAllTextAsync(Path.Combine(workspaceDir, "recept.txt"), "Pannkaksrecept");
+
+        using var zip = await sut.GetResultZipAsync(jobId, CancellationToken.None);
+
+        Assert.NotNull(zip);
+        using var archive = new System.IO.Compression.ZipArchive(zip!, System.IO.Compression.ZipArchiveMode.Read);
+        Assert.Contains(archive.Entries, e => e.Name == "recept.txt");
     }
 
     private sealed class FakeAgentRunRepository : IAgentRunRepository

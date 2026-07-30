@@ -116,6 +116,15 @@ else
     Console.WriteLine("[!] Database not configured (AppConfiguration:Database:ConnectionString missing) — job history and restart-safe status disabled.");
 }
 
+// ── Peer clustering: forward a job to another AgentKit.Api instance when this node is too busy
+//    and a peer (AppConfiguration.Cluster.Peers) has room. A short timeout keeps a dead/slow
+//    peer from stalling job submission. ──
+builder.Services.AddHttpClient(ClusterPeerClient.HttpClientName, client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+builder.Services.AddSingleton<IClusterPeerClient, ClusterPeerClient>();
+
 builder.Services.AddSingleton<IAgentJobService, AgentJobService>();
 
 // Configure CORS from an explicit allow-list — see OfflineAI.Api/Program.cs for the same

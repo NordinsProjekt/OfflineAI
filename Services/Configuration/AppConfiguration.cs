@@ -57,6 +57,44 @@ public class AppConfiguration
     /// Settings for headless goal-agent jobs (see <c>AgentKit.Api</c>'s job API).
     /// </summary>
     public JobsSettings Jobs { get; set; } = new();
+
+    /// <summary>
+    /// Other <c>AgentKit.Api</c> instances this node can forward jobs to when it's too busy to
+    /// take one itself. Empty (the default) means no clustering — every job runs locally.
+    /// </summary>
+    public ClusterSettings Cluster { get; set; } = new();
+}
+
+/// <summary>
+/// Peer <c>AgentKit.Api</c> nodes this instance can forward jobs to. A static list, not
+/// auto-discovered — see <see cref="ClusterPeerSettings"/>.
+/// </summary>
+public class ClusterSettings
+{
+    /// <summary>
+    /// Known peer nodes, in the order they're tried when this node is too busy for a new job.
+    /// Empty = clustering disabled; every job runs locally regardless of load.
+    /// </summary>
+    public List<ClusterPeerSettings> Peers { get; set; } = new();
+}
+
+/// <summary>
+/// One peer <c>AgentKit.Api</c> node this instance may forward jobs to.
+/// </summary>
+public class ClusterPeerSettings
+{
+    /// <summary>Friendly name for logging/identification, e.g. "office-pc".</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Base URL of the peer, e.g. "https://192.168.1.50:7016".</summary>
+    public string BaseUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The <em>peer's own</em> API key — what this node presents as its <c>X-API-Key</c> header
+    /// when calling the peer, not this node's own key. The peer authenticates the call the same
+    /// way it authenticates any other caller; clustering adds no new auth mechanism.
+    /// </summary>
+    public string ApiKey { get; set; } = string.Empty;
 }
 
 /// <summary>

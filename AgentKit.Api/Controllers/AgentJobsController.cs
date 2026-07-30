@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using AgentKit.Api.Models;
 using AgentKit.Api.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -9,7 +8,9 @@ namespace AgentKit.Api.Controllers;
 /// Headless goal-agent jobs: describe a desired workspace end result, poll progress, and download
 /// the resulting files once the job finishes. Mirrors what Agent Mode does in the dashboard, but
 /// as a start/poll/download HTTP flow instead of a live Blazor page, since a job can run for
-/// minutes and involves many LLM round trips — not a fit for a single blocking request.
+/// minutes and involves many LLM round trips — not a fit for a single blocking request. A job may
+/// run on this node or, when it's too busy, on a configured peer — the caller never needs to know
+/// which; every action here is keyed by the id returned from <see cref="StartJob"/>.
 /// </summary>
 [ApiController]
 [Route("api/jobs")]
@@ -34,7 +35,7 @@ public class AgentJobsController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(StartJobResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
-    public ActionResult<StartJobResponse> StartJob([FromBody] StartJobRequest request)
+    public async Task<ActionResult<StartJobResponse>> StartJob([FromBody] StartJobRequest request, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.GoalDescription))
         {
@@ -45,23 +46,23 @@ public class AgentJobsController : ControllerBase
             });
         }
 
-        var jobId = _jobService.StartJob(request.GoalDescription.Trim(), request.MaxIterations);
+        var jobId = await _jobService.StartJobAsync(request.GoalDescription.Trim(), request.MaxIterations, cancellationToken);
         _logger.LogInformation("Started agent job {JobId}", jobId);
 
         return AcceptedAtAction(nameof(GetStatus), new { id = jobId }, new StartJobResponse(jobId));
     }
 
     /// <summary>
-    /// Job status: phase, iteration progress, requirements, and activity log. Served from process
-    /// memory while the job is live; falls back to persisted history for a job whose process
-    /// restarted (or that ran in an earlier process).
+    /// Job status: phase, iteration progress, requirements, and activity log. Served live
+    /// (locally or proxied from the peer running it) while the job is active; falls back to
+    /// persisted history for a job whose process restarted.
     /// </summary>
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(AgentJobStatus), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AgentJobStatus>> GetStatus(Guid id)
+    public async Task<ActionResult<AgentJobStatus>> GetStatus(Guid id, CancellationToken cancellationToken)
     {
-        var status = _jobService.GetStatus(id) ?? await _jobService.GetPersistedStatusAsync(id);
+        var status = await _jobService.GetStatusAsync(id, cancellationToken);
         if (status is null)
         {
             return NotFound(new ErrorResponse
@@ -82,14 +83,14 @@ public class AgentJobsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status409Conflict)]
-    public ActionResult GetResult(Guid id)
+    public async Task<ActionResult> GetResult(Guid id, CancellationToken cancellationToken)
     {
-        var status = _jobService.GetStatus(id);
+        var status = await _jobService.GetStatusAsync(id, cancellationToken);
         if (status is null)
         {
             return NotFound(new ErrorResponse
             {
-                Error = $"Job {id} not found or not running in this process. If the server restarted mid-run, its files are still on disk but not downloadable through this endpoint yet.",
+                Error = $"Job {id} not found.",
                 StatusCode = StatusCodes.Status404NotFound
             });
         }
@@ -103,40 +104,26 @@ public class AgentJobsController : ControllerBase
             });
         }
 
-        var workspacePath = _jobService.GetWorkspacePath(id);
-        if (workspacePath is null || !Directory.Exists(workspacePath))
+        var zip = await _jobService.GetResultZipAsync(id, cancellationToken);
+        if (zip is null)
         {
             return NotFound(new ErrorResponse
             {
-                Error = $"Job {id}'s workspace directory is missing.",
+                Error = $"Job {id}'s result is unavailable (its workspace is missing, or the peer that ran it is unreachable).",
                 StatusCode = StatusCodes.Status404NotFound
             });
         }
 
-        // Built in memory rather than to a temp file — jobs are expected to produce at most a
-        // handful of MB of text/code, well within what's reasonable to hold in memory for the
-        // length of one response.
-        var buffer = new MemoryStream();
-        using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
-        {
-            foreach (var file in Directory.GetFiles(workspacePath, "*", SearchOption.AllDirectories))
-            {
-                var entryName = Path.GetRelativePath(workspacePath, file);
-                zip.CreateEntryFromFile(file, entryName);
-            }
-        }
-        buffer.Position = 0;
-
-        return File(buffer, "application/zip", $"{id}.zip");
+        return File(zip, "application/zip", $"{id}.zip");
     }
 
     /// <summary>Requests the job stop at its next step boundary. No-ops (returns 404) for a job unknown to this process.</summary>
     [HttpPost("{id:guid}/stop")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
-    public ActionResult StopJob(Guid id)
+    public async Task<ActionResult> StopJob(Guid id, CancellationToken cancellationToken)
     {
-        if (!_jobService.RequestStop(id))
+        if (!await _jobService.RequestStopAsync(id, cancellationToken))
         {
             return NotFound(new ErrorResponse
             {
@@ -148,12 +135,12 @@ public class AgentJobsController : ControllerBase
         return Ok();
     }
 
-    /// <summary>Recent jobs (persisted history), newest first.</summary>
+    /// <summary>Recent jobs (this node's own persisted history), newest first.</summary>
     [HttpGet]
     [ProducesResponseType(typeof(List<AgentJobSummary>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IReadOnlyList<AgentJobSummary>>> GetRecentJobs([FromQuery] int count = 25)
+    public async Task<ActionResult<IReadOnlyList<AgentJobSummary>>> GetRecentJobs([FromQuery] int count = 25, CancellationToken cancellationToken = default)
     {
-        var jobs = await _jobService.GetRecentJobsAsync(count);
+        var jobs = await _jobService.GetRecentJobsAsync(count, cancellationToken);
         return Ok(jobs);
     }
 }

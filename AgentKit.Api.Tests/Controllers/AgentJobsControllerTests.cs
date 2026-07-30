@@ -9,39 +9,21 @@ using Moq;
 namespace AgentKit.Api.Tests.Controllers;
 
 /// <summary>
-/// Unit tests for <see cref="AgentJobsController"/>: request validation, status lookup
-/// (live-then-persisted fallback), result download gating by phase, and error mapping.
-/// The job service is mocked throughout — no real agent run or LLM call happens here.
+/// Unit tests for <see cref="AgentJobsController"/>: request validation, status lookup, result
+/// download gating by phase, and error mapping. The job service is mocked throughout — no real
+/// agent run, LLM call, or peer network call happens here. Zip-building itself (local vs. proxied
+/// from a peer) is <see cref="AgentJobService"/>'s responsibility and is tested there; this class
+/// only checks the controller passes whatever stream the service returns straight through.
 /// </summary>
-public sealed class AgentJobsControllerTests : IDisposable
+public class AgentJobsControllerTests
 {
     private readonly Mock<IAgentJobService> _mockJobService;
     private readonly AgentJobsController _controller;
-    private readonly List<string> _tempDirs = new();
 
     public AgentJobsControllerTests()
     {
         _mockJobService = new Mock<IAgentJobService>();
         _controller = new AgentJobsController(_mockJobService.Object, new Mock<ILogger<AgentJobsController>>().Object);
-    }
-
-    public void Dispose()
-    {
-        foreach (var dir in _tempDirs)
-        {
-            if (Directory.Exists(dir))
-                Directory.Delete(dir, recursive: true);
-        }
-    }
-
-    private string CreateTempWorkspace(params (string Name, string Content)[] files)
-    {
-        var dir = Path.Combine(Path.GetTempPath(), "AgentJobsControllerTests_" + Guid.NewGuid());
-        Directory.CreateDirectory(dir);
-        _tempDirs.Add(dir);
-        foreach (var (name, content) in files)
-            File.WriteAllText(Path.Combine(dir, name), content);
-        return dir;
     }
 
     private static AgentJobStatus MakeStatus(string phase, Guid? jobId = null) => new(
@@ -53,15 +35,30 @@ public sealed class AgentJobsControllerTests : IDisposable
         new List<AgentJobRequirementStatus>(),
         new List<string>());
 
+    private static MemoryStream MakeZipStream(string entryName = "recept.txt")
+    {
+        var buffer = new MemoryStream();
+        using (var zip = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var entry = zip.CreateEntry(entryName);
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write("klart");
+        }
+        buffer.Position = 0;
+        return buffer;
+    }
+
     // ── StartJob ────────────────────────────────────────────────────────
 
     [Fact]
-    public void StartJob_ValidRequest_ReturnsAcceptedWithJobId()
+    public async Task StartJob_ValidRequest_ReturnsAcceptedWithJobId()
     {
         var jobId = Guid.NewGuid();
-        _mockJobService.Setup(s => s.StartJob("Skapa ett pannkaksrecept", null)).Returns(jobId);
+        _mockJobService
+            .Setup(s => s.StartJobAsync("Skapa ett pannkaksrecept", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(jobId);
 
-        var result = _controller.StartJob(new StartJobRequest { GoalDescription = "Skapa ett pannkaksrecept" });
+        var result = await _controller.StartJob(new StartJobRequest { GoalDescription = "Skapa ett pannkaksrecept" }, CancellationToken.None);
 
         var accepted = Assert.IsType<AcceptedAtActionResult>(result.Result);
         var response = Assert.IsType<StartJobResponse>(accepted.Value);
@@ -69,66 +66,53 @@ public sealed class AgentJobsControllerTests : IDisposable
     }
 
     [Fact]
-    public void StartJob_PassesMaxIterationsThrough()
+    public async Task StartJob_PassesMaxIterationsThrough()
     {
-        _mockJobService.Setup(s => s.StartJob(It.IsAny<string>(), 5)).Returns(Guid.NewGuid());
+        _mockJobService
+            .Setup(s => s.StartJobAsync(It.IsAny<string>(), 5, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
 
-        _controller.StartJob(new StartJobRequest { GoalDescription = "Mål", MaxIterations = 5 });
+        await _controller.StartJob(new StartJobRequest { GoalDescription = "Mål", MaxIterations = 5 }, CancellationToken.None);
 
-        _mockJobService.Verify(s => s.StartJob("Mål", 5), Times.Once);
+        _mockJobService.Verify(s => s.StartJobAsync("Mål", 5, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
     [InlineData(null)]
-    public void StartJob_EmptyGoalDescription_ReturnsBadRequest(string? goalDescription)
+    public async Task StartJob_EmptyGoalDescription_ReturnsBadRequest(string? goalDescription)
     {
-        var result = _controller.StartJob(new StartJobRequest { GoalDescription = goalDescription! });
+        var result = await _controller.StartJob(new StartJobRequest { GoalDescription = goalDescription! }, CancellationToken.None);
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
         var error = Assert.IsType<ErrorResponse>(badRequest.Value);
         Assert.Equal(400, error.StatusCode);
+        _mockJobService.Verify(s => s.StartJobAsync(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // ── GetStatus ───────────────────────────────────────────────────────
 
     [Fact]
-    public async Task GetStatus_LiveJob_ReturnsLiveStatusWithoutTouchingPersistedFallback()
+    public async Task GetStatus_KnownJob_ReturnsOk()
     {
         var jobId = Guid.NewGuid();
         var status = MakeStatus("Working", jobId);
-        _mockJobService.Setup(s => s.GetStatus(jobId)).Returns(status);
+        _mockJobService.Setup(s => s.GetStatusAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(status);
 
-        var result = await _controller.GetStatus(jobId);
+        var result = await _controller.GetStatus(jobId, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Same(status, ok.Value);
-        _mockJobService.Verify(s => s.GetPersistedStatusAsync(It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]
-    public async Task GetStatus_NotLiveButPersisted_FallsBackToPersistedStatus()
+    public async Task GetStatus_UnknownJob_ReturnsNotFound()
     {
         var jobId = Guid.NewGuid();
-        var persisted = MakeStatus("Completed", jobId);
-        _mockJobService.Setup(s => s.GetStatus(jobId)).Returns((AgentJobStatus?)null);
-        _mockJobService.Setup(s => s.GetPersistedStatusAsync(jobId)).ReturnsAsync(persisted);
+        _mockJobService.Setup(s => s.GetStatusAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync((AgentJobStatus?)null);
 
-        var result = await _controller.GetStatus(jobId);
-
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        Assert.Same(persisted, ok.Value);
-    }
-
-    [Fact]
-    public async Task GetStatus_UnknownEverywhere_ReturnsNotFound()
-    {
-        var jobId = Guid.NewGuid();
-        _mockJobService.Setup(s => s.GetStatus(jobId)).Returns((AgentJobStatus?)null);
-        _mockJobService.Setup(s => s.GetPersistedStatusAsync(jobId)).ReturnsAsync((AgentJobStatus?)null);
-
-        var result = await _controller.GetStatus(jobId);
+        var result = await _controller.GetStatus(jobId, CancellationToken.None);
 
         var notFound = Assert.IsType<NotFoundObjectResult>(result.Result);
         Assert.Equal(404, Assert.IsType<ErrorResponse>(notFound.Value).StatusCode);
@@ -137,79 +121,76 @@ public sealed class AgentJobsControllerTests : IDisposable
     // ── GetResult ───────────────────────────────────────────────────────
 
     [Fact]
-    public void GetResult_UnknownJob_ReturnsNotFound()
+    public async Task GetResult_UnknownJob_ReturnsNotFound()
     {
         var jobId = Guid.NewGuid();
-        _mockJobService.Setup(s => s.GetStatus(jobId)).Returns((AgentJobStatus?)null);
+        _mockJobService.Setup(s => s.GetStatusAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync((AgentJobStatus?)null);
 
-        var result = _controller.GetResult(jobId);
+        var result = await _controller.GetResult(jobId, CancellationToken.None);
 
         Assert.IsType<NotFoundObjectResult>(result);
     }
 
     [Fact]
-    public void GetResult_StillRunning_ReturnsConflict()
+    public async Task GetResult_StillRunning_ReturnsConflict()
     {
         var jobId = Guid.NewGuid();
-        _mockJobService.Setup(s => s.GetStatus(jobId)).Returns(MakeStatus("Working", jobId));
+        _mockJobService.Setup(s => s.GetStatusAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(MakeStatus("Working", jobId));
 
-        var result = _controller.GetResult(jobId);
+        var result = await _controller.GetResult(jobId, CancellationToken.None);
 
         var conflict = Assert.IsType<ConflictObjectResult>(result);
         Assert.Equal(409, Assert.IsType<ErrorResponse>(conflict.Value).StatusCode);
+        _mockJobService.Verify(s => s.GetResultZipAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public void GetResult_TerminalPhaseButWorkspaceGone_ReturnsNotFound()
+    public async Task GetResult_TerminalPhaseButZipUnavailable_ReturnsNotFound()
     {
         var jobId = Guid.NewGuid();
-        _mockJobService.Setup(s => s.GetStatus(jobId)).Returns(MakeStatus("Completed", jobId));
-        _mockJobService.Setup(s => s.GetWorkspacePath(jobId)).Returns((string?)null);
+        _mockJobService.Setup(s => s.GetStatusAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(MakeStatus("Completed", jobId));
+        _mockJobService.Setup(s => s.GetResultZipAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync((Stream?)null);
 
-        var result = _controller.GetResult(jobId);
+        var result = await _controller.GetResult(jobId, CancellationToken.None);
 
         Assert.IsType<NotFoundObjectResult>(result);
     }
 
     [Fact]
-    public void GetResult_CompletedWithFiles_ReturnsZipContainingThem()
+    public async Task GetResult_TerminalPhaseWithZip_ReturnsItAsFileDownload()
     {
         var jobId = Guid.NewGuid();
-        var workspace = CreateTempWorkspace(("recept.txt", "Pannkaksrecept\n1. Vispa\n"), ("notes.txt", "klart"));
-        _mockJobService.Setup(s => s.GetStatus(jobId)).Returns(MakeStatus("Completed", jobId));
-        _mockJobService.Setup(s => s.GetWorkspacePath(jobId)).Returns(workspace);
+        var zip = MakeZipStream();
+        _mockJobService.Setup(s => s.GetStatusAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(MakeStatus("Completed", jobId));
+        _mockJobService.Setup(s => s.GetResultZipAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(zip);
 
-        var result = _controller.GetResult(jobId);
+        var result = await _controller.GetResult(jobId, CancellationToken.None);
 
         var fileResult = Assert.IsType<FileStreamResult>(result);
         Assert.Equal("application/zip", fileResult.ContentType);
-
-        using var zip = new ZipArchive(fileResult.FileStream, ZipArchiveMode.Read);
-        Assert.Equal(2, zip.Entries.Count);
-        Assert.Contains(zip.Entries, e => e.Name == "recept.txt");
-        Assert.Contains(zip.Entries, e => e.Name == "notes.txt");
+        Assert.Same(zip, fileResult.FileStream);
     }
 
     // ── StopJob ─────────────────────────────────────────────────────────
 
     [Fact]
-    public void StopJob_KnownJob_ReturnsOk()
+    public async Task StopJob_KnownJob_ReturnsOk()
     {
         var jobId = Guid.NewGuid();
-        _mockJobService.Setup(s => s.RequestStop(jobId)).Returns(true);
+        _mockJobService.Setup(s => s.RequestStopAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
-        var result = _controller.StopJob(jobId);
+        var result = await _controller.StopJob(jobId, CancellationToken.None);
 
         Assert.IsType<OkResult>(result);
     }
 
     [Fact]
-    public void StopJob_UnknownJob_ReturnsNotFound()
+    public async Task StopJob_UnknownJob_ReturnsNotFound()
     {
         var jobId = Guid.NewGuid();
-        _mockJobService.Setup(s => s.RequestStop(jobId)).Returns(false);
+        _mockJobService.Setup(s => s.RequestStopAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
-        var result = _controller.StopJob(jobId);
+        var result = await _controller.StopJob(jobId, CancellationToken.None);
 
         Assert.IsType<NotFoundObjectResult>(result);
     }
@@ -223,9 +204,9 @@ public sealed class AgentJobsControllerTests : IDisposable
         {
             new(Guid.NewGuid(), "Mål 1", "Completed", 3, 20, DateTime.UtcNow, DateTime.UtcNow)
         };
-        _mockJobService.Setup(s => s.GetRecentJobsAsync(25)).ReturnsAsync(jobs);
+        _mockJobService.Setup(s => s.GetRecentJobsAsync(25, It.IsAny<CancellationToken>())).ReturnsAsync(jobs);
 
-        var result = await _controller.GetRecentJobs();
+        var result = await _controller.GetRecentJobs(cancellationToken: CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Same(jobs, ok.Value);
