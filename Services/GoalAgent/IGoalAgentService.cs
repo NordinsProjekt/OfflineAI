@@ -72,6 +72,11 @@ public interface IGoalAgentService
     /// deterministic verdicts — empty/garbled replies cluster at high temperature). When null,
     /// <paramref name="sendToLlm"/> is used for everything.
     /// </param>
+    /// <param name="maxIterations">
+    /// Optional. Overrides the work → verify iteration cap for this run only. Non-positive or
+    /// null falls back to the cap the service was constructed with (typically
+    /// <c>AppConfiguration.AgentTools.MaxGoalIterations</c>).
+    /// </param>
     /// <remarks>
     /// When the service was constructed with a file agent, the complete raw transcript of the
     /// run (every prompt, every LLM reply including internal tool-call rounds, executed tool
@@ -87,7 +92,8 @@ public interface IGoalAgentService
         CancellationToken cancellationToken = default,
         string? modelName = null,
         Guid? conversationId = null,
-        Func<string, Task<string>>? verifySendToLlm = null);
+        Func<string, Task<string>>? verifySendToLlm = null,
+        int? maxIterations = null);
 
     /// <summary>
     /// Requests the run stop at the next step boundary (between work items or verifications).

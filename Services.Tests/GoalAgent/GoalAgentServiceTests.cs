@@ -409,6 +409,33 @@ public class GoalAgentServiceTests
     }
 
     [Fact]
+    public async Task RunAsync_MaxIterationsOverride_StopsAtPerRunCapNotConstructorDefault()
+    {
+        // The constructor default (20) would keep going; the per-run override should win.
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: UNDERKÄNT - fel innehåll") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 20);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm, maxIterations: 2);
+
+        sut.Phase.Should().Be(GoalAgentPhase.MaxIterationsReached);
+        sut.CurrentIteration.Should().Be(2);
+        sut.MaxIterations.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task RunAsync_NonPositiveMaxIterationsOverride_FallsBackToConstructorDefault()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 3);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm, maxIterations: 0);
+
+        sut.MaxIterations.Should().Be(3);
+    }
+
+    [Fact]
     public async Task RunAsync_UnparseableVerdict_CountsAsFailedNotGreen()
     {
         var fake = new FakeAgenticChatService(msg =>

@@ -85,7 +85,17 @@ public sealed class GoalAgentService : IGoalAgentService
     private readonly IFileAgentService? _fileAgent;
     private readonly IAgentRunRepository? _runRepository;
     private readonly IQb64ToolService? _qb64Tools;
-    private readonly int _maxIterations;
+
+    /// <summary>Cap used when a run doesn't request its own override — set at construction time,
+    /// typically from <c>AppConfiguration.AgentTools.MaxGoalIterations</c>.</summary>
+    private readonly int _defaultMaxIterations;
+
+    /// <summary>
+    /// The cap actually in effect. Equal to <see cref="_defaultMaxIterations"/> until a run
+    /// overrides it via <see cref="RunAsync"/>'s <c>maxIterations</c> parameter; re-derived at
+    /// the start of every run, so it never mixes one run's override into the next.
+    /// </summary>
+    private int _maxIterations;
     private readonly List<GoalRequirement> _requirements = new();
     private readonly List<string> _activityLog = new();
     private readonly List<AgentRunEventEntity> _pendingEvents = new();
@@ -112,8 +122,8 @@ public sealed class GoalAgentService : IGoalAgentService
     /// workspace) so a run can be debugged after the fact. When null, no transcript is written.
     /// </param>
     /// <param name="maxIterations">
-    /// Cap on work → verify iterations. Non-positive values fall back to
-    /// <see cref="DefaultMaxIterations"/>.
+    /// Default cap on work → verify iterations, used whenever a run doesn't supply its own via
+    /// <see cref="RunAsync"/>. Non-positive values fall back to <see cref="DefaultMaxIterations"/>.
     /// </param>
     /// <param name="runRepository">
     /// Optional. When provided, each run is recorded as history (the run, its requirements, and
@@ -138,7 +148,8 @@ public sealed class GoalAgentService : IGoalAgentService
     {
         _agenticChat = agenticChat ?? throw new ArgumentNullException(nameof(agenticChat));
         _fileAgent = fileAgent;
-        _maxIterations = maxIterations > 0 ? maxIterations : DefaultMaxIterations;
+        _defaultMaxIterations = maxIterations > 0 ? maxIterations : DefaultMaxIterations;
+        _maxIterations = _defaultMaxIterations;
         _runRepository = runRepository;
         _qb64Tools = qb64Tools;
     }
@@ -220,7 +231,8 @@ public sealed class GoalAgentService : IGoalAgentService
         CancellationToken cancellationToken = default,
         string? modelName = null,
         Guid? conversationId = null,
-        Func<string, Task<string>>? verifySendToLlm = null)
+        Func<string, Task<string>>? verifySendToLlm = null,
+        int? maxIterations = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(goalDescription);
         ArgumentNullException.ThrowIfNull(sendToLlm);
@@ -230,6 +242,7 @@ public sealed class GoalAgentService : IGoalAgentService
 
         _isRunning = true;
         _stopRequested = false;
+        _maxIterations = maxIterations is > 0 ? maxIterations.Value : _defaultMaxIterations;
         lock (_lock)
         {
             _requirements.Clear();

@@ -36,6 +36,13 @@
                       disabled="@GoalAgent.IsRunning"
                       rows="3"></textarea>
 
+            <div class="oa-field oa-goal-iterations-field">
+                <label title="Caps how many work → verify passes the agent makes before giving up. Higher lets it retry more, but costs more compute per run.">Max iterations</label>
+                <input type="number" min="1" max="100" class="oa-text" style="width: 6rem;"
+                       @bind="_maxIterationsInput" @bind:event="oninput"
+                       disabled="@GoalAgent.IsRunning">
+            </div>
+
             <div class="oa-batch-controls">
                 <button class="oa-batch-start-btn" @onclick="StartRun" disabled="@(GoalAgent.IsRunning || string.IsNullOrWhiteSpace(_goalDescription))">
                     @(GoalAgent.IsRunning ? "Running..." : "Run Agent")
@@ -123,6 +130,7 @@
 
 @code {
     private string _goalDescription = string.Empty;
+    private int _maxIterationsInput;
 
     // Verification wants deterministic verdicts, not creativity: Gemma's recommended 1.0 gives
     // intermittent empty/garbled replies, which in a real run burned a third of all reviews.
@@ -132,6 +140,9 @@
     protected override void OnInitialized()
     {
         GoalAgent.OnChange += Refresh;
+        // Pre-fill from the configured default (Llm:AgentTools:MaxGoalIterations) so the field
+        // shows a sensible value even before the user has ever touched it.
+        _maxIterationsInput = GoalAgent.MaxIterations;
     }
 
     private void Refresh() => InvokeAsync(StateHasChanged);
@@ -156,7 +167,8 @@
             CancellationToken.None,
             Dashboard.ActiveModelName,
             Dashboard.CurrentConversationId,
-            verifySendToLlm: msg => Dashboard.SendQuickAskActiveAsync(msg, VerificationTemperature));
+            verifySendToLlm: msg => Dashboard.SendQuickAskActiveAsync(msg, VerificationTemperature),
+            maxIterations: _maxIterationsInput);
     }
 
     private static string PhaseText(GoalAgentPhase phase) => phase switch
