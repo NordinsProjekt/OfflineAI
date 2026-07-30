@@ -1036,6 +1036,171 @@ public sealed class FileAgentServiceTests : IDisposable
         File.Exists(Path.Combine(Path.GetDirectoryName(_tempDir)!, "evil.txt")).Should().BeFalse();
     }
 
+    // ── SetBaseDirectory ─────────────────────────────────────────────────
+
+    [Fact]
+    public void SetBaseDirectory_ExistingPath_SwitchesBaseDirectory()
+    {
+        var newDir = Path.Combine(_tempDir, "workspace2");
+        Directory.CreateDirectory(newDir);
+
+        _sut.SetBaseDirectory(newDir);
+
+        _sut.BaseDirectory.Should().Be(Path.GetFullPath(newDir));
+    }
+
+    [Fact]
+    public void SetBaseDirectory_MissingPath_CreatesDirectory()
+    {
+        var newDir = Path.Combine(_tempDir, "not-yet-created");
+
+        _sut.SetBaseDirectory(newDir);
+
+        Directory.Exists(newDir).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SetBaseDirectory_AfterSwitch_SubsequentWritesLandInNewDirectory()
+    {
+        var newDir = Path.Combine(_tempDir, "workspace2");
+        _sut.SetBaseDirectory(newDir);
+
+        await _sut.ExecuteAsync("/skapa notes.txt");
+
+        File.Exists(Path.Combine(newDir, "notes.txt")).Should().BeTrue();
+        File.Exists(Path.Combine(_tempDir, "notes.txt")).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void SetBaseDirectory_NullOrWhitespace_Throws(string? baseDirectory)
+    {
+        var act = () => _sut.SetBaseDirectory(baseDirectory!);
+
+        act.Should().Throw<ArgumentNullException>();
+    }
+
+    // ── ReadFileRawAsync ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ReadFileRawAsync_ExistingFile_ReturnsRawContentWithoutCombiningInstruction()
+    {
+        await CreateFileAsync("notes.txt", "rad 1", "rad 2");
+
+        var result = await _sut.ReadFileRawAsync("notes.txt");
+
+        result.IsSuccess.Should().BeTrue();
+        result.ResultType.Should().Be(FileAgentResultType.FileRead);
+        result.InjectedContext.Should().Contain("rad 1").And.Contain("rad 2");
+    }
+
+    [Fact]
+    public async Task ReadFileRawAsync_MissingFile_ReturnsFailureSuggestingSkapa()
+    {
+        var result = await _sut.ReadFileRawAsync("missing.txt");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("/skapa missing.txt");
+    }
+
+    [Fact]
+    public async Task ReadFileRawAsync_EmptyFilename_ReturnsFailure()
+    {
+        var result = await _sut.ReadFileRawAsync(string.Empty);
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("Ange ett filnamn");
+    }
+
+    [Fact]
+    public async Task ReadFileRawAsync_EmptyFile_ReturnsFailure()
+    {
+        await CreateFileAsync("empty.txt");
+
+        var result = await _sut.ReadFileRawAsync("empty.txt");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("tom");
+    }
+
+    // ── WriteExtractedContentAsync ──────────────────────────────────────────
+
+    [Fact]
+    public async Task WriteExtractedContentAsync_NewFile_WritesContent()
+    {
+        await _sut.WriteExtractedContentAsync("generated.txt", "hej\nvärlden");
+
+        (await File.ReadAllTextAsync(Path.Combine(_tempDir, "generated.txt")))
+            .Should().Be("hej\nvärlden");
+    }
+
+    [Fact]
+    public async Task WriteExtractedContentAsync_ExistingFile_Overwrites()
+    {
+        await CreateFileAsync("generated.txt", "gammalt innehåll");
+
+        await _sut.WriteExtractedContentAsync("generated.txt", "nytt innehåll");
+
+        (await File.ReadAllTextAsync(Path.Combine(_tempDir, "generated.txt")))
+            .Should().Be("nytt innehåll");
+    }
+
+    [Fact]
+    public async Task WriteExtractedContentAsync_InvalidFilename_ThrowsInvalidOperationException()
+    {
+        var act = async () => await _sut.WriteExtractedContentAsync("Fil:", "innehåll");
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    // ── StripFileMarkers ────────────────────────────────────────────────
+
+    [Fact]
+    public void StripFileMarkers_RemovesMarkers_KeepsContent()
+    {
+        var response = "<FILE>\nPRINT \"Hej\"\n<ENDFILE>";
+
+        _sut.StripFileMarkers(response).Should().Be("PRINT \"Hej\"");
+    }
+
+    [Fact]
+    public void StripFileMarkers_NoMarkersPresent_ReturnsTrimmedInputUnchanged()
+    {
+        var response = "  Bara vanlig text utan markörer.  ";
+
+        _sut.StripFileMarkers(response).Should().Be("Bara vanlig text utan markörer.");
+    }
+
+    // ── GetToolDescriptions / BuildToolsSystemPrompt ───────────────────────
+
+    [Fact]
+    public void GetToolDescriptions_ReturnsAllSixFileCommands()
+    {
+        var descriptions = _sut.GetToolDescriptions();
+
+        descriptions.Keys.Should().BeEquivalentTo(
+            "/läs <filnamn> <instruktion>",
+            "/läs-pdf <filnamn> <instruktion>",
+            "/skapa <filnamn>",
+            "/fyll <filnamn> <beskrivning>",
+            "/redigera <filnamn> <instruktion>",
+            "/lista");
+    }
+
+    [Fact]
+    public void BuildToolsSystemPrompt_IncludesEveryToolSignatureAndDescription()
+    {
+        var prompt = _sut.BuildToolsSystemPrompt();
+
+        foreach (var (signature, description) in _sut.GetToolDescriptions())
+        {
+            prompt.Should().Contain(signature);
+            prompt.Should().Contain(description);
+        }
+    }
+
     // ── TryFindAgentCommand ───────────────────────────────────────────────
 
     [Fact]
