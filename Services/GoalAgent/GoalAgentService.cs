@@ -539,7 +539,7 @@ public sealed class GoalAgentService : IGoalAgentService
                 if (!await WorkOnUnmetRequirementsAsync(goalDescription, loggingSendToLlm, context.OnToolStatus, cancellationToken))
                     return; // stop requested mid-work
 
-                if (!await VerifyAllRequirementsAsync(loggingVerifySendToLlm, context.OnToolStatus, cancellationToken))
+                if (!await VerifyAllRequirementsAsync(goalDescription, loggingVerifySendToLlm, context.OnToolStatus, cancellationToken))
                     return; // stop requested mid-verification
 
                 if (Requirements.All(r => r.Status == RequirementStatus.Passed))
@@ -872,6 +872,7 @@ public sealed class GoalAgentService : IGoalAgentService
     /// can see what the model actually said. Returns false if a stop was requested.
     /// </summary>
     private async Task<bool> VerifyAllRequirementsAsync(
+        string goalDescription,
         Func<string, Task<string>> sendToLlm,
         Action<string>? onToolStatus,
         CancellationToken cancellationToken)
@@ -891,7 +892,13 @@ public sealed class GoalAgentService : IGoalAgentService
             // Nothing this requirement depends on has changed since it passed, so re-running the
             // review can only reach the same conclusion — at the price of a full LLM round trip.
             // Over a long run this is where most of the verification budget went.
-            var fingerprint = ComputeVerificationFingerprint(requirement.Description);
+            // Goal + requirement, the same pair the work step uses: a requirement often describes
+            // behaviour without naming a file ("hjälten kan styras med piltangenterna"), and on its
+            // own that leaves the reviewer with a bare file listing and no code — which is exactly
+            // when it starts guessing at read tools instead of judging what is in front of it.
+            var referenceTexts = new[] { goalDescription, requirement.Description };
+
+            var fingerprint = ComputeVerificationFingerprint(referenceTexts);
             if (requirement.Status == RequirementStatus.Passed
                 && fingerprint is not null
                 && fingerprint == requirement.VerifiedFingerprint)
@@ -916,7 +923,7 @@ public sealed class GoalAgentService : IGoalAgentService
 
             var verifyPrompt = BuildVerifyPrompt(
                 requirement.Description,
-                BuildWorkspaceSnapshot(new[] { requirement.Description }),
+                BuildWorkspaceSnapshot(referenceTexts),
                 Qb64Available);
 
             var result = await _agenticChat.SendWithToolsAsync(
@@ -1044,18 +1051,24 @@ public sealed class GoalAgentService : IGoalAgentService
     }
 
     /// <summary>
-    /// Fingerprints the workspace files a requirement depends on — the ones it names, or the whole
-    /// workspace listing when it names none — as name + size + last-write time. Deliberately not a
-    /// content hash: this runs once per requirement per iteration, and file metadata answers
-    /// "could this possibly have changed?" without reading anything.
+    /// Fingerprints the workspace files a requirement depends on — the ones named across
+    /// <paramref name="referenceTexts"/> (goal + requirement), or the whole workspace listing when
+    /// they name none — as name + size + last-write time. Deliberately not a content hash: this
+    /// runs once per requirement per iteration, and file metadata answers "could this possibly have
+    /// changed?" without reading anything.
     /// <para>
     /// A named file that does not exist is part of the fingerprint too ("missing"), so creating it
     /// invalidates the previous verdict exactly as editing it would.
     /// </para>
+    /// <para>
+    /// The reference texts must be the same ones the verify prompt's snapshot is built from —
+    /// fingerprinting a narrower set than the reviewer actually saw would let a file change
+    /// underneath a pass without ever invalidating it.
+    /// </para>
     /// Returns null when there is no workspace to inspect, which disables the optimisation rather
     /// than risking a stale pass.
     /// </summary>
-    private string? ComputeVerificationFingerprint(string requirementDescription)
+    private string? ComputeVerificationFingerprint(IEnumerable<string> referenceTexts)
     {
         if (_fileAgent is null)
             return null;
@@ -1064,8 +1077,8 @@ public sealed class GoalAgentService : IGoalAgentService
         {
             var baseDirectory = _fileAgent.BaseDirectory;
 
-            var names = FilenamePattern.Matches(requirementDescription)
-                .Select(match => match.Value)
+            var names = referenceTexts
+                .SelectMany(text => FilenamePattern.Matches(text ?? string.Empty).Select(match => match.Value))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
@@ -1262,6 +1275,13 @@ public sealed class GoalAgentService : IGoalAgentService
         sb.Append("Basera din bedömning i första hand på ögonblicksbilden ovan. Använd verktygen bara om " +
                   "ögonblicksbilden inte räcker (t.ex. /läs <filnamn> <instruktion> för en fil som inte visas där). " +
                   "Ändra inga filer.\n");
+        sb.Append("/läs fungerar för alla textfiler, inklusive källkod som .bas — /läs-pdf är BARA för filer som slutar på .pdf.\n");
+
+        // A reviewer that mis-aimed a tool used to fail the requirement because it "couldn't read
+        // the file": a wrong tool choice became a substantive verdict about the work. The verdict
+        // must describe the workspace, never the reviewer's own tool trouble.
+        sb.Append("Om ett verktygskommando misslyckas är det ett fel i DITT kommando, inte en brist i arbetet — " +
+                  "rätta kommandot och försök igen. Underkänn aldrig ett krav enbart för att du inte lyckades läsa en fil.\n");
 
         if (qb64Available)
             sb.Append("Om kravet gäller att ett QBasic-program kompilerar eller fungerar: kontrollera med " +

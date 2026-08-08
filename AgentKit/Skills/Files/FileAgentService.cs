@@ -291,77 +291,134 @@ public class FileAgentService : IFileAgentService
     }
 
     /// <inheritdoc/>
-    public Task<FileAgentResult> ReadPdfFileAsync(string filename)
+    public async Task<FileAgentResult> ReadPdfFileAsync(string filename)
     {
-        var (path, error) = ResolvePdfPath(filename);
+        var (path, isPdf, error) = ResolveReadablePath(filename);
         if (error is not null)
-            return Task.FromResult(error);
+            return error;
+
+        if (!isPdf)
+            return await ReadNonPdfAsTextAsync(path!, instruction: null);
 
         var (content, extractError) = ExtractPdfText(path!);
         if (extractError is not null)
-            return Task.FromResult(extractError);
+            return extractError;
 
-        return Task.FromResult(FileAgentResult.ReadSuccess(
+        return FileAgentResult.ReadSuccess(
             $"✓ PDF läst: {Path.GetFileName(path)}",
-            content!));
+            content!);
     }
 
     // ── /läs-pdf ──────────────────────────────────────────────────────────
 
-    private Task<FileAgentResult> ReadPdfCommandAsync(string args)
+    private async Task<FileAgentResult> ReadPdfCommandAsync(string args)
     {
         // Format: <filename> <instruktion> — same shape as /läs, but the file content is
         // extracted from a PDF via UglyToad.PdfPig instead of read as plain text.
         var spaceIdx = args.IndexOf(' ');
         if (spaceIdx < 0)
-            return Task.FromResult(FileAgentResult.Failure(
-                "Ange filnamn och en instruktion. Exempel: /läs-pdf rapport.pdf Sammanfatta innehållet."));
+            return FileAgentResult.Failure(
+                "Ange filnamn och en instruktion. Exempel: /läs-pdf rapport.pdf Sammanfatta innehållet.");
 
         var filename = args[..spaceIdx].Trim();
         var instruction = args[(spaceIdx + 1)..].Trim();
 
         if (string.IsNullOrWhiteSpace(instruction))
-            return Task.FromResult(FileAgentResult.Failure(
-                "Ange en instruktion efter filnamnet. Exempel: /läs-pdf rapport.pdf Sammanfatta innehållet."));
+            return FileAgentResult.Failure(
+                "Ange en instruktion efter filnamnet. Exempel: /läs-pdf rapport.pdf Sammanfatta innehållet.");
 
-        var (path, error) = ResolvePdfPath(filename);
+        var (path, isPdf, error) = ResolveReadablePath(filename);
         if (error is not null)
-            return Task.FromResult(error);
+            return error;
+
+        if (!isPdf)
+            return await ReadNonPdfAsTextAsync(path!, instruction);
 
         var (content, extractError) = ExtractPdfText(path!);
         if (extractError is not null)
-            return Task.FromResult(extractError);
+            return extractError;
 
         var promptForLlm =
             $"Instruktion: {instruction}\n\n" +
             $"PDF-filens innehåll ({Path.GetFileName(path)}):\n{content}";
 
-        return Task.FromResult(FileAgentResult.ReadSuccess(
+        return FileAgentResult.ReadSuccess(
             $"✓ PDF läst: {Path.GetFileName(path)}",
-            promptForLlm));
+            promptForLlm);
     }
 
     /// <summary>
-    /// Validates <paramref name="filename"/> as a bare, existing <c>.pdf</c> file inside
-    /// <see cref="BaseDirectory"/>. Returns the resolved path on success, or a
-    /// <see cref="FileAgentResult"/> describing the validation failure.
+    /// Extensions <c>/läs-pdf</c> refuses to fall back to a plain-text read on: their bytes would
+    /// reach the model as mojibake, which is worse than a clear error.
     /// </summary>
-    private (string? Path, FileAgentResult? Error) ResolvePdfPath(string filename)
+    private static readonly HashSet<string> UnreadableAsTextExtensions = new(StringComparer.OrdinalIgnoreCase)
+    { ".exe", ".dll", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".zip", ".gguf", ".mp3", ".mp4", ".wav" };
+
+    /// <summary>
+    /// Resolves <paramref name="filename"/> to a bare, existing file inside
+    /// <see cref="BaseDirectory"/> for <c>/läs-pdf</c>, reporting whether it is actually a PDF.
+    /// Existence is checked before the extension, so a missing file says so rather than
+    /// complaining about its type. A non-PDF is only an error when it is a binary format that
+    /// cannot sensibly be read as text (see <see cref="UnreadableAsTextExtensions"/>) — every
+    /// other file falls back to a plain-text read via <see cref="ReadNonPdfAsTextAsync"/>.
+    /// </summary>
+    private (string? Path, bool IsPdf, FileAgentResult? Error) ResolveReadablePath(string filename)
     {
         if (string.IsNullOrWhiteSpace(filename))
-            return (null, FileAgentResult.Failure("Ange ett filnamn. Exempel: /läs-pdf rapport.pdf Sammanfatta innehållet."));
+            return (null, false, FileAgentResult.Failure("Ange ett filnamn. Exempel: /läs-pdf rapport.pdf Sammanfatta innehållet."));
 
         var path = GetSafePath(filename);
         if (path is null)
-            return (null, FileAgentResult.Failure($"Ogiltigt filnamn: \"{filename}\"."));
-
-        if (!Path.GetExtension(path).Equals(".pdf", Cmp))
-            return (null, FileAgentResult.Failure($"Filen är inte en PDF: {Path.GetFileName(path)}"));
+            return (null, false, FileAgentResult.Failure($"Ogiltigt filnamn: \"{filename}\"."));
 
         if (!File.Exists(path))
-            return (null, FileAgentResult.Failure($"Filen hittades inte: {Path.GetFileName(path)}"));
+            return (null, false, FileAgentResult.Failure($"Filen hittades inte: {Path.GetFileName(path)}"));
 
-        return (path, null);
+        var extension = Path.GetExtension(path);
+        if (extension.Equals(".pdf", Cmp))
+            return (path, true, null);
+
+        if (UnreadableAsTextExtensions.Contains(extension))
+            return (null, false, FileAgentResult.Failure(
+                $"Filen är inte en PDF och kan inte läsas som text: {Path.GetFileName(path)}"));
+
+        return (path, false, null);
+    }
+
+    /// <summary>
+    /// Fallback when <c>/läs-pdf</c> is pointed at a file that isn't a PDF: reads it as plain
+    /// text, exactly as <c>/läs</c> would, since the model's intent — see what is in this file —
+    /// is the same either way and the extension mismatch is a mechanical slip.
+    /// <para>
+    /// A hard error here cost a real goal-agent run a whole review round: the reviewer aimed
+    /// <c>/läs-pdf</c> at a <c>.bas</c> source file, got "Filen är inte en PDF" back, and then
+    /// failed the requirement on the grounds that it could not read the code — turning a wrong
+    /// tool choice into a substantive verdict — instead of retrying with <c>/läs</c>.
+    /// </para>
+    /// </summary>
+    private static async Task<FileAgentResult> ReadNonPdfAsTextAsync(string path, string? instruction)
+    {
+        var name = Path.GetFileName(path);
+
+        string content;
+        try
+        {
+            content = await File.ReadAllTextAsync(path);
+        }
+        catch (Exception ex)
+        {
+            return FileAgentResult.Failure($"Kunde inte läsa filen {name}: {ex.Message}");
+        }
+
+        if (string.IsNullOrWhiteSpace(content))
+            return FileAgentResult.Failure($"Filen är tom: {name}");
+
+        var note = $"OBS: {name} är ingen PDF — filen lästes som vanlig text i stället (samma resultat som /läs {name}).";
+        var body = string.IsNullOrWhiteSpace(instruction)
+            ? $"{note}\n\nFilens innehåll ({name}):\n{TruncateForLlm(content)}"
+            : $"{note}\n\nInstruktion: {instruction}\n\nFilens innehåll ({name}):\n{TruncateForLlm(content)}";
+
+        return FileAgentResult.ReadSuccess($"✓ Fil läst som text (ingen PDF): {name}", body);
     }
 
     /// <summary>
@@ -844,8 +901,8 @@ public class FileAgentService : IFileAgentService
     /// <inheritdoc/>
     public IReadOnlyDictionary<string, string> GetToolDescriptions() => new Dictionary<string, string>
     {
-        ["/läs <filnamn> <instruktion>"] = "Läser innehållet i en fil i agentkatalogen och skickar det tillsammans med instruktionen till dig, t.ex. \"/läs text.txt Sammanfatta innehållet.\"",
-        ["/läs-pdf <filnamn> <instruktion>"] = "Extraherar texten ur en PDF-fil i agentkatalogen och skickar den tillsammans med instruktionen till dig, t.ex. \"/läs-pdf rapport.pdf Sammanfatta innehållet och föreslå en åtgärd.\"",
+        ["/läs <filnamn> <instruktion>"] = "Läser innehållet i en fil i agentkatalogen och skickar det tillsammans med instruktionen till dig, t.ex. \"/läs text.txt Sammanfatta innehållet.\" Använd detta för ALLA filer utom PDF:er — även källkod som .bas, .cs och .txt.",
+        ["/läs-pdf <filnamn> <instruktion>"] = "Extraherar texten ur en PDF-fil i agentkatalogen och skickar den tillsammans med instruktionen till dig, t.ex. \"/läs-pdf rapport.pdf Sammanfatta innehållet och föreslå en åtgärd.\" Endast för filer som slutar på .pdf — för andra filer, använd /läs.",
         ["/skapa <filnamn>"] = "Skapar en ny, tom fil med angivet namn i agentkatalogen. En fil som redan finns lämnas orörd.",
         ["/fyll <filnamn> <beskrivning>"] = "Genererar innehåll utifrån beskrivningen och sparar det i filen. OBS: ersätter HELA filens innehåll — använd /redigera för att ändra eller utöka en befintlig fil.",
         ["/redigera <filnamn> <instruktion>"] = "Läser en fil med radnummer, ber dig ange exakt vilka rader som ska ersättas och med vad (eller var ny kod, t.ex. en ny funktion, ska infogas utan att skriva över något), och uppdaterar sedan filen automatiskt utifrån ditt svar.",

@@ -85,6 +85,11 @@ public interface IFileAgentService
     /// order, each preceded by a <c>--- Page N ---</c> marker. Intended for programmatic/tool-calling
     /// access — e.g. Semantic Kernel function calling via <c>BuiltInFileTools</c> — mirroring
     /// <see cref="ReadFileRawAsync"/> for plain text files.
+    /// <para>
+    /// A file that exists but isn't a PDF is read as plain text instead of rejected (binary
+    /// formats excepted), so a model that reaches for the wrong read tool still gets the file's
+    /// content rather than a dead end.
+    /// </para>
     /// </summary>
     Task<FileAgentResult> ReadPdfFileAsync(string filename);
 
