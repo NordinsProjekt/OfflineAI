@@ -799,9 +799,17 @@ public sealed class GoalAgentService : IGoalAgentService
         var target = candidates[0];
         await _fileAgent.WriteExtractedContentAsync(target, content);
 
-        return new ToolInvocation(
-            "(räddad filskrivning)",
-            $"✓ Fil sparad: {target} — svaret innehöll ett fullständigt filinnehåll men inget verktygskommando, så det tillämpades automatiskt.");
+        var message =
+            $"✓ Fil sparad: {target} — svaret innehöll ett fullständigt filinnehåll men inget verktygskommando, så det tillämpades automatiskt.";
+
+        // Same write-time QBasic check the tool loop applies. This path bypasses AgenticChatService
+        // entirely, so without it a recovered .bas rewrite would be the one write in the whole run
+        // that nothing ever looked at.
+        var qbasicIssues = QBasicStructureLinter.DescribeIssuesAfterWrite(target, content);
+        if (qbasicIssues is not null)
+            message += $"\n{qbasicIssues}";
+
+        return new ToolInvocation("(räddad filskrivning)", message);
     }
 
     /// <summary>

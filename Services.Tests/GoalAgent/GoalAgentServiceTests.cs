@@ -613,6 +613,37 @@ public class GoalAgentServiceTests
     }
 
     [Fact]
+    public async Task RunAsync_RecoveredBasRewriteWithInventedKeyword_IsReportedByTheStructuralCheck()
+    {
+        // This recovery path writes straight through IFileAgentService, bypassing the tool loop
+        // that normally runs the QBasic check — without its own call it would be the one write in
+        // a run that nothing ever looks at, compiler configured or not.
+        var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(workspaceDir);
+            await File.WriteAllTextAsync(Path.Combine(workspaceDir, "game.bas"), "GAMMALT INNEHALL");
+            var fileAgent = new FileAgentService(workspaceDir);
+            var brokenRewrite = "Har ar koden:\n```qbasic\nSCREEN 12\n_LINE (1, 1), (2, 2), 1\nEND\n```\n";
+            var fake = new FakeAgenticChatService(msg =>
+                IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result(brokenRewrite));
+            var sut = new GoalAgentService(fake, fileAgent, maxIterations: 1);
+
+            await sut.RunAsync(
+                "Fixa game.bas",
+                _ => Task.FromResult("KRAV: game.bas innehåller ett fungerande spel."));
+
+            sut.ActivityLog.Should().Contain(line =>
+                line.Contains("räddad filskrivning") && line.Contains("Strukturkontroll") && line.Contains("\"LINE\""));
+        }
+        finally
+        {
+            if (Directory.Exists(workspaceDir))
+                Directory.Delete(workspaceDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_WorkReplyHasCodeFence_ButTwoCandidateFilesExist_DoesNotGuessAndSkipsRecovery()
     {
         var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));

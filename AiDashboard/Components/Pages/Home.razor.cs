@@ -4,6 +4,7 @@ using AiDashboard.State;
 using AiDashboard.Models;
 using AiDashboard.Services.Interfaces;
 using AgentKit.Skills.Files;
+using AgentKit.Skills.Qb64;
 using AgentKit.ToolLoop;
 
 namespace AiDashboard.Components.Pages;
@@ -75,6 +76,24 @@ public sealed partial class Home : IDisposable
         text = text.Replace("\n", "<br>");
 
         return text;
+    }
+
+    /// <summary>
+    /// Adds a chat message listing the QBasic structural/keyword problems in a freshly written
+    /// .bas file, or nothing at all for other file types and files that look fine. Mirrors the
+    /// check <c>AgenticChatService</c> runs on the agent's own writes, so a hand-typed
+    /// <c>/fyll</c> or <c>/redigera</c> in this chat gets the same warning — these two commands
+    /// are handled here directly and never pass through the tool loop.
+    /// </summary>
+    private void AddQbasicCheckMessage(string? filename, string? content)
+    {
+        var issues = QBasicStructureLinter.DescribeIssuesAfterWrite(filename, content);
+        if (issues is null)
+            return;
+
+        var lintMsg = new ChatMessageModel { IsUser = false, Text = issues };
+        lintMsg.FormattedText = FormatMessage(issues, isUser: false);
+        messages.Add(lintMsg);
     }
 
     private void OnComposerTextChanged(string value)
@@ -166,6 +185,8 @@ public sealed partial class Home : IDisposable
                         };
                         confirmMsg.FormattedText = FormatMessage(confirmMsg.Text, isUser: false);
                         messages.Add(confirmMsg);
+
+                        AddQbasicCheckMessage(result.TargetFilename, fileContent);
                     }
                     else
                     {
@@ -206,6 +227,16 @@ public sealed partial class Home : IDisposable
                         var resultMsg = new ChatMessageModel { IsUser = false, Text = applyResult.Message };
                         resultMsg.FormattedText = FormatMessage(applyResult.Message, isUser: false);
                         messages.Add(resultMsg);
+
+                        // The edits are applied inside the file service, which never hands the
+                        // resulting content back — so the file is read from the workspace to check
+                        // what the edit actually produced.
+                        if (applyResult.IsSuccess)
+                        {
+                            var reread = await FileAgent.ReadFileRawAsync(result.TargetFilename!);
+                            if (reread.IsSuccess)
+                                AddQbasicCheckMessage(result.TargetFilename, reread.InjectedContext);
+                        }
                     }
                     else
                     {
