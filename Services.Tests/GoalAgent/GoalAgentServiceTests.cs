@@ -1205,6 +1205,54 @@ public class GoalAgentServiceTests
         }
     }
 
+    /// <summary>
+    /// A behavioural requirement ("hjälten kan styras med piltangenterna") names no file, so the
+    /// verify snapshot used to inline nothing and the reviewer got a bare file listing. In a real
+    /// run that is where it started guessing at read tools — it aimed /läs-pdf at a .bas file and
+    /// then failed the requirement because it could not read the code. The goal names the file, so
+    /// the reviewer is given the same reference texts the work step gets.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_RequirementNamingNoFile_VerifyPromptStillCarriesTheGoalsFileContent()
+    {
+        var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(workspaceDir);
+            await File.WriteAllTextAsync(Path.Combine(workspaceDir, "rpggame.bas"), "UNIKT_INNEHALL_123");
+            var fileAgent = new FileAgentService(workspaceDir);
+            var fake = new FakeAgenticChatService(msg =>
+                IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+            var sut = new GoalAgentService(fake, fileAgent, maxIterations: 1);
+
+            await sut.RunAsync(
+                "Skriv ett RPG-spel i rpggame.bas",
+                _ => Task.FromResult("KRAV: Hjälten kan styras med piltangenterna och attackera med space."));
+
+            var verifyPrompt = fake.ReceivedMessages.Should().ContainSingle(m => IsVerifyPrompt(m)).Subject;
+            verifyPrompt.Should().Contain("UNIKT_INNEHALL_123");
+        }
+        finally
+        {
+            if (Directory.Exists(workspaceDir))
+                Directory.Delete(workspaceDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_VerifyPrompt_TellsReviewerAFailedToolCallIsNotAFailedRequirement()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 1);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        var verifyPrompt = fake.ReceivedMessages.First(IsVerifyPrompt);
+        verifyPrompt.Should().Contain("/läs-pdf är BARA för filer som slutar på .pdf");
+        verifyPrompt.Should().Contain("Underkänn aldrig ett krav enbart för att du inte lyckades läsa en fil");
+    }
+
     // ── QB64 awareness ────────────────────────────────────────────────────
 
     private sealed class FakeQb64ToolService : IQb64ToolService

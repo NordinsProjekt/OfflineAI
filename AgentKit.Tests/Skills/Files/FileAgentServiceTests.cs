@@ -913,15 +913,43 @@ public sealed class FileAgentServiceTests : IDisposable
         result.Message.Should().Contain("Ingen text kunde extraheras");
     }
 
+    /// <summary>
+    /// A goal-agent reviewer aimed <c>/läs-pdf</c> at a <c>.bas</c> source file, got a flat
+    /// "Filen är inte en PDF" back, and then failed the requirement because it "couldn't read the
+    /// code" — a wrong tool choice turned into a verdict about the work. The intent is the same
+    /// for both read tools, so a non-PDF is now read as text rather than rejected.
+    /// </summary>
     [Fact]
-    public async Task ReadPdfFileAsync_NonPdfExtension_ReturnsFailure()
+    public async Task ReadPdfFileAsync_NonPdfExtension_FallsBackToReadingItAsText()
     {
-        await CreateFileAsync("notes.txt", "hej");
+        await CreateFileAsync("rpggame.bas", "PRINT \"hej\"");
 
-        var result = await _sut.ReadPdfFileAsync("notes.txt");
+        var result = await _sut.ReadPdfFileAsync("rpggame.bas");
+
+        result.IsSuccess.Should().BeTrue();
+        result.ResultType.Should().Be(FileAgentResultType.FileRead);
+        result.InjectedContext.Should().Contain("PRINT \"hej\"");
+        result.InjectedContext.Should().Contain("ingen PDF", "the model must know which tool actually answered");
+    }
+
+    [Fact]
+    public async Task ReadPdfFileAsync_NonPdfBinaryFile_ReturnsFailureInsteadOfMojibake()
+    {
+        await File.WriteAllBytesAsync(Path.Combine(_tempDir, "bild.png"), new byte[] { 0x89, 0x50, 0x4E, 0x47 });
+
+        var result = await _sut.ReadPdfFileAsync("bild.png");
 
         result.IsSuccess.Should().BeFalse();
-        result.Message.Should().Contain("inte en PDF");
+        result.Message.Should().Contain("kan inte läsas som text");
+    }
+
+    [Fact]
+    public async Task ReadPdfFileAsync_MissingNonPdfFile_ReportsItAsMissingNotAsWrongType()
+    {
+        var result = await _sut.ReadPdfFileAsync("saknas.bas");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("hittades inte");
     }
 
     [Fact]
@@ -983,6 +1011,20 @@ public sealed class FileAgentServiceTests : IDisposable
 
         result.IsSuccess.Should().BeFalse();
         result.Message.Should().Contain("hittades inte");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LasPdfOnSourceFile_ReadsItAsTextAndKeepsTheInstruction()
+    {
+        await CreateFileAsync("rpggame.bas", "SCREEN 13\nPRINT \"hej\"");
+
+        var result = await _sut.ExecuteAsync(
+            "/läs-pdf rpggame.bas Kontrollera om koden styr hjälten med piltangenterna");
+
+        result.IsSuccess.Should().BeTrue();
+        result.ResultType.Should().Be(FileAgentResultType.FileRead);
+        result.InjectedContext.Should().Contain("Kontrollera om koden styr hjälten");
+        result.InjectedContext.Should().Contain("SCREEN 13");
     }
 
     // ── SaveUploadedFileAsync ─────────────────────────────────────────────
