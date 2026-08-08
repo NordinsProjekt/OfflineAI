@@ -61,7 +61,14 @@ public static class Program
         // Register AppConfiguration
         var appConfig = builder.Configuration.GetSection("AppConfiguration").Get<AppConfiguration>() ?? new AppConfiguration();
         builder.Services.AddSingleton(appConfig);
-        
+
+        // Register the Agent Mode settings (iteration cap, verification temperature) as a
+        // singleton so the Settings page and the Agent Mode page edit the same values, and the
+        // store that persists them (plus the generation settings) to %AppData%\OfflineAI\settings.json.
+        builder.Services.AddSingleton(_ => new AgentSettingsService(appConfig.AgentTools.MaxGoalIterations));
+        builder.Services.AddSingleton<UserSettingsStore>();
+
+
         // Register language services for stop words filtering
         builder.Services.AddSingleton<ILanguageStopWordsService, LanguageStopWordsService>();
 
@@ -96,6 +103,18 @@ public static class Program
             workspaceService.ActiveWorkspaceChanged += workspace => fileAgent.SetBaseDirectory(workspace.Path);
             return fileAgent;
         });
+
+        // Register the workspace backup service: copies the active workspace's editable files
+        // before every goal-agent work step, so a destructive edit (the model reaching for /fyll
+        // on a file it should have edited) can be undone from the Agent Mode page instead of
+        // ending the run's useful output. Backups live in a subdirectory the file agent cannot
+        // reach — it only ever resolves bare filenames in the workspace root.
+        builder.Services.AddSingleton<IWorkspaceBackupService>(sp =>
+            new WorkspaceBackupService(
+                sp.GetRequiredService<IFileAgentService>(),
+                // The run's own transcript is a log of the run, not part of its result, and it is
+                // rewritten continuously — copying it every work step would be pure noise.
+                neverBackedUpNames: new[] { GoalAgentService.TranscriptFileName }));
 
         // Register agent tool registry (used by Gemma 4 CLI tool-calling)
         builder.Services.AddSingleton<IAgentToolRegistry, AgentToolRegistry>();
@@ -166,7 +185,8 @@ public static class Program
                 // Lets the requirement generator emit "compiles via /qb64"-style requirements
                 // when a compiler is configured — without it, "test that the app works" in a
                 // goal silently degrades to file-content checks.
-                sp.GetRequiredService<IQb64ToolService>()));
+                sp.GetRequiredService<IQb64ToolService>(),
+                sp.GetRequiredService<IWorkspaceBackupService>()));
 
         // Register Gemma 4 CLI service. Prefer an explicit Gemma4Cli section, but when its
         // ModelPath is empty fall back to the main Llm model *if that model is itself a Gemma
@@ -191,32 +211,46 @@ public static class Program
         if (!string.IsNullOrWhiteSpace(gemma4CliModel)
             && !string.IsNullOrWhiteSpace(gemma4CliExe))
         {
+            // Built once and registered as its own singleton, not created inside the service
+            // factory: the Settings page binds directly to this instance to retune sampling,
+            // context size, GPU layers and timeouts on the running backend. That works because
+            // every Gemma 4 request spawns a fresh llama-completion process and reads the options
+            // again — there is no loaded state to invalidate.
+            var gemma4Options = new Gemma4CliOptions
+            {
+                LlamaCliPath           = gemma4CliExe,
+                ModelPath              = gemma4CliModel,
+                // In fallback mode inherit the operator's hardware tuning from the Llm section
+                // (they may have deliberately limited GPU layers / context for the GPU).
+                GpuLayers              = gemma4UsingLlmFallback ? appConfig.Llm!.GpuLayers : gemma4CliCfg.GpuLayers,
+                ContextSize            = gemma4UsingLlmFallback ? appConfig.Llm!.ContextSize : gemma4CliCfg.ContextSize,
+                Device                 = !string.IsNullOrWhiteSpace(gemma4CliCfg.Device)
+                                             ? gemma4CliCfg.Device
+                                             : appConfig.Llm?.Device ?? string.Empty,
+                MaxTokens              = gemma4CliCfg.MaxTokens,
+                // The configuration type stores these as float and the options type as double, so
+                // a plain widening conversion turns a configured 0.7 into 0.699999988079071 — which
+                // the settings page would then show, and save back, verbatim.
+                Temperature            = Math.Round((double)gemma4CliCfg.Temperature, 4),
+                TopP                   = Math.Round((double)gemma4CliCfg.TopP, 4),
+                TopK                   = gemma4CliCfg.TopK,
+                TimeoutMs              = gemma4CliCfg.TimeoutMs,
+                PauseTimeoutMs         = gemma4CliCfg.PauseTimeoutMs,
+                MaxToolCallIterations  = gemma4CliCfg.MaxToolCallIterations
+            };
+
+            builder.Services.AddSingleton(gemma4Options);
+            // Pristine copy of what appsettings asked for, so the Settings page's "reset" can put
+            // the live options back without re-reading configuration.
+            builder.Services.AddSingleton(AiDashboard.State.Gemma4SettingsMapper.Capture(gemma4Options));
+
             builder.Services.AddSingleton<IGemma4CliService>(sp =>
             {
-                var opts = new Gemma4CliOptions
-                {
-                    LlamaCliPath           = gemma4CliExe,
-                    ModelPath              = gemma4CliModel,
-                    // In fallback mode inherit the operator's hardware tuning from the Llm section
-                    // (they may have deliberately limited GPU layers / context for the GPU).
-                    GpuLayers              = gemma4UsingLlmFallback ? appConfig.Llm!.GpuLayers : gemma4CliCfg.GpuLayers,
-                    ContextSize            = gemma4UsingLlmFallback ? appConfig.Llm!.ContextSize : gemma4CliCfg.ContextSize,
-                    Device                 = !string.IsNullOrWhiteSpace(gemma4CliCfg.Device)
-                                                 ? gemma4CliCfg.Device
-                                                 : appConfig.Llm?.Device ?? string.Empty,
-                    MaxTokens              = gemma4CliCfg.MaxTokens,
-                    Temperature            = gemma4CliCfg.Temperature,
-                    TopP                   = gemma4CliCfg.TopP,
-                    TopK                   = gemma4CliCfg.TopK,
-                    TimeoutMs              = gemma4CliCfg.TimeoutMs,
-                    PauseTimeoutMs         = gemma4CliCfg.PauseTimeoutMs,
-                    MaxToolCallIterations  = gemma4CliCfg.MaxToolCallIterations
-                };
                 var registry = sp.GetRequiredService<IAgentToolRegistry>();
                 _ = registry; // available for future tool-call wiring
                 var source = gemma4UsingLlmFallback ? " (from Llm config)" : string.Empty;
                 Console.WriteLine($"[+] Gemma 4 CLI service registered (model: {Path.GetFileName(gemma4CliModel)}){source}");
-                return new Gemma4CliService(opts);
+                return new Gemma4CliService(sp.GetRequiredService<Gemma4CliOptions>());
             });
         }
         else
@@ -572,6 +606,12 @@ public static class Program
 
         var app = builder.Build();
 
+        // Re-apply whatever the user last saved on the Settings page, before the first request is
+        // served. Best-effort by design: no saved file (the normal case until the page is used
+        // once), a corrupt file, or a dashboard that can't initialize at all must all leave the
+        // app running on its built-in/appsettings defaults exactly as before.
+        ApplyPersistedUserSettings(app);
+
         // Initialize database tables on startup (non-blocking)
         if (app.Services.GetService<IVectorMemoryRepository>() != null)
         {
@@ -697,6 +737,39 @@ public static class Program
             .AddInteractiveServerRenderMode();
 
         app.Run();
+    }
+
+    /// <summary>
+    /// Applies the settings persisted by the Settings page (<c>%AppData%\OfflineAI\settings.json</c>)
+    /// to the live services. Swallows every failure: settings are a convenience, and a broken
+    /// settings file must never keep the app from starting.
+    /// </summary>
+    private static void ApplyPersistedUserSettings(WebApplication app)
+    {
+        try
+        {
+            var saved = app.Services.GetRequiredService<UserSettingsStore>().Load();
+            if (saved is null)
+                return;
+
+            // Resolving DashboardState constructs it (and its GenerationSettingsService) eagerly.
+            // It can throw when the LLM/chat configuration is incomplete — which is exactly the
+            // case the catch below keeps harmless, since the dashboard pages already report that.
+            var dashboardState = app.Services.GetRequiredService<AiDashboard.State.DashboardState>();
+            var agentSettings = app.Services.GetRequiredService<AgentSettingsService>();
+            UserSettingsStore.ApplyTo(saved, dashboardState.SettingsService, agentSettings);
+
+            var gemma4Options = app.Services.GetService<Gemma4CliOptions>();
+            if (gemma4Options is not null)
+                AiDashboard.State.Gemma4SettingsMapper.ApplyTo(saved.Gemma4, gemma4Options);
+
+            Console.WriteLine("[+] Saved user settings applied");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[!] Warning: Could not apply saved user settings: {ex.Message}");
+            Console.WriteLine("   Continuing with the configured defaults");
+        }
     }
 
     /// <summary>

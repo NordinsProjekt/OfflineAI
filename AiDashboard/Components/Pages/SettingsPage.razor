@@ -1,0 +1,643 @@
+@page "/settings"
+@namespace AiDashboard.Components.Pages
+@using global::Services.Configuration
+@using global::Services.Workspace
+@using global::Application.AI.Gemma4
+@using AiDashboard.State
+@using Microsoft.Extensions.DependencyInjection
+
+@rendermode InteractiveServer
+@inject NavigationManager Navigation
+@inject DashboardState Dashboard
+@inject AppConfiguration Config
+@inject AgentSettingsService AgentSettings
+@inject UserSettingsStore SettingsStore
+@inject IServiceProvider ServiceProvider
+@implements IDisposable
+
+<PageTitle>Settings - OfflineAI</PageTitle>
+
+<div class="oa-quick-ask-page">
+    <div class="oa-quick-header">
+        <button class="oa-back-button" @onclick="@(() => Navigation.NavigateTo("/"))">Back to Home</button>
+        <div class="oa-quick-header-center">
+            <h1>Settings</h1>
+            <p class="oa-quick-subtitle">Every change applies immediately — save to keep it after a restart</p>
+        </div>
+        <button class="oa-back-button oa-header-action" @onclick="Save">Save</button>
+    </div>
+
+    <div class="oa-quick-container oa-settings-container">
+        @if (_status is not null)
+        {
+            <div class="oa-set-status @(_statusIsError ? "error" : "ok")">@_status</div>
+        }
+
+        <div class="oa-settings-grid">
+
+            <!-- ── Backend & model ─────────────────────────────────────────── -->
+            <section class="oa-set-card">
+                <h2>Backend &amp; model</h2>
+                <p class="oa-set-note">
+                    Which local LLM answers chat, Quick Ask, batch jobs and Agent Mode.
+                </p>
+
+                <div class="oa-set-field">
+                    <label for="backend">Active backend</label>
+                    <select id="backend" class="oa-set-input" @bind="SelectedBackend">
+                        <option value="@LlmBackend.Classic">Classic (pooled llama.cpp, supports RAG)</option>
+                        @if (Dashboard.IsGemma4Available)
+                        {
+                            <option value="@LlmBackend.Gemma4Cli">Gemma 4 CLI (chat template, no RAG)</option>
+                        }
+                    </select>
+                    @if (!Dashboard.IsGemma4Available)
+                    {
+                        <small class="oa-set-hint">
+                            The Gemma 4 CLI backend is not configured — set
+                            <code>AppConfiguration:Gemma4Cli:ModelPath</code> (or point
+                            <code>Llm:ModelPath</code> at a Gemma model with <code>ModelType: "Gemma"</code>).
+                        </small>
+                    }
+                </div>
+
+                <div class="oa-set-field">
+                    <label for="model">Model (classic pool)</label>
+                    <select id="model" class="oa-set-input" @bind="Dashboard.ModelService.CurrentModel" @bind:after="SwitchModel">
+                        @foreach (var model in Dashboard.ModelService.AvailableModels)
+                        {
+                            <option value="@model">@model</option>
+                        }
+                    </select>
+                    <small class="oa-set-hint">
+                        Switching reloads the pooled backend. The Gemma 4 CLI backend always uses
+                        the model from configuration and is unaffected.
+                    </small>
+                </div>
+
+                <dl class="oa-set-facts">
+                    <dt>Answering now</dt>
+                    <dd>@(Dashboard.ActiveModelName ?? "unknown")</dd>
+                </dl>
+            </section>
+
+            <!-- ── Agent Mode ──────────────────────────────────────────────── -->
+            <section class="oa-set-card">
+                <h2>Agent Mode</h2>
+                <p class="oa-set-note">
+                    Used by every goal-agent run started from the Agent Mode page.
+                </p>
+
+                <div class="oa-set-field">
+                    <label for="agent-iterations">Max iterations per run</label>
+                    <input id="agent-iterations" type="number" min="1" max="@AgentSettingsService.MaxAllowedIterations"
+                           class="oa-set-input" @bind="AgentSettings.MaxIterations" @bind:event="oninput">
+                    <small class="oa-set-hint">
+                        Work → verify passes before the run gives up. The loop already stops as soon as
+                        every requirement passes, so a higher value only helps a weaker model keep retrying.
+                    </small>
+                </div>
+
+                <label class="oa-switch-row oa-set-switch">
+                    <input type="checkbox" @bind="AgentSettings.RequireApproval">
+                    <span class="oa-switch"></span>
+                    <span>Review requirements before work starts</span>
+                </label>
+                <small class="oa-set-hint">
+                    Pauses each run after the requirements are derived so they can be edited before
+                    any file work happens. A misread goal costs one click here and a whole run if it
+                    slips through. Headless jobs via the API never pause.
+                </small>
+
+                <div class="oa-set-field">
+                    <label for="agent-verify-temp">Verification temperature</label>
+                    <input id="agent-verify-temp" type="number" min="0" max="2" step="0.05"
+                           class="oa-set-input" @bind="AgentSettings.VerificationTemperature" @bind:event="oninput">
+                    <small class="oa-set-hint">
+                        Reviews want deterministic verdicts. Gemma's recommended 1.0 produces intermittent
+                        empty replies — 0.3 is the tested default. Gemma 4 CLI backend only.
+                    </small>
+                </div>
+
+                <div class="oa-set-field">
+                    <label for="agent-stall">Give up after N identical failures</label>
+                    <input id="agent-stall" type="number" min="0" max="@AgentSettingsService.MaxAllowedStallLimit"
+                           class="oa-set-input" @bind="AgentSettings.StallLimit" @bind:event="oninput">
+                    <small class="oa-set-hint">
+                        When every remaining requirement has been rejected for the same reason this many
+                        verifications running, the run stops instead of spending its remaining iterations
+                        replaying the same exchange. 0 turns the check off.
+                    </small>
+                </div>
+
+                <dl class="oa-set-facts">
+                    <dt>Tool-call rounds</dt>
+                    <dd>@Config.AgentTools.MaxToolCallRounds <span class="oa-set-restart">restart</span></dd>
+                    <dt>QB64 compiler</dt>
+                    <dd>@(string.IsNullOrWhiteSpace(Config.AgentTools.Qb64.CompilerPath) ? "not configured — /qb64 is not offered to the model" : Config.AgentTools.Qb64.CompilerPath)</dd>
+                    <dt>External tools</dt>
+                    <dd>@(Config.AgentTools.ExternalTools.Count == 0 ? "none" : string.Join(", ", Config.AgentTools.ExternalTools.Select(t => "/" + t.Command)))</dd>
+                    <dt>API endpoints</dt>
+                    <dd>@(Config.AgentTools.Endpoints.Count == 0 ? "none" : string.Join(", ", Config.AgentTools.Endpoints.Select(e => e.Name)))</dd>
+                </dl>
+            </section>
+
+            <!-- ── Gemma 4 CLI sampling ────────────────────────────────────── -->
+            @if (_gemma4 is not null)
+            {
+                <section class="oa-set-card">
+                    <h2>Gemma 4 CLI</h2>
+                    <p class="oa-set-note">
+                        Applies from the next request — each call starts its own
+                        <code>llama-completion</code> process.
+                    </p>
+
+                    <div class="oa-set-grid2">
+                        <div class="oa-set-field">
+                            <label for="g4-temp">Temperature</label>
+                            <input id="g4-temp" type="number" min="0" max="2" step="0.05" class="oa-set-input"
+                                   @bind="_gemma4.Temperature" @bind:event="oninput">
+                        </div>
+                        <div class="oa-set-field">
+                            <label for="g4-maxtokens">Max tokens</label>
+                            <input id="g4-maxtokens" type="number" min="1" max="32768" class="oa-set-input"
+                                   @bind="_gemma4.MaxTokens" @bind:event="oninput">
+                        </div>
+                        <div class="oa-set-field">
+                            <label for="g4-topp">Top-P</label>
+                            <input id="g4-topp" type="number" min="0" max="1" step="0.01" class="oa-set-input"
+                                   @bind="_gemma4.TopP" @bind:event="oninput">
+                        </div>
+                        <div class="oa-set-field">
+                            <label for="g4-topk">Top-K</label>
+                            <input id="g4-topk" type="number" min="1" max="200" class="oa-set-input"
+                                   @bind="_gemma4.TopK" @bind:event="oninput">
+                        </div>
+                        <div class="oa-set-field">
+                            <label for="g4-ctx">Context size</label>
+                            <input id="g4-ctx" type="number" min="512" step="512" class="oa-set-input"
+                                   @bind="_gemma4.ContextSize" @bind:event="oninput">
+                        </div>
+                        <div class="oa-set-field">
+                            <label for="g4-ngl">GPU layers</label>
+                            <input id="g4-ngl" type="number" min="0" max="99" class="oa-set-input"
+                                   @bind="_gemma4.GpuLayers" @bind:event="oninput">
+                        </div>
+                        <div class="oa-set-field">
+                            <label for="g4-timeout">Timeout (s)</label>
+                            <input id="g4-timeout" type="number" min="10" max="7200" class="oa-set-input"
+                                   value="@(_gemma4.TimeoutMs / 1000)"
+                                   @onchange="@(e => _gemma4.TimeoutMs = ToMilliseconds(e.Value, _gemma4.TimeoutMs))">
+                        </div>
+                        <div class="oa-set-field">
+                            <label for="g4-pause">Pause timeout (s)</label>
+                            <input id="g4-pause" type="number" min="1" max="600" class="oa-set-input"
+                                   value="@(_gemma4.PauseTimeoutMs / 1000)"
+                                   @onchange="@(e => _gemma4.PauseTimeoutMs = ToMilliseconds(e.Value, _gemma4.PauseTimeoutMs))">
+                        </div>
+                    </div>
+
+                    <small class="oa-set-hint">
+                        Context size is the biggest VRAM lever: the KV cache is charged on top of the
+                        model weights, so raising it is what usually turns a working setup into empty
+                        replies. Pause timeout ends a reply after that much silence — raise it for
+                        large or partly CPU-offloaded models.
+                    </small>
+
+                    <dl class="oa-set-facts">
+                        <dt>Model</dt>
+                        <dd>@_gemma4.ModelPath <span class="oa-set-restart">restart</span></dd>
+                        <dt>Executable</dt>
+                        <dd>@_gemma4.LlamaCliPath <span class="oa-set-restart">restart</span></dd>
+                        <dt>Device</dt>
+                        <dd>@(string.IsNullOrWhiteSpace(_gemma4.Device) ? "(llama.cpp default — name one explicitly on multi-GPU machines)" : _gemma4.Device) <span class="oa-set-restart">restart</span></dd>
+                    </dl>
+                </section>
+            }
+
+            <!-- ── Generation (classic backend) ────────────────────────────── -->
+            <section class="oa-set-card">
+                <h2>Generation (classic backend)</h2>
+                <p class="oa-set-note">
+                    Sampling for the pooled backend. The Gemma 4 CLI backend has its own card and
+                    ignores these.
+                </p>
+
+                <div class="oa-set-grid2">
+                    <div class="oa-set-field">
+                        <label for="gen-temp">Temperature</label>
+                        <input id="gen-temp" type="number" min="0" max="2" step="0.05" class="oa-set-input"
+                               @bind="Dashboard.SettingsService.Temperature" @bind:event="oninput">
+                    </div>
+                    <div class="oa-set-field">
+                        <label for="gen-maxtokens">Max tokens</label>
+                        <input id="gen-maxtokens" type="number" min="1" class="oa-set-input"
+                               @bind="Dashboard.SettingsService.MaxTokens" @bind:event="oninput">
+                    </div>
+                    <div class="oa-set-field">
+                        <label for="gen-topk">Top-K</label>
+                        <input id="gen-topk" type="number" min="1" max="200" class="oa-set-input"
+                               @bind="Dashboard.SettingsService.TopK" @bind:event="oninput">
+                    </div>
+                    <div class="oa-set-field">
+                        <label for="gen-topp">Top-P</label>
+                        <input id="gen-topp" type="number" min="0" max="1" step="0.01" class="oa-set-input"
+                               @bind="Dashboard.SettingsService.TopP" @bind:event="oninput">
+                    </div>
+                    <div class="oa-set-field">
+                        <label for="gen-repeat">Repeat penalty</label>
+                        <input id="gen-repeat" type="number" min="0" max="2" step="0.01" class="oa-set-input"
+                               @bind="Dashboard.SettingsService.RepeatPenalty" @bind:event="oninput">
+                    </div>
+                    <div class="oa-set-field">
+                        <label for="gen-presence">Presence penalty</label>
+                        <input id="gen-presence" type="number" min="0" max="2" step="0.01" class="oa-set-input"
+                               @bind="Dashboard.SettingsService.PresencePenalty" @bind:event="oninput">
+                    </div>
+                    <div class="oa-set-field">
+                        <label for="gen-frequency">Frequency penalty</label>
+                        <input id="gen-frequency" type="number" min="0" max="2" step="0.01" class="oa-set-input"
+                               @bind="Dashboard.SettingsService.FrequencyPenalty" @bind:event="oninput">
+                    </div>
+                    <div class="oa-set-field">
+                        <label for="gen-timeout">Timeout (s)</label>
+                        <input id="gen-timeout" type="number" min="10" max="7200" class="oa-set-input"
+                               @bind="Dashboard.SettingsService.TimeoutSeconds" @bind:event="oninput">
+                    </div>
+                    <div class="oa-set-field">
+                        <label for="gen-pause">Pause timeout (s)</label>
+                        <input id="gen-pause" type="number" min="1" max="120" class="oa-set-input"
+                               @bind="Dashboard.SettingsService.PauseTimeoutSeconds" @bind:event="oninput">
+                    </div>
+                </div>
+            </section>
+
+            <!-- ── Modes & hardware ────────────────────────────────────────── -->
+            <section class="oa-set-card">
+                <h2>Modes &amp; hardware</h2>
+
+                <label class="oa-switch-row oa-set-switch">
+                    <input type="checkbox" @bind="Dashboard.SettingsService.RagMode">
+                    <span class="oa-switch"></span>
+                    <span>RAG mode (retrieve knowledge before answering)</span>
+                </label>
+                <label class="oa-switch-row oa-set-switch">
+                    <input type="checkbox" @bind="Dashboard.SettingsService.PerformanceMetrics">
+                    <span class="oa-switch"></span>
+                    <span>Show performance metrics</span>
+                </label>
+                <label class="oa-switch-row oa-set-switch">
+                    <input type="checkbox" @bind="Dashboard.SettingsService.DebugMode">
+                    <span class="oa-switch"></span>
+                    <span>Debug mode (show prompts and debug commands)</span>
+                </label>
+                <label class="oa-switch-row oa-set-switch">
+                    <input type="checkbox" @bind="Dashboard.SettingsService.UseGpu">
+                    <span class="oa-switch"></span>
+                    <span>Use GPU</span>
+                </label>
+
+                @if (Dashboard.SettingsService.UseGpu)
+                {
+                    <div class="oa-set-field">
+                        <label for="gpu-layers">
+                            GPU layers: @(Dashboard.SettingsService.GpuLayers >= 99 ? "Max (auto)" : Dashboard.SettingsService.GpuLayers.ToString())
+                        </label>
+                        <input id="gpu-layers" type="range" min="0" max="99" class="oa-set-range"
+                               @bind="Dashboard.SettingsService.GpuLayers" @bind:event="oninput">
+                        <small class="oa-set-hint">
+                            Max auto-adapts to whichever model is loaded — llama.cpp clamps it to the
+                            model's real layer count. Lower it only to keep layers on the CPU on purpose.
+                        </small>
+                    </div>
+                }
+            </section>
+
+            <!-- ── RAG ─────────────────────────────────────────────────────── -->
+            <section class="oa-set-card">
+                <h2>RAG</h2>
+                <p class="oa-set-note">Applies when RAG mode is on and the classic backend is active.</p>
+
+                <div class="oa-set-grid2">
+                    <div class="oa-set-field">
+                        <label for="rag-topk">Chunks per question</label>
+                        <input id="rag-topk" type="number" min="1" max="5" class="oa-set-input"
+                               @bind="Dashboard.SettingsService.RagTopK" @bind:event="oninput">
+                    </div>
+                    <div class="oa-set-field">
+                        <label for="rag-relevance">Min relevance</label>
+                        <input id="rag-relevance" type="number" min="0.3" max="0.8" step="0.05" class="oa-set-input"
+                               @bind="Dashboard.SettingsService.RagMinRelevanceScore" @bind:event="oninput">
+                    </div>
+                </div>
+                <small class="oa-set-hint">1–5 chunks; relevance 0.3 is loose, 0.8 strict.</small>
+
+                <dl class="oa-set-facts">
+                    <dt>Active table</dt>
+                    <dd>@Dashboard.ActiveTable</dd>
+                    <dt>Collection</dt>
+                    <dd>@Config.Debug.CollectionName</dd>
+                    <dt>Embedding model</dt>
+                    <dd>@(string.IsNullOrWhiteSpace(Config.Embedding.ModelPath) ? "not configured — RAG unavailable" : Config.Embedding.ModelPath)</dd>
+                </dl>
+            </section>
+
+            <!-- ── Workspaces ──────────────────────────────────────────────── -->
+            <section class="oa-set-card">
+                <h2>Workspaces</h2>
+                <p class="oa-set-note">
+                    The agent can only create, read and edit files inside the active workspace.
+                </p>
+
+                @if (_workspaces.Count > 0)
+                {
+                    <div class="oa-set-field">
+                        <label for="workspace">Active workspace</label>
+                        <select id="workspace" class="oa-set-input" @bind="_selectedWorkspaceName" @bind:after="ChangeWorkspaceAsync">
+                            @foreach (var workspaceName in _workspaces.Select(workspace => workspace.Name))
+                            {
+                                <option value="@workspaceName">@workspaceName</option>
+                            }
+                        </select>
+                    </div>
+                }
+
+                @if (_activeWorkspace is not null)
+                {
+                    <dl class="oa-set-facts">
+                        <dt>Folder</dt>
+                        <dd>@_activeWorkspace.Path</dd>
+                    </dl>
+                }
+
+                <div class="oa-set-grid2">
+                    <div class="oa-set-field">
+                        <label for="ws-name">New workspace name</label>
+                        <input id="ws-name" type="text" class="oa-set-input" placeholder="e.g. Project X"
+                               @bind="_newWorkspaceName" @bind:event="oninput">
+                    </div>
+                    <div class="oa-set-field">
+                        <label for="ws-path">Folder path</label>
+                        <input id="ws-path" type="text" class="oa-set-input" placeholder="C:\Path\To\Folder"
+                               @bind="_newWorkspacePath" @bind:event="oninput">
+                    </div>
+                </div>
+                <button class="oa-set-btn" @onclick="AddWorkspaceAsync"
+                        disabled="@(string.IsNullOrWhiteSpace(_newWorkspaceName) || string.IsNullOrWhiteSpace(_newWorkspacePath))">
+                    Add &amp; select
+                </button>
+
+                @if (_workspaces.Count > 1 && _activeWorkspace is not null)
+                {
+                    @if (!_confirmingRemove)
+                    {
+                        <button class="oa-set-btn danger" @onclick="@(() => _confirmingRemove = true)">
+                            Remove "@_activeWorkspace.Name" from the list
+                        </button>
+                    }
+                    else
+                    {
+                        <div class="oa-set-confirm">
+                            <strong>Remove "@_activeWorkspace.Name"?</strong>
+                            <span>The folder and its files stay on disk — only the entry is removed.</span>
+                            <div class="oa-set-grid2">
+                                <button class="oa-set-btn" @onclick="@(() => _confirmingRemove = false)">Cancel</button>
+                                <button class="oa-set-btn danger" @onclick="RemoveWorkspaceAsync">Confirm remove</button>
+                            </div>
+                        </div>
+                    }
+                }
+            </section>
+
+            <!-- ── Paths & system ──────────────────────────────────────────── -->
+            <section class="oa-set-card">
+                <h2>Paths &amp; system</h2>
+                <p class="oa-set-note">
+                    From <code>appsettings.json</code> / user secrets. Changing these needs a restart.
+                </p>
+
+                <dl class="oa-set-facts">
+                    <dt>LLM executable</dt>
+                    <dd>@Fallback(Config.Llm.ExecutablePath)</dd>
+                    <dt>LLM model</dt>
+                    <dd>@Fallback(Config.Llm.ModelPath)</dd>
+                    <dt>Model type</dt>
+                    <dd>@Fallback(Config.Llm.ModelType)</dd>
+                    <dt>Device</dt>
+                    <dd>@Fallback(Config.Llm.Device, "(llama.cpp default)")</dd>
+                    <dt>Context size</dt>
+                    <dd>@Config.Llm.ContextSize</dd>
+                    <dt>Pool</dt>
+                    <dd>@Config.Pool.MaxInstances instance(s), @Config.Pool.TimeoutMs ms timeout</dd>
+                    <dt>Inbox</dt>
+                    <dd>@Fallback(Config.Folders.InboxFolder)</dd>
+                    <dt>Archive</dt>
+                    <dd>@Fallback(Config.Folders.ArchiveFolder)</dd>
+                    <dt>Workspace root</dt>
+                    <dd>@Fallback(Config.Folders.WorkspaceRoot, "(parent of the agent files folder)")</dd>
+                    <dt>Cluster peers</dt>
+                    <dd>@(Config.Cluster.Peers.Count == 0 ? "none — every job runs locally" : string.Join(", ", Config.Cluster.Peers.Select(p => p.Name)))</dd>
+                    <dt>Saved settings file</dt>
+                    <dd>@SettingsStore.FilePath</dd>
+                </dl>
+            </section>
+        </div>
+
+        <div class="oa-set-actions">
+            <button class="oa-set-btn primary" @onclick="Save">Save settings</button>
+            <button class="oa-set-btn" @onclick="ResetToDefaults">Reset to defaults</button>
+            <button class="oa-set-btn danger" @onclick="ForgetSaved" disabled="@(!SettingsStore.Exists)">
+                Delete saved file
+            </button>
+            <span class="oa-set-actions-note">
+                Saving writes the values above to <code>settings.json</code> so they survive a restart.
+                Everything else on this page comes from configuration and is shown read-only.
+            </span>
+        </div>
+    </div>
+</div>
+
+@code {
+    private Gemma4CliOptions? _gemma4;
+    private Gemma4UserSettings? _gemma4Defaults;
+
+    private IReadOnlyList<WorkspaceInfo> _workspaces = Array.Empty<WorkspaceInfo>();
+    private WorkspaceInfo? _activeWorkspace;
+    private string? _selectedWorkspaceName;
+    private string _newWorkspaceName = string.Empty;
+    private string _newWorkspacePath = string.Empty;
+    private bool _confirmingRemove;
+
+    private string? _status;
+    private bool _statusIsError;
+
+    /// <summary>
+    /// The backend selector binds here rather than straight to <see cref="DashboardState"/> so the
+    /// page re-renders (the property is a plain auto-property with no change notification) and so
+    /// selecting Gemma 4 while it is unavailable can't leave the app on a backend that isn't there.
+    /// </summary>
+    private LlmBackend SelectedBackend
+    {
+        get => Dashboard.SelectedBackend;
+        set => Dashboard.SelectedBackend = value == LlmBackend.Gemma4Cli && !Dashboard.IsGemma4Available
+            ? LlmBackend.Classic
+            : value;
+    }
+
+    protected override void OnInitialized()
+    {
+        // Registered only when the Gemma 4 CLI backend is configured, so both may be absent.
+        _gemma4 = ServiceProvider.GetService<Gemma4CliOptions>();
+        _gemma4Defaults = ServiceProvider.GetService<Gemma4UserSettings>();
+
+        Dashboard.OnChange += Refresh;
+        AgentSettings.OnChange += Refresh;
+        RefreshWorkspaces();
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private void RefreshWorkspaces()
+    {
+        _workspaces = Dashboard.GetWorkspaces();
+        _activeWorkspace = Dashboard.GetActiveWorkspace();
+        _selectedWorkspaceName = _activeWorkspace?.Name;
+    }
+
+    private async Task SwitchModel() => await Dashboard.SwitchModelAsync();
+
+    private async Task ChangeWorkspaceAsync()
+    {
+        _confirmingRemove = false;
+
+        if (string.IsNullOrWhiteSpace(_selectedWorkspaceName)
+            || string.Equals(_selectedWorkspaceName, _activeWorkspace?.Name, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        await RunWorkspaceActionAsync(
+            () => Dashboard.SetActiveWorkspaceAsync(_selectedWorkspaceName!),
+            $"Active workspace is now \"{_selectedWorkspaceName}\".");
+    }
+
+    private async Task AddWorkspaceAsync()
+    {
+        var name = _newWorkspaceName.Trim();
+        var path = _newWorkspacePath.Trim();
+        if (name.Length == 0 || path.Length == 0)
+            return;
+
+        await RunWorkspaceActionAsync(
+            async () =>
+            {
+                await Dashboard.AddWorkspaceAsync(name, path);
+                await Dashboard.SetActiveWorkspaceAsync(name);
+                _newWorkspaceName = string.Empty;
+                _newWorkspacePath = string.Empty;
+            },
+            $"Workspace \"{name}\" added and selected.");
+    }
+
+    private async Task RemoveWorkspaceAsync()
+    {
+        if (_activeWorkspace is null)
+            return;
+
+        var name = _activeWorkspace.Name;
+        _confirmingRemove = false;
+
+        await RunWorkspaceActionAsync(
+            () => Dashboard.RemoveWorkspaceAsync(name),
+            $"Workspace \"{name}\" removed from the list (the folder is untouched).");
+    }
+
+    /// <summary>
+    /// Runs a workspace change and reports the outcome in the page's status line. Adding a
+    /// workspace is the one action here that legitimately fails — a duplicate name, or a path
+    /// outside the configured workspace root, which the service rejects on purpose — and the
+    /// message is the only place the user would see why.
+    /// </summary>
+    private async Task RunWorkspaceActionAsync(Func<Task> action, string successMessage)
+    {
+        try
+        {
+            await action();
+            RefreshWorkspaces();
+            SetStatus(successMessage, isError: false);
+        }
+        catch (Exception ex)
+        {
+            RefreshWorkspaces();
+            SetStatus(ex.Message, isError: true);
+        }
+    }
+
+    private void Save()
+    {
+        try
+        {
+            var snapshot = UserSettingsStore.Capture(Dashboard.SettingsService, AgentSettings);
+            if (_gemma4 is not null)
+                snapshot.Gemma4 = Gemma4SettingsMapper.Capture(_gemma4);
+
+            SettingsStore.Save(snapshot);
+            SetStatus($"Saved to {SettingsStore.FilePath}", isError: false);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Could not save settings: {ex.Message}", isError: true);
+        }
+    }
+
+    /// <summary>
+    /// Restores the built-in defaults for the generation and agent settings, and puts the Gemma 4
+    /// options back to what configuration asked for at startup. The saved file is deliberately
+    /// left alone: until the user saves, a restart brings the previously saved values back, so a
+    /// reset that was pressed by mistake costs nothing.
+    /// </summary>
+    private void ResetToDefaults()
+    {
+        Dashboard.SettingsService.ResetToDefaults();
+        AgentSettings.ResetToDefaults();
+
+        if (_gemma4 is not null && _gemma4Defaults is not null)
+            Gemma4SettingsMapper.ApplyTo(_gemma4Defaults, _gemma4);
+
+        SetStatus("Reset to defaults. Save to make it stick across a restart.", isError: false);
+    }
+
+    private void ForgetSaved()
+    {
+        try
+        {
+            var deleted = SettingsStore.Delete();
+            SetStatus(
+                deleted
+                    ? "Saved settings deleted — the next restart uses the configured defaults."
+                    : "There was no saved settings file to delete.",
+                isError: false);
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Could not delete the settings file: {ex.Message}", isError: true);
+        }
+    }
+
+    private void SetStatus(string message, bool isError)
+    {
+        _status = message;
+        _statusIsError = isError;
+    }
+
+    /// <summary>Converts a seconds input back to milliseconds, keeping the old value if unparseable.</summary>
+    private static int ToMilliseconds(object? value, int currentMs)
+        => int.TryParse(value?.ToString(), out var seconds) && seconds > 0 ? seconds * 1000 : currentMs;
+
+    private static string Fallback(string? value, string placeholder = "not configured")
+        => string.IsNullOrWhiteSpace(value) ? placeholder : value;
+
+    public void Dispose()
+    {
+        Dashboard.OnChange -= Refresh;
+        AgentSettings.OnChange -= Refresh;
+    }
+}

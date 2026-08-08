@@ -1,5 +1,6 @@
 @page "/agent-mode"
 @namespace AiDashboard.Components.Pages
+@using global::Services.Configuration
 @using global::Services.GoalAgent
 @using global::Services.Workspace
 @using AiDashboard.State
@@ -9,6 +10,8 @@
 @inject DashboardState Dashboard
 @inject IGoalAgentService GoalAgent
 @inject IWorkspaceService Workspaces
+@inject IWorkspaceBackupService Backups
+@inject AgentSettingsService AgentSettings
 @implements IDisposable
 
 <PageTitle>Agent Mode - OfflineAI</PageTitle>
@@ -36,11 +39,18 @@
                       disabled="@GoalAgent.IsRunning"
                       rows="3"></textarea>
 
-            <div class="oa-field oa-goal-iterations-field">
-                <label title="Caps how many work → verify passes the agent makes before giving up. Higher lets it retry more, but costs more compute per run.">Max iterations</label>
-                <input type="number" min="1" max="100" class="oa-text" style="width: 6rem;"
-                       @bind="_maxIterationsInput" @bind:event="oninput"
-                       disabled="@GoalAgent.IsRunning">
+            <div class="oa-goal-options">
+                <div class="oa-field oa-goal-iterations-field">
+                    <label title="Caps how many work → verify passes the agent makes before giving up. Higher lets it retry more, but costs more compute per run. Shared with the Settings page.">Max iterations</label>
+                    <input type="number" min="1" max="@AgentSettingsService.MaxAllowedIterations" class="oa-text" style="width: 6rem;"
+                           @bind="AgentSettings.MaxIterations" @bind:event="oninput"
+                           disabled="@GoalAgent.IsRunning">
+                </div>
+
+                <label class="oa-goal-approval-toggle" title="Pauses after the requirements are derived so you can edit them before any file work starts. A misread goal is cheap to fix here and expensive to discover twenty iterations later.">
+                    <input type="checkbox" @bind="AgentSettings.RequireApproval" disabled="@GoalAgent.IsRunning">
+                    <span>Review requirements before work starts</span>
+                </label>
             </div>
 
             <div class="oa-batch-controls">
@@ -50,16 +60,33 @@
                 @if (GoalAgent.IsRunning)
                 {
                     <button class="oa-batch-stop-btn" @onclick="@(() => GoalAgent.RequestStop())">
-                        Stop after current step
+                        @(GoalAgent.IsAwaitingApproval ? "Cancel run" : "Stop")
                     </button>
                 }
-                else if (GoalAgent.Phase != GoalAgentPhase.Idle)
+                else
                 {
-                    <button class="oa-batch-clear-btn" @onclick="@(() => GoalAgent.Reset())">
-                        Reset
-                    </button>
+                    @if (GoalAgent.CanContinue)
+                    {
+                        <button class="oa-batch-start-btn oa-goal-continue-btn" @onclick="ContinueRun">
+                            Continue (@AgentSettings.MaxIterations more iterations)
+                        </button>
+                    }
+                    @if (GoalAgent.Phase != GoalAgentPhase.Idle)
+                    {
+                        <button class="oa-batch-clear-btn" @onclick="@(() => GoalAgent.Reset())">
+                            Reset
+                        </button>
+                    }
                 }
             </div>
+
+            @if (GoalAgent.CanContinue)
+            {
+                <p class="oa-goal-continue-hint">
+                    Continuing keeps the requirements above and everything already verified — it picks
+                    up where the run stopped instead of starting over.
+                </p>
+            }
 
             @if (GoalAgent.Phase != GoalAgentPhase.Idle)
             {
@@ -77,6 +104,52 @@
                 <p class="oa-batch-status">@Dashboard.StatusMessage</p>
             }
 
+            @if (GoalAgent.IsAwaitingApproval)
+            {
+                <div class="oa-goal-approval">
+                    <div class="oa-goal-approval-title">Review the requirements</div>
+                    <p class="oa-goal-approval-intro">
+                        These are what the agent will work towards and verify against — nothing has been
+                        written to the workspace yet. Edit the wording, drop what the goal doesn't
+                        actually require, and add anything the model missed.
+                    </p>
+
+                    @for (var i = 0; i < _editedRequirements.Count; i++)
+                    {
+                        var index = i;
+                        <div class="oa-goal-approval-row">
+                            <span class="oa-batch-job-index">#@(index + 1)</span>
+                            <textarea class="oa-batch-input oa-goal-approval-input" rows="2"
+                                      value="@_editedRequirements[index]"
+                                      @onchange="@(e => _editedRequirements[index] = e.Value?.ToString() ?? string.Empty)"></textarea>
+                            <button class="oa-batch-clear-btn oa-goal-approval-remove"
+                                    title="Remove this requirement"
+                                    @onclick="@(() => _editedRequirements.RemoveAt(index))">Remove</button>
+                        </div>
+                    }
+
+                    <div class="oa-goal-approval-row">
+                        <span class="oa-batch-job-index">+</span>
+                        <textarea class="oa-batch-input oa-goal-approval-input" rows="2"
+                                  placeholder="Add another requirement the agent must satisfy"
+                                  @bind="_newRequirement" @bind:event="oninput"></textarea>
+                        <button class="oa-batch-clear-btn oa-goal-approval-remove"
+                                disabled="@string.IsNullOrWhiteSpace(_newRequirement)"
+                                @onclick="AddRequirement">Add</button>
+                    </div>
+
+                    <div class="oa-batch-controls">
+                        <button class="oa-batch-start-btn" @onclick="ApproveRequirements"
+                                disabled="@(!_editedRequirements.Any(r => !string.IsNullOrWhiteSpace(r)))">
+                            Approve and start working
+                        </button>
+                        <button class="oa-batch-clear-btn" @onclick="ResetEditedRequirements">
+                            Undo my edits
+                        </button>
+                    </div>
+                </div>
+            }
+
             <div class="oa-batch-job-list">
                 @{
                     var requirements = GoalAgent.Requirements;
@@ -85,7 +158,7 @@
                 {
                     <p class="oa-batch-empty">No requirements yet. Describe the desired end result above and run the agent.</p>
                 }
-                else
+                else if (!GoalAgent.IsAwaitingApproval)
                 {
                     @for (var i = 0; i < requirements.Count; i++)
                     {
@@ -105,6 +178,44 @@
                     }
                 }
             </div>
+
+            @if (_backups.Count > 0)
+            {
+                <div class="oa-goal-backups">
+                    <button class="oa-goal-backups-toggle" @onclick="ToggleBackups">
+                        @(_showBackups ? "▾" : "▸") Workspace backups (@_backups.Count)
+                    </button>
+
+                    @if (_showBackups)
+                    {
+                        <p class="oa-goal-backups-intro">
+                            Taken automatically before every work step. Restoring copies those files back
+                            over the workspace; anything created later is left where it is.
+                        </p>
+
+                        @if (_restoreMessage is not null)
+                        {
+                            <p class="oa-goal-backups-message @(_restoreFailed ? "error" : "ok")">@_restoreMessage</p>
+                        }
+
+                        @foreach (var backup in _backups)
+                        {
+                            var id = backup.Id;
+                            <div class="oa-goal-backup-row">
+                                <span class="oa-goal-backup-time">@backup.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")</span>
+                                <span class="oa-goal-backup-label">@backup.Label</span>
+                                <span class="oa-goal-backup-files">@backup.FileCount file(s) · @FormatSize(backup.TotalBytes)</span>
+                                <button class="oa-batch-clear-btn oa-goal-backup-restore"
+                                        disabled="@GoalAgent.IsRunning"
+                                        title="@(GoalAgent.IsRunning ? "Stop the run first — restoring under a working agent would fight it" : "Copy these files back into the workspace")"
+                                        @onclick="@(() => RestoreBackup(id))">
+                                    Restore
+                                </button>
+                            </div>
+                        }
+                    }
+                </div>
+            }
 
             @{
                 var log = GoalAgent.ActivityLog;
@@ -130,22 +241,119 @@
 
 @code {
     private string _goalDescription = string.Empty;
-    private int _maxIterationsInput;
 
-    // Verification wants deterministic verdicts, not creativity: Gemma's recommended 1.0 gives
-    // intermittent empty/garbled replies, which in a real run burned a third of all reviews.
-    // Only applies to the Gemma 4 CLI backend; the classic backend keeps its own settings.
-    private const double VerificationTemperature = 0.3;
+    /// <summary>
+    /// The requirement list as the user is editing it during the approval pause. Held here rather
+    /// than in the service so an abandoned edit changes nothing: only "Approve" hands it over.
+    /// </summary>
+    private readonly List<string> _editedRequirements = new();
+    private string _newRequirement = string.Empty;
+
+    /// <summary>Phase seen on the previous render, used to detect entry into the approval pause.</summary>
+    private GoalAgentPhase _lastPhase = GoalAgentPhase.Idle;
+
+    private IReadOnlyList<WorkspaceBackupInfo> _backups = Array.Empty<WorkspaceBackupInfo>();
+    private bool _showBackups;
+    private string? _restoreMessage;
+    private bool _restoreFailed;
 
     protected override void OnInitialized()
     {
         GoalAgent.OnChange += Refresh;
-        // Pre-fill from the configured default (Llm:AgentTools:MaxGoalIterations) so the field
-        // shows a sensible value even before the user has ever touched it.
-        _maxIterationsInput = GoalAgent.MaxIterations;
+        // The iteration cap and the verification temperature live in AgentSettingsService (shared
+        // with the Settings page and persisted there), so they survive navigation and restarts
+        // instead of resetting to the configured default every time this page is opened.
+        AgentSettings.OnChange += Refresh;
+
+        // Re-entering the page mid-pause (navigating away and back) must still show the list.
+        if (GoalAgent.IsAwaitingApproval)
+            ResetEditedRequirements();
+        _lastPhase = GoalAgent.Phase;
+        RefreshBackups();
     }
 
-    private void Refresh() => InvokeAsync(StateHasChanged);
+    private void Refresh()
+    {
+        // Seed the editor the moment the run parks on the approval gate — the requirements only
+        // exist from that point, and re-seeding on every notification would discard the user's
+        // edits as the service fires OnChange for its own reasons.
+        if (GoalAgent.Phase == GoalAgentPhase.AwaitingApproval && _lastPhase != GoalAgentPhase.AwaitingApproval)
+            ResetEditedRequirements();
+
+        // A backup is taken at the start of every work step, so the list is only ever stale for as
+        // long as one phase change — cheap to re-read (a directory listing) and always current.
+        if (GoalAgent.Phase != _lastPhase)
+            RefreshBackups();
+
+        _lastPhase = GoalAgent.Phase;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void RefreshBackups() => _backups = Backups.GetBackups();
+
+    private void ToggleBackups()
+    {
+        _showBackups = !_showBackups;
+        if (_showBackups)
+            RefreshBackups();
+    }
+
+    private void RestoreBackup(string backupId)
+    {
+        if (GoalAgent.IsRunning)
+            return;
+
+        try
+        {
+            var restored = Backups.Restore(backupId);
+            _restoreFailed = false;
+            _restoreMessage = $"Restored {restored} file(s) into the workspace.";
+        }
+        catch (Exception ex)
+        {
+            _restoreFailed = true;
+            _restoreMessage = $"Could not restore: {ex.Message}";
+        }
+
+        RefreshBackups();
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes >= 1024 * 1024)
+            return $"{bytes / (1024d * 1024d):F1} MB";
+
+        return bytes >= 1024 ? $"{bytes / 1024d:F0} kB" : $"{bytes} B";
+    }
+
+    private void ResetEditedRequirements()
+    {
+        _editedRequirements.Clear();
+        _editedRequirements.AddRange(GoalAgent.Requirements.Select(r => r.Description));
+        _newRequirement = string.Empty;
+    }
+
+    private void AddRequirement()
+    {
+        if (string.IsNullOrWhiteSpace(_newRequirement))
+            return;
+
+        _editedRequirements.Add(_newRequirement.Trim());
+        _newRequirement = string.Empty;
+    }
+
+    private void ApproveRequirements()
+    {
+        var approved = _editedRequirements
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .Select(r => r.Trim())
+            .ToList();
+
+        if (approved.Count == 0)
+            return;
+
+        GoalAgent.ApproveRequirements(approved);
+    }
 
     private void StartRun()
     {
@@ -160,24 +368,54 @@
         // GoalAgent.OnChange as the phase and requirement statuses change — same
         // background-progress pattern as BatchProcessingPage. RunAsync itself never throws for
         // LLM/tool failures (it ends in the Failed phase instead).
+        //
+        // The LLM delegates read GoalAgent.RunToken *per call* rather than capturing a token from
+        // here, so pressing Stop kills the llama-completion process that is generating right now —
+        // and keeps doing so even if this page component was rebuilt while the run continued.
         _ = GoalAgent.RunAsync(
             _goalDescription.Trim(),
-            Dashboard.SendQuickAskActiveAsync,
+            msg => Dashboard.SendQuickAskActiveAsync(msg, null, GoalAgent.RunToken),
             status => Dashboard.StatusMessage = status,
             CancellationToken.None,
             Dashboard.ActiveModelName,
             Dashboard.CurrentConversationId,
-            verifySendToLlm: msg => Dashboard.SendQuickAskActiveAsync(msg, VerificationTemperature),
-            maxIterations: _maxIterationsInput);
+            verifySendToLlm: msg => Dashboard.SendQuickAskActiveAsync(msg, AgentSettings.VerificationTemperature, GoalAgent.RunToken),
+            maxIterations: AgentSettings.MaxIterations,
+            requireApproval: AgentSettings.RequireApproval,
+            stallLimit: AgentSettings.StallLimit);
+    }
+
+    /// <summary>
+    /// Resumes the last run with a fresh iteration budget, keeping its requirements and verdicts.
+    /// Same fire-and-forget shape as <see cref="StartRun"/>.
+    /// </summary>
+    private void ContinueRun()
+    {
+        if (!GoalAgent.CanContinue)
+            return;
+
+        Dashboard.StartNewConversation();
+
+        _ = GoalAgent.ContinueAsync(
+            msg => Dashboard.SendQuickAskActiveAsync(msg, null, GoalAgent.RunToken),
+            status => Dashboard.StatusMessage = status,
+            CancellationToken.None,
+            Dashboard.ActiveModelName,
+            Dashboard.CurrentConversationId,
+            verifySendToLlm: msg => Dashboard.SendQuickAskActiveAsync(msg, AgentSettings.VerificationTemperature, GoalAgent.RunToken),
+            maxIterations: AgentSettings.MaxIterations,
+            stallLimit: AgentSettings.StallLimit);
     }
 
     private static string PhaseText(GoalAgentPhase phase) => phase switch
     {
         GoalAgentPhase.GeneratingRequirements => "Generating requirements",
+        GoalAgentPhase.AwaitingApproval => "Waiting for your approval",
         GoalAgentPhase.Working => "Working",
         GoalAgentPhase.Verifying => "Verifying",
         GoalAgentPhase.Completed => "All green",
         GoalAgentPhase.MaxIterationsReached => "Iteration cap reached",
+        GoalAgentPhase.Stalled => "Stopped making progress",
         GoalAgentPhase.Stopped => "Stopped",
         GoalAgentPhase.Failed => "Failed",
         _ => "Idle"
@@ -186,8 +424,9 @@
     private static string PhaseClass(GoalAgentPhase phase) => phase switch
     {
         GoalAgentPhase.Completed => "green",
-        GoalAgentPhase.MaxIterationsReached or GoalAgentPhase.Failed => "red",
+        GoalAgentPhase.MaxIterationsReached or GoalAgentPhase.Failed or GoalAgentPhase.Stalled => "red",
         GoalAgentPhase.Stopped => "gray",
+        GoalAgentPhase.AwaitingApproval => "amber",
         _ => "blue"
     };
 
@@ -212,5 +451,6 @@
     public void Dispose()
     {
         GoalAgent.OnChange -= Refresh;
+        AgentSettings.OnChange -= Refresh;
     }
 }

@@ -537,16 +537,29 @@ public class DashboardState
     /// to the Gemma 4 CLI backend — the classic backend already runs at its configured
     /// Generation temperature.
     /// </summary>
-    public Task<string> SendQuickAskActiveAsync(string message, double? gemma4Temperature)
+    /// <param name="cancellationToken">
+    /// Aborts the call. Only honoured by the Gemma 4 CLI backend, where each call is its own
+    /// subprocess that can be killed: cancelling kills it and throws
+    /// <see cref="OperationCanceledException"/>, which is what makes Agent Mode's Stop button
+    /// take effect during a long generation instead of only between steps. The classic pooled
+    /// backend keeps a shared process alive across calls and has no per-call abort.
+    /// </param>
+    public Task<string> SendQuickAskActiveAsync(
+        string message,
+        double? gemma4Temperature,
+        CancellationToken cancellationToken = default)
         => SelectedBackend == LlmBackend.Gemma4Cli && Gemma4CliService != null
-            ? SendViaGemma4Async(message, gemma4Temperature)
+            ? SendViaGemma4Async(message, gemma4Temperature, cancellationToken)
             : SendQuickAskAsync(message);
 
-    private async Task<string> SendViaGemma4Async(string message, double? temperatureOverride = null)
+    private async Task<string> SendViaGemma4Async(
+        string message,
+        double? temperatureOverride = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var response = await Gemma4CliService!.ChatAsync(message, temperatureOverride);
+            var response = await Gemma4CliService!.ChatAsync(message, temperatureOverride, cancellationToken);
 
             // Persist the turn (grouped under the current conversation/session) so
             // Gemma 4 responses are saved just like the classic backend's.
@@ -556,6 +569,13 @@ public class DashboardState
             }
 
             return response;
+        }
+        catch (OperationCanceledException)
+        {
+            // Deliberately not turned into an "[ERROR] ..." answer string like every other failure:
+            // a cancellation is the caller's own doing, and the goal agent relies on the exception
+            // to end the run as Stopped instead of feeding an error message to the next step.
+            throw;
         }
         catch (Exception ex)
         {

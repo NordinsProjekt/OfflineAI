@@ -11,6 +11,7 @@ using Application.AI.Pooling;
 using Services.Configuration;
 using Services.GoalAgent;
 using Services.Repositories;
+using Services.Workspace;
 
 namespace AgentKit.Api.Services;
 
@@ -119,7 +120,14 @@ public sealed class AgentJobService : IAgentJobService
             agenticChat,
             fileAgent,
             maxIterations ?? _appConfig.AgentTools.MaxGoalIterations,
-            _runRepository);
+            _runRepository,
+            qb64Tools: null,
+            // Unattended jobs are exactly where a destructive edit costs the most: nobody is
+            // watching, and the workspace is the only record of the work. The backups sit inside
+            // the job's own workspace directory, so they are downloadable with the rest of it.
+            backups: new WorkspaceBackupService(
+                fileAgent,
+                neverBackedUpNames: new[] { GoalAgentService.TranscriptFileName }));
 
         _jobs[jobId] = new LocalJobEntry(goalAgent, workspacePath);
 

@@ -23,6 +23,32 @@ public interface IGoalAgentService
     /// <summary>True while <see cref="RunAsync"/> is executing.</summary>
     bool IsRunning { get; }
 
+    /// <summary>
+    /// True while the run is paused waiting for <see cref="ApproveRequirements"/> — the run is
+    /// still "running", it is just not doing any work until the requirement list is accepted.
+    /// </summary>
+    bool IsAwaitingApproval { get; }
+
+    /// <summary>
+    /// True when <see cref="ContinueAsync"/> would do something: a finished run that did not end
+    /// all-green and still has requirements to work on. False while a run is active, after a
+    /// completed ("all green") run, and before the first run.
+    /// </summary>
+    bool CanContinue { get; }
+
+    /// <summary>
+    /// The active run's cancellation token — linked to whatever token the caller passed, and
+    /// additionally cancelled by <see cref="RequestStop"/>. <see cref="CancellationToken.None"/>
+    /// when no run is active.
+    /// <para>
+    /// Build the <c>sendToLlm</c> delegate around this rather than around a token the caller owns:
+    /// it is the only way a stop can abort an LLM call that is already generating, and because it
+    /// is read from the service on every call it keeps working even for a UI that was rebuilt
+    /// mid-run (navigating away from the page and back).
+    /// </para>
+    /// </summary>
+    CancellationToken RunToken { get; }
+
     /// <summary>The goal description of the current/last run, or null before the first run.</summary>
     string? GoalDescription { get; }
 
@@ -83,6 +109,17 @@ public interface IGoalAgentService
     /// (e.g. a job id an API returned to its caller before the run started) look the same row up
     /// later by that id. Ignored when the service was constructed without a run repository.
     /// </param>
+    /// <param name="requireApproval">
+    /// When true the run pauses in <see cref="GoalAgentPhase.AwaitingApproval"/> once the
+    /// requirements have been derived, and does no file work until <see cref="ApproveRequirements"/>
+    /// is called (or the run is stopped). Leave false for unattended/headless callers, which have
+    /// nobody to answer the prompt.
+    /// </param>
+    /// <param name="stallLimit">
+    /// Optional. Overrides, for this run, how many consecutive identical failures across every
+    /// remaining requirement end the run early in <see cref="GoalAgentPhase.Stalled"/>. 0 disables
+    /// the check; null falls back to the value the service was constructed with.
+    /// </param>
     /// <remarks>
     /// When the service was constructed with a file agent, the complete raw transcript of the
     /// run (every prompt, every LLM reply including internal tool-call rounds, executed tool
@@ -100,11 +137,61 @@ public interface IGoalAgentService
         Guid? conversationId = null,
         Func<string, Task<string>>? verifySendToLlm = null,
         int? maxIterations = null,
-        Guid? runId = null);
+        Guid? runId = null,
+        bool requireApproval = false,
+        int? stallLimit = null);
 
     /// <summary>
-    /// Requests the run stop at the next step boundary (between work items or verifications).
-    /// Cannot interrupt a single in-flight LLM call.
+    /// Resumes a finished run that did not end all-green: keeps the goal, the requirement list and
+    /// every requirement's current verdict, and runs the work → verify loop for another
+    /// <paramref name="maxIterations"/> iterations. No-ops unless <see cref="CanContinue"/> is true.
+    /// <para>
+    /// Requirement generation is deliberately skipped — the requirements have already been derived
+    /// (and possibly approved by hand), and re-deriving them from the same goal description would
+    /// throw that away and could produce a different list, making the earlier verdicts meaningless.
+    /// </para>
+    /// <para>
+    /// The continuation is recorded as its own run in the history (a run row is closed when it
+    /// ends), marked as a continuation in its activity log. The workspace transcript is appended
+    /// to rather than overwritten, so the full story stays in one file.
+    /// </para>
+    /// </summary>
+    /// <param name="maxIterations">
+    /// Iteration cap for the continuation only. Non-positive or null falls back to the cap the
+    /// service was constructed with — it is not inherited from the run being continued.
+    /// </param>
+    /// <param name="stallLimit">
+    /// Stall limit for the continuation only; see <see cref="RunAsync"/>. The repeat counters
+    /// themselves start fresh, so continuing a stalled run always gets a real attempt before it
+    /// can give up again.
+    /// </param>
+    Task ContinueAsync(
+        Func<string, Task<string>> sendToLlm,
+        Action<string>? onToolStatus = null,
+        CancellationToken cancellationToken = default,
+        string? modelName = null,
+        Guid? conversationId = null,
+        Func<string, Task<string>>? verifySendToLlm = null,
+        int? maxIterations = null,
+        int? stallLimit = null);
+
+    /// <summary>
+    /// Releases a run paused in <see cref="GoalAgentPhase.AwaitingApproval"/> so the work loop can
+    /// start. No-ops when no run is waiting for approval.
+    /// </summary>
+    /// <param name="requirements">
+    /// Optional replacement requirement list (edited, reordered, added to, or trimmed by the user).
+    /// When null the generated requirements are used as-is. Blank entries are dropped; if nothing
+    /// usable remains, the generated list is kept rather than starting a run with no requirements
+    /// at all — a run with an empty suite would report "all green" without doing anything.
+    /// </param>
+    void ApproveRequirements(IReadOnlyList<string>? requirements = null);
+
+    /// <summary>
+    /// Requests the run stop at the next step boundary (between work items or verifications), and
+    /// releases a run that is waiting for requirement approval. Does not by itself interrupt an
+    /// in-flight LLM call — cancel the <c>cancellationToken</c> passed to
+    /// <see cref="RunAsync"/> for that.
     /// </summary>
     void RequestStop();
 

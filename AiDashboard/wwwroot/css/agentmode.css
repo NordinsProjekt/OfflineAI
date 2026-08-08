@@ -144,3 +144,156 @@
     margin-right: 0.5rem;
     font-variant-numeric: tabular-nums;
 }
+
+/* Run options row: iteration cap next to the approval toggle, so the two decisions that shape a
+   run are made in the same glance. */
+
+.oa-goal-options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 1.25rem;
+}
+
+.oa-goal-approval-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.9rem;
+    font-size: 0.85rem;
+    color: #4a5568;
+    cursor: pointer;
+}
+
+.oa-goal-continue-btn {
+    background: white;
+    color: #4a5568;
+    border: 2px solid #cbd5e0;
+}
+
+.oa-goal-continue-hint {
+    margin: 0.5rem 0 0;
+    font-size: 0.8rem;
+    color: #a0aec0;
+}
+
+/* Requirement approval — the run is parked here until the user accepts the list, so it gets a
+   visibly distinct block rather than reusing the read-only requirement rows. */
+
+.oa-goal-approval {
+    margin-top: 1.25rem;
+    padding: 1rem 1.1rem 1.1rem;
+    border: 2px solid #fbd38d;
+    border-radius: 12px;
+    background: #fffaf0;
+}
+
+.oa-goal-approval-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #975a16;
+}
+
+.oa-goal-approval-intro {
+    margin: 0.3rem 0 1rem;
+    font-size: 0.82rem;
+    color: #975a16;
+    line-height: 1.5;
+    opacity: 0.9;
+}
+
+.oa-goal-approval-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    margin-bottom: 0.6rem;
+}
+
+.oa-goal-approval-input {
+    flex: 1;
+    background: white;
+}
+
+.oa-goal-approval-remove {
+    flex-shrink: 0;
+    margin-top: 0.2rem;
+}
+
+/* Workspace backups — collapsed by default: they only matter when something went wrong, and an
+   always-open list of eight snapshots would push the activity log off screen. */
+
+.oa-goal-backups {
+    margin-top: 1.25rem;
+    border-top: 1px solid #e2e8f0;
+    padding-top: 0.85rem;
+}
+
+.oa-goal-backups-toggle {
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #a0aec0;
+    cursor: pointer;
+}
+
+.oa-goal-backups-toggle:hover {
+    color: #4a5568;
+}
+
+.oa-goal-backups-intro {
+    margin: 0.5rem 0 0.75rem;
+    font-size: 0.8rem;
+    color: #a0aec0;
+    line-height: 1.5;
+}
+
+.oa-goal-backups-message {
+    margin: 0 0 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+}
+
+.oa-goal-backups-message.ok {
+    background: #f0fff4;
+    color: #2f855a;
+}
+
+.oa-goal-backups-message.error {
+    background: #fff5f5;
+    color: #c53030;
+}
+
+.oa-goal-backup-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid #f7fafc;
+    font-size: 0.8rem;
+    color: #4a5568;
+}
+
+.oa-goal-backup-time {
+    font-variant-numeric: tabular-nums;
+    color: #2d3748;
+}
+
+.oa-goal-backup-label {
+    color: #718096;
+}
+
+.oa-goal-backup-files {
+    margin-left: auto;
+    color: #a0aec0;
+    white-space: nowrap;
+}
+
+.oa-goal-backup-restore {
+    flex-shrink: 0;
+}
