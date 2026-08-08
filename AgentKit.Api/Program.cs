@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 using AgentKit.Api.Security;
 using AgentKit.Api.Services;
 using AgentKit.Skills.External;
+using AgentKit.Skills.QBasicGraphics;
 using AgentKit.Skills.Utility;
 using Application.AI.Pooling;
 using Infrastructure.Data.Dapper;
@@ -91,6 +92,11 @@ builder.Services.AddSingleton<IUtilityToolsService>(sp =>
 });
 builder.Services.AddSingleton<IExternalToolsService>(_ =>
     new ExternalToolsService(MapExternalToolOptions(appConfig.AgentTools.ExternalTools)));
+
+// The QBasic graphics reference (/qbasic-grafik) is offline, stateless and needs no configuration,
+// so unattended jobs get it unconditionally — a job writing a .bas file can look the syntax up
+// instead of guessing, which matters more here than in chat: nobody is watching to correct it.
+builder.Services.AddSingleton<IQBasicGraphicsService>(_ => new QBasicGraphicsService());
 
 // ── Run history: optional. Enables the database status fallback (job survives a server
 //    restart, at least as far as its persisted record) and the recent-jobs list. Jobs still run

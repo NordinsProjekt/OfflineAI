@@ -55,6 +55,10 @@ peka ut en egen körbar fil (samma vitlistningsprincip som `ExternalTools`).
 5. LLM: `/qb64 primtal.bas` → programmet körs, utdata matas tillbaka.
 6. LLM svarar användaren med resultatet.
 
+Ska programmet rita något: se [QBasic-grafikskillen](QBASIC-GRAFIK-SKILL.md), som låter LLM:en slå
+upp rätt grafiksyntax med `/qbasic-grafik <ämne>` innan den skriver filen — och som förklarar varför
+grafikprogram ska verifieras med `/qb64-kompilera` och utan `$CONSOLE:ONLY`.
+
 Obs: i vanlig chatt begränsas antalet verktygsvarv av `AgentTools:MaxToolCallRounds`
 (standard 3). För kod-kompilera-rätta-loopar är det snålt — höj gärna till 6–8. I Agent
 Mode gäller i stället `MaxGoalIterations` (standard 20).

@@ -339,6 +339,11 @@ public static class QBasicStructureLinter
         // Graphics and console
         "CLS", "COLOR", "LOCATE", "PRINT", "LPRINT", "SCREEN", "PSET", "PRESET", "LINE",
         "CIRCLE", "PAINT", "DRAW", "POINT", "PALETTE", "PCOPY", "VIEW", "WINDOW", "CSRLIN",
+        // Sprite, image and low-level graphics statements (see AgentKit.Skills.QBasicGraphics):
+        // QB64 has _PUTIMAGE and _MEMIMAGE, but no _GET/_PUT/_BSAVE/_POKE, so an underscore on
+        // any of these is the model over-applying the convention.
+        "GET", "PUT", "BSAVE", "BLOAD", "PEEK", "POKE", "OUT", "INP", "WAIT",
+        "VARSEG", "VARPTR", "SADD", "CLEAR", "PMAP",
         // Input, sound and timing
         "INPUT", "INKEY", "SLEEP", "BEEP", "SOUND", "PLAY", "TIMER", "RANDOMIZE", "RND",
         // Strings
