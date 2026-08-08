@@ -389,6 +389,12 @@ public sealed class Gemma4CliService : IGemma4CliService
         // Small delay so the last OutputDataReceived events can flush
         await Task.Delay(200, CancellationToken.None);
 
+        // The loop above exits on cancellation and the process has just been killed, so whatever
+        // was captured is a truncated generation — never a real answer. Throwing (after the
+        // cleanup, so no process is left behind) is what lets a caller distinguish "the user
+        // stopped this" from "the model replied", instead of feeding half a reply into a parser.
+        cancellationToken.ThrowIfCancellationRequested();
+
         lock (outputLock)
         {
             return fullOutput.ToString();

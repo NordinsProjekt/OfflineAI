@@ -57,6 +57,28 @@ public class GoalRequirement
     /// </summary>
     public bool VerdictInconclusive { get; internal set; }
 
+    /// <summary>
+    /// Fingerprint (name + size + last-write time) of the workspace files this requirement talks
+    /// about, taken when it last passed verification. While it still matches, re-verifying can
+    /// only produce the same verdict, so the check is skipped — the single largest source of
+    /// wasted LLM calls in a long run, since every iteration re-verifies the whole suite.
+    /// Null whenever the requirement is not currently passed.
+    /// </summary>
+    internal string? VerifiedFingerprint { get; set; }
+
+    /// <summary>
+    /// How many verifications in a row have failed this requirement for the same reason. Used to
+    /// notice that the loop is stuck: identical verdict after identical verdict means the work
+    /// steps are not moving the needle, and iterating further just burns time.
+    /// </summary>
+    public int RepeatedFailureCount { get; internal set; }
+
+    /// <summary>
+    /// Normalised form of the verdict behind <see cref="RepeatedFailureCount"/>, used to tell
+    /// "failed again for the same reason" from "failed for a new reason" (which resets the count).
+    /// </summary>
+    internal string? LastVerdictKey { get; set; }
+
     public GoalRequirement(string description)
     {
         if (string.IsNullOrWhiteSpace(description))

@@ -17,6 +17,14 @@ namespace Application.AI.Gemma4;
 /// }
 /// </code>
 /// </para>
+/// <para>
+/// The per-call knobs (sampling, context size, GPU layers, timeouts) are settable after
+/// construction, because every request spawns its own <c>llama-completion</c> process and reads
+/// them fresh — so the dashboard's settings page can retune the running backend without a
+/// restart. Everything that is baked into the process launch or the chat template
+/// (<see cref="LlamaCliPath"/>, <see cref="ModelPath"/>, <see cref="Device"/>,
+/// <see cref="SystemPrompt"/>, <see cref="EnableThinking"/>) stays init-only.
+/// </para>
 /// </summary>
 public sealed class Gemma4CliOptions
 {
@@ -40,7 +48,7 @@ public sealed class Gemma4CliOptions
     /// Use <c>0</c> for CPU-only, <c>99</c> to offload all layers.
     /// Default: 0
     /// </summary>
-    public int GpuLayers { get; init; } = 0;
+    public int GpuLayers { get; set; } = 0;
 
     /// <summary>
     /// Comma-separated devices to offload to (<c>--device</c>), e.g. <c>"CUDA0"</c>.
@@ -65,43 +73,43 @@ public sealed class Gemma4CliOptions
     /// than gracefully falling back to CPU/partial offload. Default: 32 768 — a much safer
     /// starting point for typical consumer GPUs; raise it only if you've confirmed it fits.
     /// </summary>
-    public int ContextSize { get; init; } = 32_768;
+    public int ContextSize { get; set; } = 32_768;
 
     /// <summary>
     /// Maximum new tokens to generate per call (<c>-n</c>).
     /// Default: 2048
     /// </summary>
-    public int MaxTokens { get; init; } = 2048;
+    public int MaxTokens { get; set; } = 2048;
 
     /// <summary>
     /// Sampling temperature. Gemma 4 documentation recommends <c>1.0</c>.
     /// Default: 1.0
     /// </summary>
-    public double Temperature { get; init; } = 1.0;
+    public double Temperature { get; set; } = 1.0;
 
     /// <summary>
     /// Top-P nucleus sampling. Gemma 4 documentation recommends <c>0.95</c>.
     /// Default: 0.95
     /// </summary>
-    public double TopP { get; init; } = 0.95;
+    public double TopP { get; set; } = 0.95;
 
     /// <summary>
     /// Top-K sampling. Gemma 4 documentation recommends <c>64</c>.
     /// Default: 64
     /// </summary>
-    public int TopK { get; init; } = 64;
+    public int TopK { get; set; } = 64;
 
     /// <summary>
     /// Hard wall-clock timeout for a single subprocess call, in milliseconds.
     /// Default: 120 000 ms (2 minutes)
     /// </summary>
-    public int TimeoutMs { get; init; } = 120_000;
+    public int TimeoutMs { get; set; } = 120_000;
 
     /// <summary>
     /// If no new output is produced for this many milliseconds, treat generation as complete.
     /// Default: 10 000 ms (10 seconds)
     /// </summary>
-    public int PauseTimeoutMs { get; init; } = 10_000;
+    public int PauseTimeoutMs { get; set; } = 10_000;
 
     /// <summary>
     /// Maximum number of tool-call / tool-result round trips before forcing a final answer.

@@ -214,3 +214,10 @@
     background: #fff5f5;
     color: #c53030;
 }
+
+/* Waiting on the user (Agent Mode's requirement approval) — deliberately not blue: the run is
+   parked, not working, and the distinction is the whole point of the pause. */
+.oa-batch-badge.amber {
+    background: #fffaf0;
+    color: #b7791f;
+}

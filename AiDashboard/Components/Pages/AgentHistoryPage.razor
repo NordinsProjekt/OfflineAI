@@ -272,10 +272,13 @@
     private static string PhaseText(string phase) => phase switch
     {
         "GeneratingRequirements" => "Generating requirements",
+        // Only ever stored for a run whose process died while it was waiting to be approved.
+        "AwaitingApproval" => "Awaiting approval",
         "Working" => "Working",
         "Verifying" => "Verifying",
         "Completed" => "All green",
         "MaxIterationsReached" => "Iteration cap reached",
+        "Stalled" => "Stopped making progress",
         "Stopped" => "Stopped",
         "Failed" => "Failed",
         _ => phase
@@ -284,8 +287,9 @@
     private static string PhaseClass(string phase) => phase switch
     {
         "Completed" => "green",
-        "MaxIterationsReached" or "Failed" => "red",
+        "MaxIterationsReached" or "Failed" or "Stalled" => "red",
         "Stopped" => "gray",
+        "AwaitingApproval" => "amber",
         _ => "blue"
     };
 

@@ -9,7 +9,9 @@ namespace AgentKit.Tests.Skills.Qb64;
 /// integration point). Covers the exact bug shapes observed in a real 20-iteration agent run that
 /// never converged: an extra END IF, a NEXT closing the wrong loop, and a SUB/FUNCTION defined
 /// before the program's top-level code (QB64's "Statement cannot be placed between
-/// SUB/FUNCTIONs").
+/// SUB/FUNCTIONs"). Also covers the invented-keyword pass (<c>_LINE</c>, <c>_KEYHIT$</c>) added
+/// after a structurally flawless generated game turned out to be uncompilable from its second
+/// line onwards.
 /// </summary>
 public class QBasicStructureLinterTests
 {
@@ -233,6 +235,154 @@ public class QBasicStructureLinterTests
         var source = "$CONSOLE:ONLY\nSCREEN 0\nPRINT \"hej\"";
 
         QBasicStructureLinter.Analyze(source).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Analyze_UnderscoreOnClassicKeyword_IsFlaggedWithTheRealSpelling()
+    {
+        // Straight from a real run: the model applied QB64's underscore convention to LINE, a
+        // keyword that never had one. QB64 reserves the underscore prefix for its own keywords,
+        // so the compiler stops dead on the first "_LINE".
+        var source = string.Join('\n',
+            "SCREEN 12",
+            "_LINE (10, 10), (20, 20), 1",
+            "_PSET (5, 5), 2");
+
+        var issues = QBasicStructureLinter.Analyze(source);
+
+        issues.Should().Contain(i => i.Line == 2 && i.Message.Contains("\"LINE\""));
+        issues.Should().Contain(i => i.Line == 3 && i.Message.Contains("\"PSET\""));
+    }
+
+    [Fact]
+    public void Analyze_KnownKeywordWithWrongSigil_IsFlaggedWithTheCanonicalSpelling()
+    {
+        // The run's other invented keyword: _KEYHIT is real but returns a LONG, so "_KEYHIT$"
+        // is not a QB64 keyword at all (INKEY$ is the string-returning one the model wanted).
+        var source = string.Join('\n',
+            "DO",
+            "    IF _KEYHIT$ = \"\" THEN _LIMIT 10",
+            "LOOP");
+
+        var issues = QBasicStructureLinter.Analyze(source);
+
+        issues.Should().ContainSingle(i => i.Line == 2 && i.Message.Contains("\"_KEYHIT\""));
+    }
+
+    [Fact]
+    public void Analyze_KnownKeywordMissingItsSigil_IsFlagged()
+    {
+        var issues = QBasicStructureLinter.Analyze("name$ = _TRIM(other$)");
+
+        issues.Should().ContainSingle(i => i.Line == 1 && i.Message.Contains("\"_TRIM$\""));
+    }
+
+    [Fact]
+    public void Analyze_CorrectlySpelledQb64Keywords_AreNotFlagged()
+    {
+        var source = string.Join('\n',
+            "img& = _NEWIMAGE(640, 480, 32)",
+            "_PUTIMAGE (0, 0), img&",
+            "_TITLE \"Pixel Quest\"",
+            "c~& = _RGB32(255, 128, 0)",
+            "clean$ = _TRIM$(raw$)",
+            "IF _KEYHIT = 27 THEN SYSTEM",
+            "w = _WIDTH(img&)", // WIDTH also exists without the underscore -- both are valid
+            "_LIMIT 30");
+
+        QBasicStructureLinter.Analyze(source).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Analyze_UnknownUnderscoreName_IsLeftAloneRatherThanGuessedAt()
+    {
+        // Deliberate gap: the keyword table cannot be exhaustive against a moving QB64 release,
+        // so an unrecognised name is passed through to the real compiler instead of being
+        // reported. A missed detection is cheap; a false positive would have the agent rewrite
+        // working code.
+        QBasicStructureLinter.Analyze("_GLRENDER\n_SOMETHINGNEW 1, 2").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Analyze_IdentifiersContainingUnderscores_AreNotMistakenForKeywords()
+    {
+        // "player_line" must not be read as the keyword "_LINE", and a trailing underscore is
+        // QB64's line-continuation character rather than a keyword.
+        var source = string.Join('\n',
+            "player_line = 5",
+            "map_cls = player_line + 1",
+            "total = player_line + _",
+            "        map_cls");
+
+        QBasicStructureLinter.Analyze(source).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Analyze_UnderscoreKeywordInsideStringOrComment_IsIgnored()
+    {
+        var source = string.Join('\n',
+            "PRINT \"use _LINE here\"",
+            "' _KEYHIT$ is mentioned in this comment only");
+
+        QBasicStructureLinter.Analyze(source).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Analyze_GeneratedGameWithBothInventedKeywords_ReportsThemInOnePass()
+    {
+        // The shape of the real rpggame.bas the agent produced: structurally perfect (which is
+        // why the block-balance pass alone passed it clean) but full of keywords QB64 rejects.
+        var source = string.Join('\n',
+            "SCREEN 12",
+            "FOR y = 5 TO 20",
+            "    FOR x = 1 TO 60",
+            "        _LINE (x, y), (x, y), 1",
+            "    NEXT x",
+            "NEXT y",
+            "DO",
+            "    _KEYHIT$",
+            "LOOP");
+
+        var issues = QBasicStructureLinter.Analyze(source);
+
+        issues.Should().HaveCount(2);
+        issues.Should().Contain(i => i.Line == 4);
+        issues.Should().Contain(i => i.Line == 8);
+    }
+
+    // ── DescribeIssuesAfterWrite (write-time hook, no compiler needed) ────
+
+    [Fact]
+    public void DescribeIssuesAfterWrite_NonBasFile_ReturnsNullEvenForBrokenBlocks()
+    {
+        // A .txt that happens to contain block keywords is prose, not source.
+        QBasicStructureLinter.DescribeIssuesAfterWrite("anteckningar.txt", "IF vi hinner THEN\nkör vi vidare")
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void DescribeIssuesAfterWrite_ValidBasFile_ReturnsNull()
+    {
+        QBasicStructureLinter.DescribeIssuesAfterWrite("spel.bas", "SCREEN 12\nLINE (1, 1)-(2, 2), 1\nEND")
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void DescribeIssuesAfterWrite_BrokenBasFile_NamesTheFileAndListsEveryIssue()
+    {
+        var feedback = QBasicStructureLinter.DescribeIssuesAfterWrite(
+            "spel.bas", "_LINE (1, 1), (2, 2), 1\nIF x = 1 THEN\nPRINT x");
+
+        feedback.Should().NotBeNull();
+        feedback!.Should().Contain("spel.bas").And.Contain("1.").And.Contain("2.");
+    }
+
+    [Fact]
+    public void DescribeIssuesAfterWrite_NullOrEmptyInput_IsHandled()
+    {
+        QBasicStructureLinter.DescribeIssuesAfterWrite(null, "PRINT 1").Should().BeNull();
+        QBasicStructureLinter.DescribeIssuesAfterWrite("spel.bas", null).Should().BeNull();
+        QBasicStructureLinter.DescribeIssuesAfterWrite("spel.bas", "").Should().BeNull();
     }
 
     [Fact]

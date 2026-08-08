@@ -6,6 +6,7 @@ using AgentKit.Skills.Utility;
 using AgentKit.ToolLoop;
 using Services.GoalAgent;
 using Services.Repositories;
+using Services.Workspace;
 
 namespace Services.Tests.GoalAgent;
 
@@ -26,14 +27,23 @@ public class GoalAgentServiceTests
     /// </summary>
     private sealed class FakeAgenticChatService : IAgenticChatService
     {
-        private readonly Func<string, Task<AgenticChatResult>> _handler;
+        private readonly Func<string, CancellationToken, Task<AgenticChatResult>> _handler;
 
         public FakeAgenticChatService(Func<string, AgenticChatResult> handler)
-            : this(msg => Task.FromResult(handler(msg)))
+            : this((msg, _) => Task.FromResult(handler(msg)))
         {
         }
 
-        public FakeAgenticChatService(Func<string, Task<AgenticChatResult>> handler) => _handler = handler;
+        public FakeAgenticChatService(Func<string, Task<AgenticChatResult>> handler)
+            : this((msg, _) => handler(msg))
+        {
+        }
+
+        /// <summary>
+        /// Token-aware handler, for tests that need to model an LLM call being aborted mid-flight
+        /// (the real backend kills its subprocess and throws when the token is cancelled).
+        /// </summary>
+        public FakeAgenticChatService(Func<string, CancellationToken, Task<AgenticChatResult>> handler) => _handler = handler;
 
         public List<string> ReceivedMessages { get; } = new();
 
@@ -45,7 +55,7 @@ public class GoalAgentServiceTests
             string? recentlyUploadedFilename = null)
         {
             ReceivedMessages.Add(userMessage);
-            return await _handler(userMessage);
+            return await _handler(userMessage, cancellationToken);
         }
     }
 
@@ -594,6 +604,37 @@ public class GoalAgentServiceTests
             sut.ActivityLog.Should().Contain(line => line.Contains("räddad filskrivning") && line.Contains("game.bas"));
             sut.ActivityLog.Should().NotContain(line => line.Contains("Inga verktygskommandon kördes"));
             sut.Phase.Should().Be(GoalAgentPhase.Completed);
+        }
+        finally
+        {
+            if (Directory.Exists(workspaceDir))
+                Directory.Delete(workspaceDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_RecoveredBasRewriteWithInventedKeyword_IsReportedByTheStructuralCheck()
+    {
+        // This recovery path writes straight through IFileAgentService, bypassing the tool loop
+        // that normally runs the QBasic check — without its own call it would be the one write in
+        // a run that nothing ever looks at, compiler configured or not.
+        var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(workspaceDir);
+            await File.WriteAllTextAsync(Path.Combine(workspaceDir, "game.bas"), "GAMMALT INNEHALL");
+            var fileAgent = new FileAgentService(workspaceDir);
+            var brokenRewrite = "Har ar koden:\n```qbasic\nSCREEN 12\n_LINE (1, 1), (2, 2), 1\nEND\n```\n";
+            var fake = new FakeAgenticChatService(msg =>
+                IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result(brokenRewrite));
+            var sut = new GoalAgentService(fake, fileAgent, maxIterations: 1);
+
+            await sut.RunAsync(
+                "Fixa game.bas",
+                _ => Task.FromResult("KRAV: game.bas innehåller ett fungerande spel."));
+
+            sut.ActivityLog.Should().Contain(line =>
+                line.Contains("räddad filskrivning") && line.Contains("Strukturkontroll") && line.Contains("\"LINE\""));
         }
         finally
         {
@@ -1225,5 +1266,629 @@ public class GoalAgentServiceTests
 
         requirementsPrompt.Should().NotBeNull();
         requirementsPrompt.Should().NotContain("kompilerar");
+    }
+
+    // ── Requirement approval gate ─────────────────────────────────────────
+
+    /// <summary>
+    /// Spins until <paramref name="condition"/> holds, so a test can meet a run that is executing
+    /// on a background task at a known point instead of guessing with a fixed delay.
+    /// </summary>
+    private static async Task WaitForAsync(Func<bool> condition, string description)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+                throw new TimeoutException($"Timed out waiting for {description}.");
+            await Task.Delay(10);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_RequireApproval_PausesBeforeDoingAnyWork()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake);
+
+        var run = sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm, requireApproval: true);
+        await WaitForAsync(() => sut.IsAwaitingApproval, "the run to park on the approval gate");
+
+        // The whole point: the requirements exist, but nothing has touched the workspace yet.
+        sut.Phase.Should().Be(GoalAgentPhase.AwaitingApproval);
+        sut.IsRunning.Should().BeTrue();
+        sut.Requirements.Should().HaveCount(2);
+        fake.ReceivedMessages.Should().BeEmpty();
+
+        sut.ApproveRequirements();
+        await run;
+
+        sut.Phase.Should().Be(GoalAgentPhase.Completed);
+        sut.IsAwaitingApproval.Should().BeFalse();
+        fake.ReceivedMessages.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task ApproveRequirements_WithEditedList_RunsAgainstTheEditedRequirements()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake);
+
+        var run = sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm, requireApproval: true);
+        await WaitForAsync(() => sut.IsAwaitingApproval, "the approval gate");
+
+        sut.ApproveRequirements(new[]
+        {
+            "recept.txt innehåller exakt fyra ingredienser.",
+            "   ",
+            "recept.txt har numrerade steg."
+        });
+        await run;
+
+        sut.Requirements.Select(r => r.Description).Should().Equal(
+            "recept.txt innehåller exakt fyra ingredienser.",
+            "recept.txt har numrerade steg.");
+        // The work step must be driven by the edited list, not the generated one.
+        var workPrompt = fake.ReceivedMessages.First(IsWorkPrompt);
+        workPrompt.Should().Contain("exakt fyra ingredienser").And.NotContain("ingredienslista");
+    }
+
+    [Fact]
+    public async Task ApproveRequirements_EmptyEditedList_KeepsTheGeneratedRequirements()
+    {
+        // An empty suite verifies trivially, so the run would claim "all green" without doing
+        // anything — keeping the generated list is the safe reading of a nonsensical edit.
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake);
+
+        var run = sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm, requireApproval: true);
+        await WaitForAsync(() => sut.IsAwaitingApproval, "the approval gate");
+
+        sut.ApproveRequirements(new[] { "  ", string.Empty });
+        await run;
+
+        sut.Requirements.Should().HaveCount(2);
+        sut.Phase.Should().Be(GoalAgentPhase.Completed);
+    }
+
+    [Fact]
+    public async Task RequestStop_WhileAwaitingApproval_EndsTheRunWithoutWorking()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake);
+
+        var run = sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm, requireApproval: true);
+        await WaitForAsync(() => sut.IsAwaitingApproval, "the approval gate");
+
+        sut.RequestStop();
+        await run;
+
+        sut.Phase.Should().Be(GoalAgentPhase.Stopped);
+        sut.IsRunning.Should().BeFalse();
+        fake.ReceivedMessages.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ApproveRequirements_WhenNoRunIsWaiting_IsANoOp()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake);
+
+        sut.ApproveRequirements(new[] { "påhittat krav" });
+
+        sut.Requirements.Should().BeEmpty();
+        sut.Phase.Should().Be(GoalAgentPhase.Idle);
+    }
+
+    [Fact]
+    public async Task RunAsync_RequireApproval_PersistsOnlyTheApprovedRequirements()
+    {
+        var repository = new FakeAgentRunRepository();
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake, runRepository: repository);
+
+        var run = sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm, requireApproval: true);
+        await WaitForAsync(() => sut.IsAwaitingApproval, "the approval gate");
+
+        sut.ApproveRequirements(new[] { "recept.txt innehåller exakt fyra ingredienser." });
+        await run;
+
+        // The repository inserts rows, so writing the generated list before approval would leave
+        // the discarded requirements in the history alongside the ones actually worked on.
+        repository.SavedRequirements.Select(r => r.Description).Should()
+            .Equal("recept.txt innehåller exakt fyra ingredienser.");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithoutApprovalRequired_NeverPauses()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        sut.Phase.Should().Be(GoalAgentPhase.Completed);
+        sut.IsAwaitingApproval.Should().BeFalse();
+    }
+
+    // ── Stop cancels the call in flight ───────────────────────────────────
+
+    [Fact]
+    public void RunToken_WhenIdle_IsNotCancellable()
+    {
+        var sut = new GoalAgentService(new FakeAgenticChatService(_ => Result("ok")));
+
+        sut.RunToken.CanBeCanceled.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RequestStop_CancelsRunToken_AbortingTheCallInFlight()
+    {
+        var workStarted = new TaskCompletionSource();
+        var fake = new FakeAgenticChatService(async (msg, ct) =>
+        {
+            if (!IsWorkPrompt(msg))
+                return Result("RESULTAT: GODKÄNT");
+
+            workStarted.TrySetResult();
+            // Models the real backend: the call runs until the token says otherwise.
+            await Task.Delay(Timeout.Infinite, ct);
+            return Result("klart");
+        });
+        var sut = new GoalAgentService(fake);
+
+        var run = sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+        await workStarted.Task;
+        sut.RunToken.IsCancellationRequested.Should().BeFalse();
+
+        sut.RequestStop();
+        await run;
+
+        // Stopped without waiting out the generation that was in flight.
+        sut.Phase.Should().Be(GoalAgentPhase.Stopped);
+        sut.IsRunning.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RunAsync_ExternalTokenCancelled_StopsTheRun()
+    {
+        using var cts = new CancellationTokenSource();
+        var workStarted = new TaskCompletionSource();
+        var fake = new FakeAgenticChatService(async (msg, ct) =>
+        {
+            if (!IsWorkPrompt(msg))
+                return Result("RESULTAT: GODKÄNT");
+
+            workStarted.TrySetResult();
+            await Task.Delay(Timeout.Infinite, ct);
+            return Result("klart");
+        });
+        var sut = new GoalAgentService(fake);
+
+        var run = sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm, cancellationToken: cts.Token);
+        await workStarted.Task;
+
+        // The run's own token is linked to the caller's, so an external cancel reaches the steps.
+        await cts.CancelAsync();
+        await run;
+
+        sut.Phase.Should().Be(GoalAgentPhase.Stopped);
+    }
+
+    // ── ContinueAsync ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CanContinue_ReflectsWhetherThereIsAnUnfinishedRunToResume()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: UNDERKÄNT - saknas") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 1);
+
+        sut.CanContinue.Should().BeFalse("nothing has run yet");
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        sut.Phase.Should().Be(GoalAgentPhase.MaxIterationsReached);
+        sut.CanContinue.Should().BeTrue();
+
+        sut.Reset();
+        sut.CanContinue.Should().BeFalse("a reset clears the requirements");
+    }
+
+    [Fact]
+    public async Task CanContinue_AfterAnAllGreenRun_IsFalse()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        sut.Phase.Should().Be(GoalAgentPhase.Completed);
+        sut.CanContinue.Should().BeFalse("there is nothing left to work on");
+    }
+
+    [Fact]
+    public async Task ContinueAsync_ResumesWithoutRegeneratingRequirements()
+    {
+        var requirementGenerations = 0;
+        Task<string> CountingLlm(string prompt)
+        {
+            requirementGenerations++;
+            return TwoRequirementsLlm(prompt);
+        }
+
+        var green = false;
+        var fake = new FakeAgenticChatService(msg =>
+        {
+            if (!IsVerifyPrompt(msg))
+                return Result("klart");
+            return green ? Result("RESULTAT: GODKÄNT") : Result("RESULTAT: UNDERKÄNT - saknas");
+        });
+        var sut = new GoalAgentService(fake, maxIterations: 1);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", CountingLlm);
+        sut.Phase.Should().Be(GoalAgentPhase.MaxIterationsReached);
+        requirementGenerations.Should().Be(1);
+
+        var idsBefore = sut.Requirements.Select(r => r.Id).ToList();
+        green = true;
+        await sut.ContinueAsync(CountingLlm);
+
+        sut.Phase.Should().Be(GoalAgentPhase.Completed);
+        sut.Requirements.Select(r => r.Id).Should().Equal(idsBefore, "the continuation works on the same requirements");
+        requirementGenerations.Should().Be(1, "the requirements must not be derived a second time");
+    }
+
+    [Fact]
+    public async Task ContinueAsync_KeepsTheActivityLogAndRecordsItsOwnRun()
+    {
+        var repository = new FakeAgentRunRepository();
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: UNDERKÄNT - saknas") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 1, runRepository: repository);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+        var logLinesAfterFirstRun = sut.ActivityLog.Count;
+
+        await sut.ContinueAsync(TwoRequirementsLlm);
+
+        sut.ActivityLog.Count.Should().BeGreaterThan(logLinesAfterFirstRun, "the on-screen log continues the story");
+        sut.ActivityLog.Should().Contain(line => line.Contains("Fortsätter tidigare körning"));
+        repository.StartedRuns.Should().HaveCount(2, "a continuation is its own row in the history");
+        repository.CompletedRuns.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task ContinueAsync_PersistsItsRequirementsAsNewRowsWithoutCollidingWithTheFirstRun()
+    {
+        // Regression: the continuation reused each requirement's own id as the history row id, so
+        // re-inserting the same requirements under the new run violated the primary key — which
+        // disabled history recording for the entire continuation.
+        var repository = new FakeAgentRunRepository();
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: UNDERKÄNT - saknas") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 1, runRepository: repository);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+        await sut.ContinueAsync(TwoRequirementsLlm);
+
+        repository.SavedRequirements.Should().HaveCount(4, "two requirements recorded for each of the two runs");
+        repository.SavedRequirements.Select(r => r.Id).Should().OnlyHaveUniqueItems();
+        repository.SavedRequirements.Select(r => r.RunId).Distinct().Should().HaveCount(2);
+        // The continuation's own rows must carry the verdicts its verifications produced, which
+        // only works if the status updates were routed to the new rows.
+        var continuationRunId = repository.StartedRuns[1].Id;
+        repository.SavedRequirements
+            .Where(r => r.RunId == continuationRunId)
+            .Should().OnlyContain(r => r.Status == nameof(RequirementStatus.Failed));
+        sut.ActivityLog.Should().NotContain(line => line.Contains("Kunde inte spara körningshistoriken"));
+    }
+
+    [Fact]
+    public async Task ContinueAsync_WhenThereIsNothingToContinue_IsANoOp()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var sut = new GoalAgentService(fake);
+
+        await sut.ContinueAsync(TwoRequirementsLlm);
+
+        sut.Phase.Should().Be(GoalAgentPhase.Idle);
+        fake.ReceivedMessages.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ContinueAsync_NullSendToLlm_ThrowsArgumentNullException()
+    {
+        var sut = new GoalAgentService(new FakeAgenticChatService(_ => Result("ok")));
+
+        var act = async () => await sut.ContinueAsync(null!);
+
+        await act.Should().ThrowAsync<ArgumentNullException>();
+    }
+
+    // ── Workspace backups before each work step ───────────────────────────
+
+    /// <summary>Records the backups a run asked for, so tests can assert on the timing.</summary>
+    private sealed class FakeWorkspaceBackupService : IWorkspaceBackupService
+    {
+        public List<string> CreatedLabels { get; } = new();
+
+        /// <summary>When true, <see cref="Create"/> reports failure the way a real disk error would.</summary>
+        public bool FailToCreate { get; set; }
+
+        public string BackupFolderName => ".agent-backup";
+
+        public WorkspaceBackupInfo? Create(string label)
+        {
+            CreatedLabels.Add(label);
+            return FailToCreate ? null : new WorkspaceBackupInfo(label, label, DateTime.Now, 2, 100);
+        }
+
+        public IReadOnlyList<WorkspaceBackupInfo> GetBackups() => Array.Empty<WorkspaceBackupInfo>();
+
+        public int Restore(string backupId) => 0;
+    }
+
+    [Fact]
+    public async Task RunAsync_TakesABackupBeforeEveryWorkStep()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: UNDERKÄNT - saknas") : Result("klart"));
+        var backups = new FakeWorkspaceBackupService();
+        var sut = new GoalAgentService(fake, maxIterations: 2, backups: backups, stallLimit: 0);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        backups.CreatedLabels.Should().Equal("iteration-1", "iteration-2");
+        sut.ActivityLog.Should().Contain(line => line.Contains("Säkerhetskopia"));
+    }
+
+    [Fact]
+    public async Task RunAsync_BackupFails_RunContinuesAndSaysSo()
+    {
+        // Insurance that can't be written must not stop the thing it was insuring.
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var backups = new FakeWorkspaceBackupService { FailToCreate = true };
+        var sut = new GoalAgentService(fake, maxIterations: 1, backups: backups);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        sut.Phase.Should().Be(GoalAgentPhase.Completed);
+        sut.ActivityLog.Should().Contain(line => line.Contains("Ingen säkerhetskopia kunde sparas"));
+    }
+
+    [Fact]
+    public async Task RunAsync_NothingToWorkOn_TakesNoBackup()
+    {
+        // Every requirement passes on the first verification, so iteration 2 never happens and
+        // there is no destructive step to insure against.
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: GODKÄNT") : Result("klart"));
+        var backups = new FakeWorkspaceBackupService();
+        var sut = new GoalAgentService(fake, maxIterations: 5, backups: backups);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        backups.CreatedLabels.Should().Equal("iteration-1");
+    }
+
+    // ── Skipping re-verification of unchanged files ───────────────────────
+
+    [Fact]
+    public async Task RunAsync_PassedRequirementWhoseFilesDidNotChange_IsNotReverified()
+    {
+        var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(workspaceDir);
+            await File.WriteAllTextAsync(Path.Combine(workspaceDir, "a.txt"), "A");
+            await File.WriteAllTextAsync(Path.Combine(workspaceDir, "b.txt"), "B");
+            var fileAgent = new FileAgentService(workspaceDir);
+
+            // The verify prompt carries a workspace snapshot that lists every file, so the
+            // requirements are told apart by a marker word instead of by the filename.
+            // a.txt passes and is never touched again; b.txt keeps failing, so the run keeps going.
+            var fake = new FakeAgenticChatService(msg =>
+            {
+                if (!IsVerifyPrompt(msg))
+                    return Result("klart");
+                return msg.Contains("ALFA") ? Result("RESULTAT: GODKÄNT") : Result("RESULTAT: UNDERKÄNT - fel innehåll");
+            });
+            var sut = new GoalAgentService(fake, fileAgent, maxIterations: 3, stallLimit: 0);
+
+            await sut.RunAsync(
+                "Fixa filerna",
+                _ => Task.FromResult("KRAV: a.txt uppfyller ALFA.\nKRAV: b.txt uppfyller BETA."));
+
+            // Verified once in iteration 1; iterations 2 and 3 skip it because a.txt is untouched.
+            fake.ReceivedMessages.Count(m => IsVerifyPrompt(m) && m.Contains("ALFA")).Should().Be(1);
+            fake.ReceivedMessages.Count(m => IsVerifyPrompt(m) && m.Contains("BETA")).Should().Be(3);
+            sut.Requirements.Single(r => r.Description.Contains("a.txt")).Status
+                .Should().Be(RequirementStatus.Passed, "skipping the check keeps the verdict, it doesn't drop it");
+            sut.ActivityLog.Should().Contain(line => line.Contains("kontrollerades inte om"));
+        }
+        finally
+        {
+            if (Directory.Exists(workspaceDir))
+                Directory.Delete(workspaceDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_PassedRequirementWhoseFileChanges_IsVerifiedAgain()
+    {
+        var workspaceDir = Path.Combine(Path.GetTempPath(), "GoalAgentTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(workspaceDir);
+            var pathA = Path.Combine(workspaceDir, "a.txt");
+            await File.WriteAllTextAsync(pathA, "A");
+            var fileAgent = new FileAgentService(workspaceDir);
+
+            var workSteps = 0;
+            var fake = new FakeAgenticChatService(msg =>
+            {
+                if (!IsVerifyPrompt(msg))
+                {
+                    // Model the work step editing the very file the passed requirement covers —
+                    // the reason every requirement is re-verified after real work in the first place.
+                    workSteps++;
+                    File.WriteAllText(pathA, "A" + new string('!', workSteps));
+                    return Result("klart");
+                }
+                return msg.Contains("ALFA") ? Result("RESULTAT: GODKÄNT") : Result("RESULTAT: UNDERKÄNT - fel");
+            });
+            var sut = new GoalAgentService(fake, fileAgent, maxIterations: 2, stallLimit: 0);
+
+            await sut.RunAsync(
+                "Fixa filerna",
+                _ => Task.FromResult("KRAV: a.txt uppfyller ALFA.\nKRAV: b.txt uppfyller BETA."));
+
+            fake.ReceivedMessages.Count(m => IsVerifyPrompt(m) && m.Contains("ALFA"))
+                .Should().Be(2, "a changed file invalidates the earlier pass");
+        }
+        finally
+        {
+            if (Directory.Exists(workspaceDir))
+                Directory.Delete(workspaceDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_WithoutAFileAgent_AlwaysReverifies()
+    {
+        // No workspace to fingerprint — the optimisation must disable itself rather than assume
+        // nothing changed and leave a requirement green on stale evidence.
+        var fake = new FakeAgenticChatService(msg =>
+        {
+            if (!IsVerifyPrompt(msg))
+                return Result("klart");
+            return msg.Contains("recept.txt finns") ? Result("RESULTAT: GODKÄNT") : Result("RESULTAT: UNDERKÄNT - saknas");
+        });
+        var sut = new GoalAgentService(fake, maxIterations: 2, stallLimit: 0);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        fake.ReceivedMessages.Count(m => IsVerifyPrompt(m) && m.Contains("recept.txt finns")).Should().Be(2);
+    }
+
+    // ── Stall detection ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunAsync_EveryRequirementFailsIdenticallyRepeatedly_StopsEarlyAsStalled()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: UNDERKÄNT - fel innehåll") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 20, stallLimit: 3);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        sut.Phase.Should().Be(GoalAgentPhase.Stalled);
+        sut.CurrentIteration.Should().Be(3, "the run gives up as soon as the third identical verdict lands");
+        sut.Requirements.Should().OnlyContain(r => r.RepeatedFailureCount == 3);
+        sut.CanContinue.Should().BeTrue("the user may still push it further by hand");
+    }
+
+    [Fact]
+    public async Task RunAsync_VerdictChanges_ResetsTheRepeatCounterAndKeepsGoing()
+    {
+        var verifyCalls = 0;
+        var fake = new FakeAgenticChatService(msg =>
+        {
+            if (!IsVerifyPrompt(msg))
+                return Result("klart");
+
+            verifyCalls++;
+            // A different complaint each time means the loop is still making progress, however
+            // slowly — that must not be mistaken for going in circles.
+            return Result($"RESULTAT: UNDERKÄNT - brist nummer {verifyCalls}");
+        });
+        var sut = new GoalAgentService(fake, maxIterations: 4, stallLimit: 2);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        sut.Phase.Should().Be(GoalAgentPhase.MaxIterationsReached);
+        sut.CurrentIteration.Should().Be(4);
+    }
+
+    [Fact]
+    public async Task RunAsync_StallLimitZero_UsesTheWholeIterationBudget()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: UNDERKÄNT - fel innehåll") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 4, stallLimit: 0);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        sut.Phase.Should().Be(GoalAgentPhase.MaxIterationsReached);
+        sut.CurrentIteration.Should().Be(4);
+    }
+
+    [Fact]
+    public async Task RunAsync_OneRequirementStillMoving_DoesNotCountAsStalled()
+    {
+        // A run is only stuck when *nothing* is progressing; one requirement that keeps failing
+        // the same way while another is being worked out is normal.
+        var secondRequirementChecks = 0;
+        var fake = new FakeAgenticChatService(msg =>
+        {
+            if (!IsVerifyPrompt(msg))
+                return Result("klart");
+
+            if (msg.Contains("recept.txt finns"))
+                return Result("RESULTAT: UNDERKÄNT - samma fel varje gång");
+
+            secondRequirementChecks++;
+            return Result($"RESULTAT: UNDERKÄNT - annat fel {secondRequirementChecks}");
+        });
+        var sut = new GoalAgentService(fake, maxIterations: 4, stallLimit: 2);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        sut.Phase.Should().Be(GoalAgentPhase.MaxIterationsReached);
+    }
+
+    [Fact]
+    public async Task RunAsync_RepeatedFailure_TellsTheModelToChangeApproach()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: UNDERKÄNT - fel innehåll") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 3, stallLimit: 0);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+
+        // Iteration 1's prompt has no history to escalate on; by iteration 3 the same verdict has
+        // come back twice and the prompt must say so instead of asking for the same fix again.
+        var workPrompts = fake.ReceivedMessages.Where(IsWorkPrompt).ToList();
+        workPrompts[0].Should().NotContain("byt angreppssätt");
+        workPrompts[2].Should().Contain("byt angreppssätt");
+    }
+
+    [Fact]
+    public async Task ContinueAsync_AfterAStall_StartsTheRepeatCountersOver()
+    {
+        var fake = new FakeAgenticChatService(msg =>
+            IsVerifyPrompt(msg) ? Result("RESULTAT: UNDERKÄNT - fel innehåll") : Result("klart"));
+        var sut = new GoalAgentService(fake, maxIterations: 20, stallLimit: 2);
+
+        await sut.RunAsync("Skapa ett pannkaksrecept", TwoRequirementsLlm);
+        sut.Phase.Should().Be(GoalAgentPhase.Stalled);
+
+        await sut.ContinueAsync(TwoRequirementsLlm);
+
+        // Two more iterations before stalling again, rather than giving up on the first check
+        // for a failure the continuation had not yet seen.
+        sut.Phase.Should().Be(GoalAgentPhase.Stalled);
+        sut.CurrentIteration.Should().Be(2);
     }
 }

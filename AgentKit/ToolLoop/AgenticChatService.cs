@@ -141,7 +141,7 @@ public sealed class AgenticChatService : IAgenticChatService
                 && _fileAgent.TryExtractFileContent(response, out var inlineContent))
             {
                 await _fileAgent.WriteExtractedContentAsync(inlineTarget, inlineContent);
-                var inlineSummary = $"✓ Fil sparad: {inlineTarget}";
+                var inlineSummary = WithQbasicCheck($"✓ Fil sparad: {inlineTarget}", inlineTarget, inlineContent);
                 invocations.Add(new ToolInvocation(command, inlineSummary));
 
                 response = await sendToLlm(
@@ -163,7 +163,7 @@ public sealed class AgenticChatService : IAgenticChatService
                 if (_fileAgent.TryExtractFileContent(fillResponse, out var content))
                 {
                     await _fileAgent.WriteExtractedContentAsync(result.TargetFilename!, content);
-                    summary = $"✓ Fil sparad: {result.TargetFilename}";
+                    summary = WithQbasicCheck($"✓ Fil sparad: {result.TargetFilename}", result.TargetFilename!, content);
                 }
                 else
                 {
@@ -189,7 +189,9 @@ public sealed class AgenticChatService : IAgenticChatService
                 if (_fileAgent.TryExtractLineEdits(editResponse, out var edits))
                 {
                     var applyResult = await _fileAgent.ApplyLineEditsAsync(result.TargetFilename!, edits);
-                    summary = applyResult.Message;
+                    summary = applyResult.IsSuccess
+                        ? await WithQbasicCheckAfterEditAsync(applyResult.Message, result.TargetFilename!)
+                        : applyResult.Message;
                 }
                 else
                 {
@@ -215,6 +217,39 @@ public sealed class AgenticChatService : IAgenticChatService
         }
 
         return new AgenticChatResult(response, invocations);
+    }
+
+    /// <summary>
+    /// Appends the QBasic structural/keyword findings for a freshly written .bas file to the
+    /// summary the LLM is about to be shown, so a broken program comes back in the very next turn
+    /// instead of surviving the run. A no-op for every other file type.
+    /// <para>
+    /// Runs on every write rather than only when the QB64 tool is unavailable: even with a
+    /// compiler configured, hearing about an invented keyword at write time beats hearing about
+    /// it one <c>/qb64</c> round trip later, and the check costs a string scan.
+    /// </para>
+    /// </summary>
+    private static string WithQbasicCheck(string summary, string filename, string content)
+    {
+        var issues = QBasicStructureLinter.DescribeIssuesAfterWrite(filename, content);
+        return issues is null ? summary : $"{summary}\n{issues}";
+    }
+
+    /// <summary>
+    /// The same check for <c>/redigera</c>, which applies its line edits inside the file service
+    /// and never hands the resulting content back — so the file is read from the workspace
+    /// instead. A failed read is ignored rather than reported: the edit itself succeeded, and a
+    /// missing lint result must not read to the LLM as a failed write.
+    /// </summary>
+    private async Task<string> WithQbasicCheckAfterEditAsync(string summary, string filename)
+    {
+        if (!filename.Trim().EndsWith(".bas", StringComparison.OrdinalIgnoreCase))
+            return summary;
+
+        var reread = await _fileAgent.ReadFileRawAsync(filename);
+        return reread.IsSuccess
+            ? WithQbasicCheck(summary, filename, reread.InjectedContext ?? string.Empty)
+            : summary;
     }
 
     /// <summary>

@@ -5,6 +5,7 @@ using AgentKit.Skills.Qb64;
 using AgentKit.ToolLoop;
 using Entities;
 using Services.Repositories;
+using Services.Workspace;
 
 namespace Services.GoalAgent;
 
@@ -81,10 +82,31 @@ public sealed class GoalAgentService : IGoalAgentService
     private static readonly string[] FailTokens = { "UNDERKÄN", "UNDERKAN", "INTE UPPFYLL", "EJ UPPFYLL", "FAIL", "REJECT" };
     private static readonly string[] PassTokens = { "GODKÄN", "GODKAN", "PASS", "APPROV" };
 
+    /// <summary>
+    /// Default number of consecutive identical failures, across every remaining requirement, that
+    /// counts as the run being stuck. Three is deliberately not two: a model can repeat itself
+    /// once and still recover on the next attempt.
+    /// </summary>
+    public const int DefaultStallLimit = 3;
+
+    /// <summary>
+    /// Repeated failures at or above this count make the work prompt tell the model that its
+    /// approach isn't working. One repeat is enough to warrant a change of tactic; waiting for the
+    /// stall limit would mean the escalation only ever fires on the run's last iteration.
+    /// </summary>
+    private const int EscalateAfterRepeats = 2;
+
     private readonly IAgenticChatService _agenticChat;
     private readonly IFileAgentService? _fileAgent;
     private readonly IAgentRunRepository? _runRepository;
     private readonly IQb64ToolService? _qb64Tools;
+    private readonly IWorkspaceBackupService? _backups;
+
+    /// <summary>Stall limit used when a run doesn't override it; 0 disables stall detection.</summary>
+    private readonly int _defaultStallLimit;
+
+    /// <summary>The stall limit in effect for the current run (see <see cref="_defaultStallLimit"/>).</summary>
+    private int _stallLimit;
 
     /// <summary>Cap used when a run doesn't request its own override — set at construction time,
     /// typically from <c>AppConfiguration.AgentTools.MaxGoalIterations</c>.</summary>
@@ -99,10 +121,32 @@ public sealed class GoalAgentService : IGoalAgentService
     private readonly List<GoalRequirement> _requirements = new();
     private readonly List<string> _activityLog = new();
     private readonly List<AgentRunEventEntity> _pendingEvents = new();
+
+    /// <summary>
+    /// Maps each in-memory requirement to the history row representing it in the <em>current</em>
+    /// run. Rebuilt every time the requirements are inserted, because a continuation writes the
+    /// same requirements again under a new run id. Guarded by <see cref="_lock"/>.
+    /// </summary>
+    private readonly Dictionary<Guid, Guid> _requirementRowIds = new();
+
     private readonly object _lock = new();
     private volatile bool _isRunning;
     private volatile bool _stopRequested;
     private string? _transcriptPath;
+
+    /// <summary>
+    /// Set while a run is parked in <see cref="GoalAgentPhase.AwaitingApproval"/>; completing it
+    /// with true resumes the run, false abandons it. Guarded by <see cref="_lock"/> because it is
+    /// created on the run's thread and completed from the UI's.
+    /// </summary>
+    private TaskCompletionSource<bool>? _approvalGate;
+
+    /// <summary>
+    /// The current run's cancellation source, linked to the token its caller supplied.
+    /// <see cref="RequestStop"/> cancels it, which is what lets a stop reach an LLM call that is
+    /// already generating — see <see cref="RunToken"/>.
+    /// </summary>
+    private volatile CancellationTokenSource? _runCts;
 
     /// <summary>
     /// Id of the current run's database row, or null when history persistence is off (no
@@ -139,12 +183,24 @@ public sealed class GoalAgentService : IGoalAgentService
     /// Without this, a goal like "test that the app works" silently degrades to file-content
     /// checks only.
     /// </param>
+    /// <param name="backups">
+    /// Optional. When provided, the workspace's editable files are copied before every work step,
+    /// so a destructive edit (the model reaching for <c>/fyll</c> on a file it should have edited)
+    /// can be undone instead of ending the run's useful output. When null, no backups are taken.
+    /// </param>
+    /// <param name="stallLimit">
+    /// Default number of consecutive identical failures — for every remaining requirement — after
+    /// which the run gives up early instead of spending its remaining iterations repeating itself.
+    /// 0 disables the check; negative values fall back to <see cref="DefaultStallLimit"/>.
+    /// </param>
     public GoalAgentService(
         IAgenticChatService agenticChat,
         IFileAgentService? fileAgent = null,
         int maxIterations = DefaultMaxIterations,
         IAgentRunRepository? runRepository = null,
-        IQb64ToolService? qb64Tools = null)
+        IQb64ToolService? qb64Tools = null,
+        IWorkspaceBackupService? backups = null,
+        int stallLimit = DefaultStallLimit)
     {
         _agenticChat = agenticChat ?? throw new ArgumentNullException(nameof(agenticChat));
         _fileAgent = fileAgent;
@@ -152,6 +208,9 @@ public sealed class GoalAgentService : IGoalAgentService
         _maxIterations = _defaultMaxIterations;
         _runRepository = runRepository;
         _qb64Tools = qb64Tools;
+        _backups = backups;
+        _defaultStallLimit = stallLimit >= 0 ? stallLimit : DefaultStallLimit;
+        _stallLimit = _defaultStallLimit;
     }
 
     /// <summary>True when a QB64 compiler is configured, i.e. the /qb64 commands are actually
@@ -163,6 +222,36 @@ public sealed class GoalAgentService : IGoalAgentService
 
     /// <inheritdoc/>
     public bool IsRunning => _isRunning;
+
+    /// <inheritdoc/>
+    public bool IsAwaitingApproval => Phase == GoalAgentPhase.AwaitingApproval;
+
+    /// <inheritdoc/>
+    public CancellationToken RunToken
+    {
+        get
+        {
+            var cts = _runCts;
+            // A disposed source (run just finished) still answers Token, but reading it throws —
+            // treat a finished run the same as no run.
+            try
+            {
+                return cts?.Token ?? CancellationToken.None;
+            }
+            catch (ObjectDisposedException)
+            {
+                return CancellationToken.None;
+            }
+        }
+    }
+
+    /// <inheritdoc/>
+    public bool CanContinue =>
+        !_isRunning
+        && !string.IsNullOrWhiteSpace(GoalDescription)
+        && Phase is GoalAgentPhase.MaxIterationsReached or GoalAgentPhase.Stopped
+            or GoalAgentPhase.Failed or GoalAgentPhase.Stalled
+        && Requirements.Count > 0;
 
     /// <inheritdoc/>
     public string? GoalDescription { get; private set; }
@@ -202,7 +291,72 @@ public sealed class GoalAgentService : IGoalAgentService
     public int MaxIterations => _maxIterations;
 
     /// <inheritdoc/>
-    public void RequestStop() => _stopRequested = true;
+    public void RequestStop()
+    {
+        _stopRequested = true;
+
+        // Cancelling the run's own token is what makes a stop take effect *now* rather than after
+        // the current step: callers build their LLM delegate around RunToken, so an in-flight
+        // generation is aborted instead of being waited out (minutes, on a local model).
+        try
+        {
+            _runCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The run finished between the check and the call — nothing left to stop.
+        }
+
+        // A run parked on the approval gate is inside an await, not between steps, so the flag
+        // alone would never be seen — release the gate so the run can observe it and stop.
+        TaskCompletionSource<bool>? gate;
+        lock (_lock)
+        {
+            gate = _approvalGate;
+        }
+        gate?.TrySetResult(false);
+    }
+
+    /// <inheritdoc/>
+    public void ApproveRequirements(IReadOnlyList<string>? requirements = null)
+    {
+        TaskCompletionSource<bool>? gate;
+        lock (_lock)
+        {
+            gate = _approvalGate;
+            if (gate is null)
+                return; // nothing is waiting — an approval for an already-started run is a no-op
+
+            if (requirements is not null)
+                ReplaceRequirements(requirements);
+        }
+
+        gate.TrySetResult(true);
+    }
+
+    /// <summary>
+    /// Swaps the generated requirements for the user's edited list. Blank entries are dropped, and
+    /// an edit that leaves nothing behind is ignored: an empty suite passes verification trivially,
+    /// so the run would report "all green" without ever touching a file.
+    /// Caller must hold <see cref="_lock"/>.
+    /// </summary>
+    private void ReplaceRequirements(IReadOnlyList<string> requirements)
+    {
+        var cleaned = requirements
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .Select(r => r.Trim())
+            .ToList();
+
+        if (cleaned.Count == 0)
+        {
+            _activityLog.Add("⚠ Den godkända kravlistan var tom — behåller de genererade kraven.");
+            return;
+        }
+
+        _requirements.Clear();
+        foreach (var description in cleaned)
+            _requirements.Add(new GoalRequirement(description));
+    }
 
     /// <inheritdoc/>
     public void Reset()
@@ -215,6 +369,7 @@ public sealed class GoalAgentService : IGoalAgentService
             _requirements.Clear();
             _activityLog.Clear();
             _pendingEvents.Clear();
+            _requirementRowIds.Clear();
         }
         _runId = null;
         GoalDescription = null;
@@ -222,6 +377,23 @@ public sealed class GoalAgentService : IGoalAgentService
         Phase = GoalAgentPhase.Idle;
         NotifyChange();
     }
+
+    /// <summary>
+    /// Everything a single execution needs beyond the goal itself. Bundled rather than passed as a
+    /// dozen arguments through <see cref="RunAsync"/> → <see cref="ExecuteAsync"/> →
+    /// <see cref="ContinueAsync"/>, which differ only in whether requirements are generated first.
+    /// </summary>
+    private sealed record RunContext(
+        Func<string, Task<string>> SendToLlm,
+        Action<string>? OnToolStatus,
+        CancellationToken CancellationToken,
+        string? ModelName,
+        Guid? ConversationId,
+        Func<string, Task<string>>? VerifySendToLlm,
+        int? MaxIterations,
+        Guid? RunId,
+        bool RequireApproval,
+        int? StallLimit);
 
     /// <inheritdoc/>
     public async Task RunAsync(
@@ -233,7 +405,9 @@ public sealed class GoalAgentService : IGoalAgentService
         Guid? conversationId = null,
         Func<string, Task<string>>? verifySendToLlm = null,
         int? maxIterations = null,
-        Guid? runId = null)
+        Guid? runId = null,
+        bool requireApproval = false,
+        int? stallLimit = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(goalDescription);
         ArgumentNullException.ThrowIfNull(sendToLlm);
@@ -241,49 +415,145 @@ public sealed class GoalAgentService : IGoalAgentService
         if (_isRunning)
             return;
 
+        await ExecuteAsync(
+            goalDescription,
+            isContinuation: false,
+            new RunContext(sendToLlm, onToolStatus, cancellationToken, modelName, conversationId,
+                verifySendToLlm, maxIterations, runId, requireApproval, stallLimit));
+    }
+
+    /// <inheritdoc/>
+    public async Task ContinueAsync(
+        Func<string, Task<string>> sendToLlm,
+        Action<string>? onToolStatus = null,
+        CancellationToken cancellationToken = default,
+        string? modelName = null,
+        Guid? conversationId = null,
+        Func<string, Task<string>>? verifySendToLlm = null,
+        int? maxIterations = null,
+        int? stallLimit = null)
+    {
+        ArgumentNullException.ThrowIfNull(sendToLlm);
+
+        if (!CanContinue)
+            return;
+
+        await ExecuteAsync(
+            GoalDescription!,
+            isContinuation: true,
+            new RunContext(sendToLlm, onToolStatus, cancellationToken, modelName, conversationId,
+                verifySendToLlm, maxIterations, RunId: null, RequireApproval: false, stallLimit));
+    }
+
+    /// <summary>
+    /// The run loop shared by <see cref="RunAsync"/> and <see cref="ContinueAsync"/>. A
+    /// continuation keeps the existing requirements (and their verdicts) and the visible activity
+    /// log, skips requirement generation and the approval gate, and appends to the transcript
+    /// instead of starting a new one — everything else is identical, including getting its own row
+    /// in the run history.
+    /// </summary>
+    private async Task ExecuteAsync(string goalDescription, bool isContinuation, RunContext context)
+    {
         _isRunning = true;
         _stopRequested = false;
-        _maxIterations = maxIterations is > 0 ? maxIterations.Value : _defaultMaxIterations;
+
+        // Linked to the caller's token so both an external cancel and RequestStop() end the run.
+        // Exposed as RunToken: callers wrap their LLM delegate around it, which is what lets a stop
+        // abort a generation that is already running.
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+        _runCts = runCts;
+        var cancellationToken = runCts.Token;
+
+        _maxIterations = context.MaxIterations is > 0 ? context.MaxIterations.Value : _defaultMaxIterations;
+        _stallLimit = context.StallLimit is >= 0 ? context.StallLimit.Value : _defaultStallLimit;
         lock (_lock)
         {
-            _requirements.Clear();
-            _activityLog.Clear();
+            if (!isContinuation)
+            {
+                _requirements.Clear();
+                _activityLog.Clear();
+            }
+            else
+            {
+                // A continuation is a fresh attempt: the previous run's repeat counters must not
+                // make it give up on its first verification for a failure it has not yet seen.
+                foreach (var requirement in _requirements)
+                {
+                    requirement.RepeatedFailureCount = 0;
+                    requirement.LastVerdictKey = null;
+                }
+            }
+            // Always reset the event queue, sequence and row mapping: a continuation writes to a
+            // new run row, so its events start from 1 again and its requirement rows are new ones,
+            // even though the on-screen log and the requirements themselves carry over.
             _pendingEvents.Clear();
+            _requirementRowIds.Clear();
             _eventSequence = 0;
         }
         GoalDescription = goalDescription;
         CurrentIteration = 0;
 
-        await StartRunRecordAsync(goalDescription, modelName, conversationId, runId);
-        StartTranscript(goalDescription);
+        await StartRunRecordAsync(goalDescription, context.ModelName, context.ConversationId, context.RunId,
+            // A continuation derives no requirements; recording that phase would misdescribe the
+            // row for as long as it is open (and permanently, if the process dies mid-run).
+            initialPhase: isContinuation ? GoalAgentPhase.Working : GoalAgentPhase.GeneratingRequirements);
+        StartTranscript(goalDescription, append: isContinuation);
 
         // Every LLM round trip — including the internal tool-call rounds AgenticChatService
         // performs on our behalf — goes through this wrapper so the transcript captures the
         // complete raw conversation. This is the primary debugging aid when a model ignores
         // the KRAV:/RESULTAT: format or never emits a tool command. The wrapper also scrubs
         // leaked special tokens and retries empty replies before they reach any parsing.
-        var loggingSendToLlm = WrapWithLoggingAndRetry(sendToLlm);
-        var loggingVerifySendToLlm = verifySendToLlm is null
+        var loggingSendToLlm = WrapWithLoggingAndRetry(context.SendToLlm);
+        var loggingVerifySendToLlm = context.VerifySendToLlm is null
             ? loggingSendToLlm
-            : WrapWithLoggingAndRetry(verifySendToLlm);
+            : WrapWithLoggingAndRetry(context.VerifySendToLlm);
 
         try
         {
-            await GenerateRequirementsAsync(goalDescription, loggingSendToLlm);
+            if (isContinuation)
+            {
+                Log($"🔄 Fortsätter tidigare körning med {CountFailed()} krav kvar att uppfylla " +
+                    $"(ytterligare {_maxIterations} iterationer).");
+                await PersistRequirementsAsync();
+            }
+            else
+            {
+                await GenerateRequirementsAsync(goalDescription, loggingSendToLlm);
+
+                if (context.RequireApproval && !await WaitForApprovalAsync(cancellationToken))
+                    return; // the user stopped the run instead of approving the requirements
+
+                // Persisted only now: the approved list is the one the run actually works on, and
+                // the repository inserts requirement rows rather than replacing them.
+                await PersistRequirementsAsync();
+            }
+
+            await FlushEventsAsync();
+            NotifyChange();
 
             for (var iteration = 1; iteration <= _maxIterations; iteration++)
             {
                 CurrentIteration = iteration;
 
-                if (!await WorkOnUnmetRequirementsAsync(goalDescription, loggingSendToLlm, onToolStatus, cancellationToken))
+                if (!await WorkOnUnmetRequirementsAsync(goalDescription, loggingSendToLlm, context.OnToolStatus, cancellationToken))
                     return; // stop requested mid-work
 
-                if (!await VerifyAllRequirementsAsync(loggingVerifySendToLlm, onToolStatus, cancellationToken))
+                if (!await VerifyAllRequirementsAsync(loggingVerifySendToLlm, context.OnToolStatus, cancellationToken))
                     return; // stop requested mid-verification
 
                 if (Requirements.All(r => r.Status == RequirementStatus.Passed))
                 {
                     SetPhase(GoalAgentPhase.Completed, "🎉 Alla krav uppfyllda — målet är uppnått.");
+                    return;
+                }
+
+                if (HasStalled())
+                {
+                    SetPhase(GoalAgentPhase.Stalled,
+                        $"⏹ Ingen förändring på {_stallLimit} kontroller i rad för samtliga {CountFailed()} kvarvarande krav — " +
+                        "avbryter i förtid istället för att upprepa samma arbete. Justera målet eller kraven och kör vidare.");
+                    await FlushEventsAsync();
                     return;
                 }
 
@@ -305,6 +575,13 @@ public sealed class GoalAgentService : IGoalAgentService
         {
             // Runs on every exit path (including the early returns above), so the run's row always
             // gets its terminal phase — an uncompleted row means the process itself died.
+            lock (_lock)
+            {
+                _approvalGate = null;
+            }
+            // Cleared before the `using` disposes it, so RequestStop() can never reach a disposed
+            // source through the field.
+            _runCts = null;
             await CompleteRunRecordAsync();
             _isRunning = false;
             NotifyChange();
@@ -312,10 +589,62 @@ public sealed class GoalAgentService : IGoalAgentService
     }
 
     /// <summary>
+    /// Parks the run until <see cref="ApproveRequirements"/> is called, the run is stopped, or the
+    /// cancellation token fires. Returns true when the run may proceed.
+    /// <para>
+    /// This is the cheapest possible place to catch a misread goal: the requirements are the whole
+    /// contract for the rest of the run, and a wrong one costs every iteration that follows.
+    /// </para>
+    /// </summary>
+    private async Task<bool> WaitForApprovalAsync(CancellationToken cancellationToken)
+    {
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_lock)
+        {
+            _approvalGate = gate;
+        }
+
+        SetPhase(GoalAgentPhase.AwaitingApproval,
+            "⏸ Kravlistan är klar — granska, redigera vid behov och godkänn för att starta arbetet.");
+        await FlushEventsAsync();
+
+        // A stop requested before the gate existed (between generation and here) must not be lost.
+        if (_stopRequested)
+            gate.TrySetResult(false);
+
+        bool approved;
+        using (cancellationToken.Register(() => gate.TrySetResult(false)))
+        {
+            approved = await gate.Task;
+        }
+
+        lock (_lock)
+        {
+            _approvalGate = null;
+        }
+
+        if (approved && !_stopRequested && !cancellationToken.IsCancellationRequested)
+        {
+            Log($"▶ Kravlistan godkänd — {Requirements.Count} krav går vidare till arbete.");
+            Transcript("KRAV (godkända)",
+                string.Join("\n", Requirements.Select((r, i) => $"{i + 1}. {r.Description}")));
+            return true;
+        }
+
+        SetPhase(GoalAgentPhase.Stopped, "⏹ Körningen avbröts innan kraven godkändes.");
+        return false;
+    }
+
+    /// <summary>
     /// Phase 1: asks the LLM (plain call, no tools needed) to break the goal down into
     /// "KRAV:" lines and stores the parsed requirements. Falls back to treating the whole
     /// goal description as a single requirement if no line could be parsed, so a model that
     /// ignores the format instruction still yields a runnable (if coarse) requirement.
+    /// <para>
+    /// The requirements are not persisted here: the caller may still park the run on the approval
+    /// gate, where the user can edit the list, and the repository inserts requirement rows rather
+    /// than replacing them — so only the list the run actually works on gets written.
+    /// </para>
     /// </summary>
     private async Task GenerateRequirementsAsync(string goalDescription, Func<string, Task<string>> sendToLlm)
     {
@@ -339,8 +668,6 @@ public sealed class GoalAgentService : IGoalAgentService
 
         Log($"📋 {parsed.Count} krav identifierade.");
         Transcript("KRAV", string.Join("\n", parsed.Select((r, i) => $"{i + 1}. {r}")));
-        await PersistRequirementsAsync();
-        await FlushEventsAsync();
         NotifyChange();
     }
 
@@ -384,6 +711,17 @@ public sealed class GoalAgentService : IGoalAgentService
         {
             Log("⏭ Ingen åtgärd i denna iteration — de kvarvarande kraven saknar tolkbara granskningsutslag, så det finns ingen konkret brist att åtgärda. Kraven granskas om i nästa kontrollpass.");
             return true;
+        }
+
+        // Taken before the model can touch anything: /fyll replaces a whole file, and a wrong
+        // choice of tool has wiped good work mid-run before. Best-effort — a failed backup is
+        // logged and the work proceeds, since refusing to work would be the worse outcome.
+        if (_backups is not null)
+        {
+            var backup = _backups.Create($"iteration-{CurrentIteration}");
+            Log(backup is not null
+                ? $"🗄 Säkerhetskopia av arbetsytan sparad ({backup.FileCount} fil(er)) innan arbetssteget."
+                : "⚠ Ingen säkerhetskopia kunde sparas innan arbetssteget — arbetet fortsätter ändå.");
         }
 
         foreach (var requirement in actionable)
@@ -461,9 +799,17 @@ public sealed class GoalAgentService : IGoalAgentService
         var target = candidates[0];
         await _fileAgent.WriteExtractedContentAsync(target, content);
 
-        return new ToolInvocation(
-            "(räddad filskrivning)",
-            $"✓ Fil sparad: {target} — svaret innehöll ett fullständigt filinnehåll men inget verktygskommando, så det tillämpades automatiskt.");
+        var message =
+            $"✓ Fil sparad: {target} — svaret innehöll ett fullständigt filinnehåll men inget verktygskommando, så det tillämpades automatiskt.";
+
+        // Same write-time QBasic check the tool loop applies. This path bypasses AgenticChatService
+        // entirely, so without it a recovered .bas rewrite would be the one write in the whole run
+        // that nothing ever looked at.
+        var qbasicIssues = QBasicStructureLinter.DescribeIssuesAfterWrite(target, content);
+        if (qbasicIssues is not null)
+            message += $"\n{qbasicIssues}";
+
+        return new ToolInvocation("(räddad filskrivning)", message);
     }
 
     /// <summary>
@@ -532,6 +878,8 @@ public sealed class GoalAgentService : IGoalAgentService
     {
         SetPhase(GoalAgentPhase.Verifying, $"🔎 Iteration {CurrentIteration}/{_maxIterations}: kontrollerar kraven mot arbetsytan...");
 
+        var skippedAsUnchanged = 0;
+
         foreach (var requirement in Requirements)
         {
             if (_stopRequested)
@@ -540,9 +888,21 @@ public sealed class GoalAgentService : IGoalAgentService
                 return false;
             }
 
+            // Nothing this requirement depends on has changed since it passed, so re-running the
+            // review can only reach the same conclusion — at the price of a full LLM round trip.
+            // Over a long run this is where most of the verification budget went.
+            var fingerprint = ComputeVerificationFingerprint(requirement.Description);
+            if (requirement.Status == RequirementStatus.Passed
+                && fingerprint is not null
+                && fingerprint == requirement.VerifiedFingerprint)
+            {
+                skippedAsUnchanged++;
+                continue;
+            }
+
             // Pure existence requirements ("Filen X finns i arbetsytan") are answered with
             // certainty by the file system — no LLM round trip, no chance of a garbled verdict.
-            if (TryCheckFileExistenceDirectly(requirement))
+            if (TryCheckFileExistenceDirectly(requirement, fingerprint))
             {
                 await PersistRequirementStatusAsync(requirement);
                 await FlushEventsAsync();
@@ -585,9 +945,7 @@ public sealed class GoalAgentService : IGoalAgentService
 
             if (verdictParsed && passed)
             {
-                requirement.Status = RequirementStatus.Passed;
-                requirement.LastVerdict = null;
-                requirement.VerdictInconclusive = false;
+                MarkPassed(requirement, fingerprint);
                 Log($"✅ Godkänt: {requirement.Description}", AgentRunEventTypes.Verdict);
                 Transcript("BEDÖMNING", "GODKÄNT");
             }
@@ -599,10 +957,10 @@ public sealed class GoalAgentService : IGoalAgentService
                 else
                     verdict = string.IsNullOrWhiteSpace(reason) ? "Underkänt utan motivering." : reason;
 
-                requirement.Status = RequirementStatus.Failed;
-                requirement.LastVerdict = verdict;
-                requirement.VerdictInconclusive = !verdictParsed;
-                Log($"❌ Underkänt: {requirement.Description} — {verdict}", AgentRunEventTypes.Verdict);
+                MarkFailed(requirement, verdict, inconclusive: !verdictParsed);
+                Log($"❌ Underkänt: {requirement.Description} — {verdict}" +
+                    (requirement.RepeatedFailureCount > 1 ? $" (samma utslag {requirement.RepeatedFailureCount} gånger i rad)" : string.Empty),
+                    AgentRunEventTypes.Verdict);
                 Transcript("BEDÖMNING", $"UNDERKÄNT — {verdict}");
             }
 
@@ -614,7 +972,130 @@ public sealed class GoalAgentService : IGoalAgentService
             NotifyChange();
         }
 
+        if (skippedAsUnchanged > 0)
+        {
+            Log($"⏭ {skippedAsUnchanged} redan godkänt krav kontrollerades inte om — filerna de gäller är oförändrade sedan de godkändes.");
+            await FlushEventsAsync();
+            NotifyChange();
+        }
+
         return true;
+    }
+
+    /// <summary>
+    /// Records a pass, remembering the fingerprint of the files the verdict was based on so the
+    /// next iteration can skip an identical check, and clearing the repeat counter — progress on
+    /// a requirement means the loop is not stuck on it.
+    /// </summary>
+    private static void MarkPassed(GoalRequirement requirement, string? fingerprint)
+    {
+        requirement.Status = RequirementStatus.Passed;
+        requirement.LastVerdict = null;
+        requirement.VerdictInconclusive = false;
+        requirement.VerifiedFingerprint = fingerprint;
+        requirement.RepeatedFailureCount = 0;
+        requirement.LastVerdictKey = null;
+    }
+
+    /// <summary>
+    /// Records a failure and tracks whether it is the <em>same</em> failure as last time, which is
+    /// what distinguishes "the model is working through it" from "the model is going in circles".
+    /// An unreadable verdict gets a fixed key rather than its (always slightly different) text, so
+    /// a review that keeps coming back garbled still registers as no progress.
+    /// </summary>
+    private static void MarkFailed(GoalRequirement requirement, string verdict, bool inconclusive)
+    {
+        var verdictKey = inconclusive ? InconclusiveVerdictKey : NormalizeVerdict(verdict);
+
+        requirement.RepeatedFailureCount =
+            requirement.LastVerdictKey is not null && string.Equals(requirement.LastVerdictKey, verdictKey, StringComparison.Ordinal)
+                ? requirement.RepeatedFailureCount + 1
+                : 1;
+
+        requirement.LastVerdictKey = verdictKey;
+        requirement.Status = RequirementStatus.Failed;
+        requirement.LastVerdict = verdict;
+        requirement.VerdictInconclusive = inconclusive;
+        requirement.VerifiedFingerprint = null;
+    }
+
+    /// <summary>Key used for every unreadable verdict, whose text varies with the garbled reply.</summary>
+    private const string InconclusiveVerdictKey = "(otolkbart utslag)";
+
+    /// <summary>
+    /// Reduces a verdict to something comparable across attempts: case and whitespace differences
+    /// in an otherwise identical complaint should still count as the same complaint.
+    /// </summary>
+    private static string NormalizeVerdict(string verdict) =>
+        string.Join(' ', verdict.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
+
+    /// <summary>
+    /// True when every requirement still outstanding has failed the same way
+    /// <see cref="_stallLimit"/> times running: the work steps are no longer changing the outcome,
+    /// so the remaining iterations would just replay the same exchange.
+    /// </summary>
+    private bool HasStalled()
+    {
+        if (_stallLimit <= 0)
+            return false;
+
+        var outstanding = Requirements.Where(r => r.Status != RequirementStatus.Passed).ToList();
+        return outstanding.Count > 0 && outstanding.All(r => r.RepeatedFailureCount >= _stallLimit);
+    }
+
+    /// <summary>
+    /// Fingerprints the workspace files a requirement depends on — the ones it names, or the whole
+    /// workspace listing when it names none — as name + size + last-write time. Deliberately not a
+    /// content hash: this runs once per requirement per iteration, and file metadata answers
+    /// "could this possibly have changed?" without reading anything.
+    /// <para>
+    /// A named file that does not exist is part of the fingerprint too ("missing"), so creating it
+    /// invalidates the previous verdict exactly as editing it would.
+    /// </para>
+    /// Returns null when there is no workspace to inspect, which disables the optimisation rather
+    /// than risking a stale pass.
+    /// </summary>
+    private string? ComputeVerificationFingerprint(string requirementDescription)
+    {
+        if (_fileAgent is null)
+            return null;
+
+        try
+        {
+            var baseDirectory = _fileAgent.BaseDirectory;
+
+            var names = FilenamePattern.Matches(requirementDescription)
+                .Select(match => match.Value)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (names.Count == 0)
+            {
+                // No file named: fall back to the whole workspace, so any change anywhere counts.
+                names = Directory.GetFiles(baseDirectory)
+                    .Select(Path.GetFileName)
+                    .Where(name => name is not null
+                        && !name.Equals(TranscriptFileName, StringComparison.OrdinalIgnoreCase)
+                        && !SnapshotSkippedExtensions.Contains(Path.GetExtension(name)))
+                    .Select(name => name!)
+                    .ToList();
+            }
+
+            var sb = new StringBuilder();
+            foreach (var name in names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+            {
+                var info = new FileInfo(Path.Combine(baseDirectory, name));
+                sb.Append(name).Append('|');
+                sb.Append(info.Exists ? $"{info.Length}:{info.LastWriteTimeUtc.Ticks}" : "missing");
+                sb.Append(';');
+            }
+
+            return sb.ToString();
+        }
+        catch (Exception)
+        {
+            return null; // unreadable workspace — verify for real rather than assume
+        }
     }
 
     /// <summary>
@@ -624,7 +1105,7 @@ public sealed class GoalAgentService : IGoalAgentService
     /// status/verdict/log/transcript are all updated. Returns true when the requirement was
     /// handled here (the caller skips the LLM verification), false when it needs a real review.
     /// </summary>
-    private bool TryCheckFileExistenceDirectly(GoalRequirement requirement)
+    private bool TryCheckFileExistenceDirectly(GoalRequirement requirement, string? fingerprint)
     {
         if (_fileAgent is null || !TryParseFileExistenceRequirement(requirement.Description, out var filename))
             return false;
@@ -643,17 +1124,13 @@ public sealed class GoalAgentService : IGoalAgentService
 
         if (exists)
         {
-            requirement.Status = RequirementStatus.Passed;
-            requirement.LastVerdict = null;
-            requirement.VerdictInconclusive = false;
+            MarkPassed(requirement, fingerprint);
             Log($"✅ Godkänt (direktkontroll): {requirement.Description}", AgentRunEventTypes.Verdict);
             Transcript("BEDÖMNING", "GODKÄNT (direktkontroll: filen finns)");
         }
         else
         {
-            requirement.Status = RequirementStatus.Failed;
-            requirement.LastVerdict = $"Filen {filename} saknas i arbetsytan.";
-            requirement.VerdictInconclusive = false;
+            MarkFailed(requirement, $"Filen {filename} saknas i arbetsytan.", inconclusive: false);
             Log($"❌ Underkänt (direktkontroll): {requirement.Description} — filen saknas.", AgentRunEventTypes.Verdict);
             Transcript("BEDÖMNING", $"UNDERKÄNT — Filen {filename} saknas i arbetsytan (direktkontroll).");
         }
@@ -743,6 +1220,13 @@ public sealed class GoalAgentService : IGoalAgentService
             // requirements are already filtered out of the work step, so this is belt-and-braces).
             if (!string.IsNullOrWhiteSpace(requirements[i].LastVerdict) && !requirements[i].VerdictInconclusive)
                 sb.Append($"   Vid senaste kontrollen underkändes detta krav med motiveringen: \"{requirements[i].LastVerdict}\". Åtgärda det som saknas.\n");
+
+            // Repeating the same fix after the same rejection is how a run burns its whole budget
+            // standing still. Say so plainly and ask for a different approach.
+            if (requirements[i].RepeatedFailureCount >= EscalateAfterRepeats)
+                sb.Append($"   OBS: Detta krav har underkänts {requirements[i].RepeatedFailureCount} gånger i rad av samma anledning. " +
+                          "Det du har provat hittills fungerar inte — byt angreppssätt istället för att göra om samma ändring. " +
+                          "Överväg att skriva om hela filen från grunden med /fyll.\n");
         }
 
         if (workspaceSnapshot.Length > 0)
@@ -1114,7 +1598,11 @@ public sealed class GoalAgentService : IGoalAgentService
     /// active workspace). Transcript failures never break the run — logging is disabled for
     /// the rest of the run and a warning is added to the activity log instead.
     /// </summary>
-    private void StartTranscript(string goalDescription)
+    /// <param name="append">
+    /// True for a continuation, which appends its header to the existing transcript instead of
+    /// overwriting it — the continuation only makes sense read together with the run it resumes.
+    /// </param>
+    private void StartTranscript(string goalDescription, bool append = false)
     {
         _transcriptPath = null;
         if (_fileAgent is null)
@@ -1123,10 +1611,16 @@ public sealed class GoalAgentService : IGoalAgentService
         try
         {
             var path = Path.Combine(_fileAgent.BaseDirectory, TranscriptFileName);
-            File.WriteAllText(path,
-                $"=== AGENTKÖRNING {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===\n" +
+            var header =
+                $"=== AGENTKÖRNING{(append ? " (fortsättning)" : string.Empty)} {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===\n" +
                 $"Mål: {goalDescription}\n" +
-                $"Max iterationer: {_maxIterations}\n\n");
+                $"Max iterationer: {_maxIterations}\n\n";
+
+            if (append && File.Exists(path))
+                File.AppendAllText(path, header);
+            else
+                File.WriteAllText(path, header);
+
             _transcriptPath = path;
             Log($"📄 Transkript loggas till {TranscriptFileName} i arbetsytan.");
         }
@@ -1171,7 +1665,12 @@ public sealed class GoalAgentService : IGoalAgentService
     /// this run before <see cref="RunAsync"/> was called (e.g. a job id returned from an API
     /// before the run starts) look the same row up later by that id.
     /// </param>
-    private async Task StartRunRecordAsync(string goalDescription, string? modelName, Guid? conversationId, Guid? runId)
+    private async Task StartRunRecordAsync(
+        string goalDescription,
+        string? modelName,
+        Guid? conversationId,
+        Guid? runId,
+        GoalAgentPhase initialPhase = GoalAgentPhase.GeneratingRequirements)
     {
         _runId = null;
         if (_runRepository is null)
@@ -1185,7 +1684,7 @@ public sealed class GoalAgentService : IGoalAgentService
             ConversationId = conversationId,
             MaxIterations = _maxIterations,
             Iterations = 0,
-            Phase = GoalAgentPhase.GeneratingRequirements.ToString(),
+            Phase = initialPhase.ToString(),
             StartedAt = DateTime.UtcNow
         };
         if (runId is not null)
@@ -1207,18 +1706,33 @@ public sealed class GoalAgentService : IGoalAgentService
         if (_runRepository is null || _runId is null)
             return;
 
-        var rows = Requirements
-            .Select((requirement, index) => new AgentRunRequirementEntity
+        var rows = new List<AgentRunRequirementEntity>();
+        lock (_lock)
+        {
+            _requirementRowIds.Clear();
+
+            var ordinal = 0;
+            foreach (var requirement in _requirements)
             {
-                Id = requirement.Id,
-                RunId = _runId.Value,
-                Ordinal = index + 1,
-                Description = requirement.Description,
-                Status = requirement.Status.ToString(),
-                LastVerdict = requirement.LastVerdict,
-                UpdatedAt = DateTime.UtcNow
-            })
-            .ToList();
+                // A fresh row id per run, not the requirement's own id: a continuation records the
+                // same in-memory requirements under a new run, and reusing their ids collided with
+                // the previous run's rows on the primary key (which silently disabled history for
+                // the whole continuation).
+                var rowId = Guid.NewGuid();
+                _requirementRowIds[requirement.Id] = rowId;
+
+                rows.Add(new AgentRunRequirementEntity
+                {
+                    Id = rowId,
+                    RunId = _runId.Value,
+                    Ordinal = ++ordinal,
+                    Description = requirement.Description,
+                    Status = requirement.Status.ToString(),
+                    LastVerdict = requirement.LastVerdict,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+        }
 
         try
         {
@@ -1235,10 +1749,19 @@ public sealed class GoalAgentService : IGoalAgentService
         if (_runRepository is null || _runId is null)
             return;
 
+        Guid rowId;
+        lock (_lock)
+        {
+            // No row for this requirement in the current run (history was disabled, or the
+            // requirement was added after the insert) — nothing to update.
+            if (!_requirementRowIds.TryGetValue(requirement.Id, out rowId))
+                return;
+        }
+
         try
         {
             await _runRepository.UpdateRequirementAsync(
-                requirement.Id,
+                rowId,
                 requirement.Status.ToString(),
                 requirement.LastVerdict);
         }

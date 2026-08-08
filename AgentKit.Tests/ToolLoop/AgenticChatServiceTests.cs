@@ -448,6 +448,86 @@ public sealed class AgenticChatServiceTests : IDisposable
         content.Should().Equal("rad 1", "rad 2");
     }
 
+    // ── QBasic write-time check ───────────────────────────────────────────
+    //
+    // The QB64 compiler tool only exists when an operator has configured a compiler path, so
+    // without one nothing in a whole agent run ever looked at a generated .bas file. These cover
+    // the same QBasicStructureLinter pass running at write time instead, on every path that puts
+    // content into the workspace.
+
+    [Fact]
+    public async Task SendWithToolsAsync_InlineWriteOfBrokenQbasic_ReportsLinterFindingsBackToLlm()
+    {
+        // "_LINE" is the invented keyword from a real run: structurally the file is flawless, so
+        // only the keyword pass catches it.
+        var llm = new ScriptedLlm(
+            "/fyll spel.bas\n```qbasic\nSCREEN 12\n_LINE (1, 1), (2, 2), 1\n```",
+            "Klart!");
+
+        var result = await _sut.SendWithToolsAsync("Skapa ett spel", llm.SendAsync);
+
+        result.ToolInvocations[0].ResultSummary.Should().Contain("✓ Fil sparad: spel.bas")
+            .And.Contain("Strukturkontroll").And.Contain("\"LINE\"");
+        // The finding is worthless unless the model actually sees it in the next turn.
+        llm.Prompts[1].Should().Contain("Strukturkontroll").And.Contain("\"LINE\"");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_TwoPhaseFyllOfBrokenQbasic_ReportsLinterFindingsBackToLlm()
+    {
+        var llm = new ScriptedLlm(
+            "/fyll spel.bas Skriv ett litet spel",
+            "<FILE>DO\n    IF _KEYHIT$ = \"\" THEN _LIMIT 10\nLOOP<ENDFILE>",
+            "Klart!");
+
+        var result = await _sut.SendWithToolsAsync("Skapa ett spel", llm.SendAsync);
+
+        result.ToolInvocations[0].ResultSummary.Should().Contain("\"_KEYHIT\"");
+        llm.Prompts[2].Should().Contain("Strukturkontroll");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_ValidQbasicWrite_LeavesSummaryUntouched()
+    {
+        var llm = new ScriptedLlm(
+            "/fyll spel.bas\n```qbasic\nSCREEN 12\nLINE (1, 1)-(2, 2), 1\nEND\n```",
+            "Klart!");
+
+        var result = await _sut.SendWithToolsAsync("Skapa ett spel", llm.SendAsync);
+
+        result.ToolInvocations[0].ResultSummary.Should().Be("✓ Fil sparad: spel.bas");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_RedigeraIntroducingBrokenQbasic_ReportsLinterFindingsBackToLlm()
+    {
+        // /redigera applies its edits inside the file service and never hands the content back,
+        // so this only works if the loop re-reads the file it just changed.
+        await File.WriteAllLinesAsync(Path.Combine(_tempDir, "spel.bas"), ["SCREEN 12", "CLS"]);
+        var llm = new ScriptedLlm(
+            "/redigera spel.bas Rita en linje",
+            "<REDIGERA RAD=2>_LINE (1, 1), (2, 2), 1</REDIGERA>",
+            "Klart!");
+
+        var result = await _sut.SendWithToolsAsync("Rita en linje", llm.SendAsync);
+
+        result.ToolInvocations[0].ResultSummary.Should().Contain("✓ Fil redigerad")
+            .And.Contain("\"LINE\"");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_NonBasFile_IsNeverLinted()
+    {
+        // Prose that happens to contain QBasic block keywords must not be treated as source.
+        var llm = new ScriptedLlm(
+            "/fyll anteckningar.txt\n```\nIF vi hinner THEN\nkör vi vidare\n```",
+            "Klart!");
+
+        var result = await _sut.SendWithToolsAsync("Spara anteckningar", llm.SendAsync);
+
+        result.ToolInvocations[0].ResultSummary.Should().Be("✓ Fil sparad: anteckningar.txt");
+    }
+
     // ── Safety cap ────────────────────────────────────────────────────────
 
     [Fact]
