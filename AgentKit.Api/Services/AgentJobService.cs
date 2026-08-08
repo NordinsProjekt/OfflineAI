@@ -3,6 +3,7 @@ using System.IO.Compression;
 using AgentKit.Api.Models;
 using AgentKit.Skills.External;
 using AgentKit.Skills.Files;
+using AgentKit.Skills.QBasicGraphics;
 using AgentKit.Skills.Utility;
 using AgentKit.ToolLoop;
 using Application.AI.Chat;
@@ -37,6 +38,7 @@ public sealed class AgentJobService : IAgentJobService
     private readonly IAgentRunRepository? _runRepository;
     private readonly IUtilityToolsService? _utilityTools;
     private readonly IExternalToolsService? _externalTools;
+    private readonly IQBasicGraphicsService? _qbasicGraphics;
     private readonly ILogger<AgentJobService> _logger;
     private readonly string _jobsRootFolder;
 
@@ -47,7 +49,8 @@ public sealed class AgentJobService : IAgentJobService
         ILogger<AgentJobService> logger,
         IAgentRunRepository? runRepository = null,
         IUtilityToolsService? utilityTools = null,
-        IExternalToolsService? externalTools = null)
+        IExternalToolsService? externalTools = null,
+        IQBasicGraphicsService? qbasicGraphics = null)
     {
         _modelPool = modelPool ?? throw new ArgumentNullException(nameof(modelPool));
         _appConfig = appConfig ?? throw new ArgumentNullException(nameof(appConfig));
@@ -56,6 +59,7 @@ public sealed class AgentJobService : IAgentJobService
         _runRepository = runRepository;
         _utilityTools = utilityTools;
         _externalTools = externalTools;
+        _qbasicGraphics = qbasicGraphics;
 
         _jobsRootFolder = !string.IsNullOrWhiteSpace(appConfig.Jobs.RootFolder)
             ? appConfig.Jobs.RootFolder
@@ -115,7 +119,9 @@ public sealed class AgentJobService : IAgentJobService
             fileAgent,
             _utilityTools,
             _appConfig.AgentTools.MaxToolCallRounds,
-            _externalTools);
+            _externalTools,
+            qb64Tools: null,
+            qbasicGraphics: _qbasicGraphics);
         var goalAgent = new GoalAgentService(
             agenticChat,
             fileAgent,

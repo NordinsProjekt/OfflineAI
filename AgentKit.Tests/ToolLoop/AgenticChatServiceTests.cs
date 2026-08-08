@@ -1,5 +1,6 @@
 using AgentKit.Skills.External;
 using AgentKit.Skills.Files;
+using AgentKit.Skills.QBasicGraphics;
 using AgentKit.Skills.Qb64;
 using AgentKit.Skills.Utility;
 using AgentKit.Tests.TestHelpers;
@@ -851,5 +852,50 @@ public sealed class AgenticChatServiceTests : IDisposable
 
         llm.Prompts[0].Should().Contain("/qb64 <fil.bas>");
         llm.Prompts[0].Should().Contain("Kompilerar och kör en QBasic-fil.");
+    }
+
+    // ── QBasic graphics reference ─────────────────────────────────────────
+
+    [Fact]
+    public async Task SendWithToolsAsync_QbasicReferenceRequested_FeedsTheArticleBack()
+    {
+        // The real service is used here rather than a fake: it has no configuration or process to
+        // stub out, and the point of the test is that a real lookup reaches the model.
+        var sut = new AgenticChatService(_fileAgent, qbasicGraphics: new QBasicGraphicsService());
+        var llm = new ScriptedLlm(
+            "/qbasic-grafik sprites",
+            "GET kopierar en rektangel till en array och PUT ritar tillbaka den.");
+
+        var result = await sut.SendWithToolsAsync("Hur sparar jag en bild i QBasic?", llm.SendAsync);
+
+        result.ToolInvocations.Should().ContainSingle().Which.Command.Should().Be("/qbasic-grafik sprites");
+        llm.Prompts[1].Should().Contain("GET [STEP](x1,y1)"); // the article's syntax reached the LLM
+        result.FinalResponse.Should().StartWith("GET kopierar");
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_QbasicReferenceAvailable_DescriptionAppearsInFirstPrompt()
+    {
+        var sut = new AgenticChatService(_fileAgent, qbasicGraphics: new QBasicGraphicsService());
+        var llm = new ScriptedLlm("Ett vanligt svar utan verktyg.");
+
+        await sut.SendWithToolsAsync("Hej!", llm.SendAsync);
+
+        llm.Prompts[0].Should().Contain("/qbasic-grafik <ämne>");
+        llm.Prompts[0].Should().Contain("maskning"); // topic list is part of the description
+    }
+
+    [Fact]
+    public async Task SendWithToolsAsync_Qb64CommandWithReferenceAlsoAvailable_GoesToTheCompiler()
+    {
+        // /qb64 and /qbasic-grafik share no prefix, but both are QBasic-shaped commands offered in
+        // the same tool list — this pins down that the loop routes each to its own service.
+        var qb64 = new FakeQb64ToolService(_ => UtilityToolResult.Success("✓ kompilerade", "Klart."));
+        var sut = new AgenticChatService(_fileAgent, qb64Tools: qb64, qbasicGraphics: new QBasicGraphicsService());
+        var llm = new ScriptedLlm("/qb64-kompilera spel.bas", "Programmet kompilerar utan fel.");
+
+        await sut.SendWithToolsAsync("Kontrollera spel.bas.", llm.SendAsync);
+
+        qb64.ExecutedCommands.Should().ContainSingle().Which.Should().Be("/qb64-kompilera spel.bas");
     }
 }

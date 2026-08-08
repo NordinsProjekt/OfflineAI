@@ -7,6 +7,7 @@ using Application.AI.Embeddings;
 using Application.AI.Gemma4;
 using AgentKit.Skills.External;
 using AgentKit.Skills.Files;
+using AgentKit.Skills.QBasicGraphics;
 using AgentKit.Skills.Qb64;
 using AgentKit.Skills.Utility;
 using AgentKit.ToolLoop;
@@ -149,6 +150,12 @@ public static class Program
                 MapQb64Options(appConfig.AgentTools.Qb64),
                 sp.GetRequiredService<IFileAgentService>()));
 
+        // Register the QBasic graphics reference: lets the LLM look up exact syntax for SCREEN,
+        // LINE/CIRCLE/PAINT, GET/PUT sprites, pages, masking and PALETTE via /qbasic-grafik before
+        // it writes a .bas file, instead of inventing keywords the compiler then rejects. Needs no
+        // configuration (the reference is compiled in) and is stateless, so one instance is shared.
+        builder.Services.AddSingleton<IQBasicGraphicsService>(_ => new QBasicGraphicsService());
+
         // Register the lightweight, text-based agentic chat service used by QuickAsk and the
         // Dashboard chat: tells the LLM about the IFileAgentService/IUtilityToolsService slash
         // commands and executes any it requests, feeding the result back for a final answer. The
@@ -160,7 +167,8 @@ public static class Program
                 sp.GetRequiredService<IUtilityToolsService>(),
                 appConfig.AgentTools.MaxToolCallRounds,
                 sp.GetRequiredService<IExternalToolsService>(),
-                sp.GetRequiredService<IQb64ToolService>()));
+                sp.GetRequiredService<IQb64ToolService>(),
+                sp.GetRequiredService<IQBasicGraphicsService>()));
 
         // Register the batch job queue (Batch Processing page): feeds each queued task's
         // free-text description into IAgenticChatService.SendWithToolsAsync one at a time, so

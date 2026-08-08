@@ -255,6 +255,24 @@ public class QBasicStructureLinterTests
     }
 
     [Fact]
+    public void Analyze_UnderscoreOnGraphicsStatements_IsFlaggedWithTheRealSpelling()
+    {
+        // The graphics statements the QBasicGraphics reference documents are the ones most likely
+        // to attract a stray underscore: QB64 does have _PUTIMAGE and _MEMIMAGE, so a model that
+        // has seen those reaches for _PUT and _GET too.
+        var source = string.Join('\n',
+            "_GET (0, 0)-(5, 5), sprite(0)",
+            "_PUT (20, 20), sprite(0), PSET",
+            "_BSAVE \"bild.bsv\", 0, 40");
+
+        var issues = QBasicStructureLinter.Analyze(source);
+
+        issues.Should().Contain(i => i.Line == 1 && i.Message.Contains("\"GET\""));
+        issues.Should().Contain(i => i.Line == 2 && i.Message.Contains("\"PUT\""));
+        issues.Should().Contain(i => i.Line == 3 && i.Message.Contains("\"BSAVE\""));
+    }
+
+    [Fact]
     public void Analyze_KnownKeywordWithWrongSigil_IsFlaggedWithTheCanonicalSpelling()
     {
         // The run's other invented keyword: _KEYHIT is real but returns a LONG, so "_KEYHIT$"
