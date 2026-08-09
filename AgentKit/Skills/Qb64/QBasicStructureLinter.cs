@@ -478,8 +478,13 @@ public static class QBasicStructureLinter
     /// leading <c>REM</c> token is treated the same way — see the type-level remarks for the
     /// limits of that heuristic). Positions are not preserved; only line numbers matter to this
     /// linter, and those are tracked per physical line by the caller.
+    /// <para>
+    /// Internal rather than private so <see cref="QBasicProgramKind"/> can scan the same
+    /// code-only view of a line: a <c>SCREEN 13</c> inside a comment or a string must no more
+    /// count as a graphics mode than as a statement.
+    /// </para>
     /// </summary>
-    private static string StripStringsAndComments(string line)
+    internal static string StripStringsAndComments(string line)
     {
         var sb = new System.Text.StringBuilder(line.Length);
         var inString = false;

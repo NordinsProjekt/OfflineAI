@@ -480,11 +480,12 @@ public static class QBasicGraphicsReference
             - $CONSOLE:ONLY och grafik går inte ihop. Metakommandot gör programmet konsollöst, så
               ett program som kör SCREEN 13 ska inte ha det. Regeln "$CONSOLE:ONLY överst i filen"
               gäller textprogram vars utdata ska läsas tillbaka.
-            - Verifiera grafikprogram med /qb64-kompilera, inte /qb64. Kompileringen kontrollerar
-              koden; /qb64 skulle starta ett fönster som ingen ser och till slut avbrytas av
-              körtimeouten — vilket ser ut som ett fel fast programmet var korrekt.
-            - Inget får vänta på en användare: INPUT, SLEEP utan argument och loopar som väntar på
-              INKEY$ eller _KEYHIT hänger tills timeouten dödar programmet.
+            - Verifiera grafikprogram med /qb64-kompilera. Kompileringen kontrollerar koden, och det
+              är den enda kontroll som går att göra: /qb64 upptäcker att programmet växlar skärmläge
+              och kompilerar det utan att köra det, eftersom fönstret ändå inte kan visas här.
+            - Inget får vänta på en användare: SLEEP utan argument och loopar som väntar på INKEY$
+              eller _KEYHIT hänger tills timeouten dödar programmet. (Ett textprogram som verkligen
+              ska läsa INPUT kan i stället få svaren skickade: /qb64 fil.bas <<< rad1|rad2.)
             - Behöver programmet lämna ett bevis på att det räknat rätt: skriv till en textfil i
               arbetsytan i stället för till skärmen, och läs den efteråt med /läs.
                 OPEN "resultat.txt" FOR OUTPUT AS #1

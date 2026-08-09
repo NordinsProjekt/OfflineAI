@@ -56,10 +56,11 @@ Två saker skiljer referensen från en vanlig QBasic-handledning:
   `OUT &H3C8`, `POKE` till `&HA000`, `WAIT &H3DA`) står kvar men är märkta som DOS-beroende och
   parade med QB64-motsvarigheten (`_LIMIT`, `_DISPLAY`, `_PUTIMAGE`, `_MEMIMAGE`).
 - **Ämnet `qb64` beskriver den här miljön.** Ett grafikprogram ska *inte* ha `$CONSOLE:ONLY` (det gör
-  programmet konsollöst) och ska verifieras med `/qb64-kompilera`, inte `/qb64` — annars öppnas ett
-  fönster ingen ser och körningen avbryts av timeouten, vilket ser ut som ett fel fast koden var
-  korrekt. Ska programmet lämna ett mätbart resultat: skriv till en textfil i arbetsytan och läs den
-  med `/läs`.
+  programmet konsollöst) och verifieras med `/qb64-kompilera`. Skickas det ändå till `/qb64` känner
+  verktyget igen skärmlägesbytet och kompilerar utan att köra ([QB64-verktyget](QB64-TOOL.md)), i
+  stället för att öppna ett fönster ingen ser och avbrytas av timeouten — vilket såg ut som ett fel
+  fast koden var korrekt. Ska programmet lämna ett mätbart resultat: skriv till en textfil i
+  arbetsytan och läs den med `/läs`.
 
 Avsnitten hålls medvetet korta. Distributionsmaskinen kör en 12B-modell med kontext 8192, där ett
 avsnitt ska samsas med arbetsytans filöversikt, verktygslistan och konversationen. Ett test

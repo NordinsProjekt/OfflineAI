@@ -60,6 +60,14 @@ public sealed class Qb64ToolServiceTests : IDisposable
         return path;
     }
 
+    /// <summary>Writes a .bas file that opens a graphics window, i.e. one that cannot be run here.</summary>
+    private async Task<string> CreateGraphicsBasFileAsync(string name = "bild.bas")
+    {
+        var path = Path.Combine(_tempDir, name);
+        await File.WriteAllTextAsync(path, "SCREEN 12\nCIRCLE (320, 240), 100, 15\nEND\n");
+        return path;
+    }
+
     // ── Command detection ────────────────────────────────────────────────────
 
     [Fact]
@@ -126,9 +134,11 @@ public sealed class Qb64ToolServiceTests : IDisposable
 
         var descriptions = sut.GetToolDescriptions();
 
-        descriptions.Should().ContainKey("/qb64 <fil.bas>");
+        var runCommand = descriptions.Keys.Should().ContainSingle(key => key.StartsWith("/qb64 ")).Subject;
         descriptions.Should().ContainKey("/qb64-kompilera <fil.bas>");
-        descriptions["/qb64 <fil.bas>"].Should().Contain("$CONSOLE:ONLY"); // the LLM must learn the capture rule
+        runCommand.Should().Contain("<<<");                        // the input syntax is in the signature
+        descriptions[runCommand].Should().Contain("$CONSOLE:ONLY"); // the LLM must learn the capture rule
+        descriptions[runCommand].Should().Contain("Grafikprogram"); // ...and that graphics programs aren't run
     }
 
     // ── Argument validation ──────────────────────────────────────────────────
@@ -329,6 +339,171 @@ public sealed class Qb64ToolServiceTests : IDisposable
         result.Message.Should().Contain("spel.bas");
         result.InjectedContext.Should().Contain("Programmets utdata");
         result.InjectedContext.Should().Contain("Microsoft"); // cmd.exe's banner was captured
+    }
+
+    // ── Keyboard input fed to the program (<<<) ──────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_WithStandardInput_TypesItIntoTheRunningProgram()
+    {
+        await CreateBasFileAsync();
+        // The "program" is a copy of cmd.exe, which executes whatever arrives on its stdin —
+        // so an echoed marker in the captured output proves the input really reached it.
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64 spel.bas <<< echo SVAR=42");
+
+        result.IsSuccess.Should().BeTrue();
+        result.InjectedContext.Should().Contain("SVAR=42");
+        result.InjectedContext.Should().Contain("Inmatning som skickades"); // and the LLM is told what it sent
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithSeveralInputLines_SendsThemInOrder()
+    {
+        await CreateBasFileAsync();
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64 spel.bas <<< echo FORST | echo SEDAN");
+
+        result.IsSuccess.Should().BeTrue();
+        result.InjectedContext.Should().Contain("2 rad(er)"); // split on | into two separate lines
+        result.InjectedContext.Should().Contain("FORST");     // both were executed by the program
+        result.InjectedContext.Should().Contain("SEDAN");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithTwoAngleBrackets_IsAcceptedAsWell()
+    {
+        await CreateBasFileAsync();
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64 spel.bas << echo SVAR=42");
+
+        result.IsSuccess.Should().BeTrue();
+        result.InjectedContext.Should().Contain("SVAR=42");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithEmptyInputPayload_SendsASingleEmptyLine()
+    {
+        await CreateBasFileAsync();
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64 spel.bas <<<");
+
+        result.IsSuccess.Should().BeTrue();
+        result.InjectedContext.Should().Contain("1 rad(er)"); // a bare Enter, for INPUT "Tryck retur"; a$
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithoutStandardInput_SaysNothingAboutInput()
+    {
+        await CreateBasFileAsync();
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64 spel.bas");
+
+        result.IsSuccess.Should().BeTrue();
+        result.InjectedContext.Should().NotContain("Inmatning som skickades");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CompileOnlyWithStandardInput_ReturnsFailurePointingAtQb64()
+    {
+        await CreateBasFileAsync();
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64-kompilera spel.bas <<< 42");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("/qb64");
+        File.Exists(Path.Combine(_tempDir, "spel.exe")).Should().BeFalse("nothing should be compiled for a rejected command");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_InputTimeout_TellsTheLlmToSendMoreLines()
+    {
+        await CreateBasFileAsync();
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul", runTimeoutMs: 500);
+
+        // The input given keeps the "program" busy far past the timeout — the same shape as a
+        // QBasic program that is still waiting for the next INPUT when the run is killed.
+        var result = await sut.ExecuteAsync("/qb64 spel.bas <<< ping -n 20 127.0.0.1");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("timeout");
+        result.Message.Should().Contain("fler rader");
+    }
+
+    // ── Graphics programs are compiled, never run ────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_GraphicsProgram_IsCompiledButNotRun()
+    {
+        await CreateGraphicsBasFileAsync();
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64 bild.bas");
+
+        result.IsSuccess.Should().BeTrue();
+        result.Message.Should().Contain("kompilerade utan fel");
+        result.InjectedContext.Should().Contain("kördes INTE");
+        result.InjectedContext.Should().Contain("rad 1");    // the line that decided it
+        result.InjectedContext.Should().Contain("SCREEN 12"); // and the statement itself
+        result.InjectedContext.Should().NotContain("Microsoft"); // the produced exe was never started
+        File.Exists(Path.Combine(_tempDir, "bild.exe")).Should().BeTrue("the compile itself must still happen");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_GraphicsProgramWithInput_IsStillNotRun()
+    {
+        // Piped input reaches a console, never a graphics window — the guard must win.
+        await CreateGraphicsBasFileAsync();
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64 bild.bas <<< 42");
+
+        result.IsSuccess.Should().BeTrue();
+        result.InjectedContext.Should().Contain("kördes INTE");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TextModeProgram_IsStillRun()
+    {
+        // SCREEN 0 is text mode, not a window: this must not be mistaken for a graphics program.
+        var path = Path.Combine(_tempDir, "text.bas");
+        await File.WriteAllTextAsync(path, "$CONSOLE:ONLY\nSCREEN 0\nPRINT \"HEJ\"\n");
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64 text.bas");
+
+        result.IsSuccess.Should().BeTrue();
+        result.InjectedContext.Should().Contain("Microsoft"); // cmd.exe's banner — the program really ran
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_GraphicsProgramCompiledOnly_IsUnchanged()
+    {
+        await CreateGraphicsBasFileAsync();
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64-kompilera bild.bas");
+
+        result.IsSuccess.Should().BeTrue();
+        result.InjectedContext.Should().Contain("kördes inte");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_GraphicsProgramThatDoesNotCompile_StillReportsTheCompilerError()
+    {
+        await CreateGraphicsBasFileAsync();
+        var sut = CreateSut(CmdExe, "/c echo Syntax error on line 2 & exit /b 1");
+
+        var result = await sut.ExecuteAsync("/qb64 bild.bas");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("Syntax error on line 2");
     }
 
     [Fact]
