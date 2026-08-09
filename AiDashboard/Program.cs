@@ -63,6 +63,19 @@ public static class Program
         var appConfig = builder.Configuration.GetSection("AppConfiguration").Get<AppConfiguration>() ?? new AppConfiguration();
         builder.Services.AddSingleton(appConfig);
 
+        // History switches, read early because the services they gate are registered further down.
+        // Both default to true, so existing installations keep recording history.
+        //
+        // These exist for hosts with no reachable SQL Server. Chat history writes on every turn and
+        // run history writes several times per agent iteration, so those two are what flood the log
+        // with connection errors there. Turning a switch off withholds the repository from the
+        // service that writes it — both already treat a missing repository as "nothing to persist",
+        // so the write is skipped outright instead of failing a connection every time.
+        var saveChatHistory = !bool.TryParse(builder.Configuration["DatabaseConfig:SaveChatHistory"], out var parsedSaveChatHistory)
+            || parsedSaveChatHistory;
+        var saveRunHistory = !bool.TryParse(builder.Configuration["DatabaseConfig:SaveRunHistory"], out var parsedSaveRunHistory)
+            || parsedSaveRunHistory;
+
         // Register the Agent Mode settings (iteration cap, verification temperature) as a
         // singleton so the Settings page and the Agent Mode page edit the same values, and the
         // store that persists them (plus the generation settings) to %AppData%\OfflineAI\settings.json.
@@ -182,14 +195,15 @@ public static class Program
         // iteration cap is hit). Singleton so a run's progress survives page navigation. The
         // file agent is passed so each run writes a full prompt/response transcript to
         // agentlogg.txt in the active workspace for debugging. The run repository (optional — only
-        // registered when a database is configured) additionally records each run as history that
-        // survives an app restart, which agentlogg.txt does not: it is overwritten per run.
+        // registered when a database is configured, and withheld when DatabaseConfig:SaveRunHistory
+        // is false) additionally records each run as history that survives an app restart, which
+        // agentlogg.txt does not: it is overwritten per run.
         builder.Services.AddSingleton<IGoalAgentService>(sp =>
             new GoalAgentService(
                 sp.GetRequiredService<IAgenticChatService>(),
                 sp.GetRequiredService<IFileAgentService>(),
                 appConfig.AgentTools.MaxGoalIterations,
-                sp.GetService<IAgentRunRepository>(),
+                saveRunHistory ? sp.GetService<IAgentRunRepository>() : null,
                 // Lets the requirement generator emit "compiles via /qb64"-style requirements
                 // when a compiler is configured — without it, "test that the app works" in a
                 // goal silently degrades to file-content checks.
@@ -490,11 +504,16 @@ public static class Program
                 // Get DomainDetector for domain filtering
                 var domainDetector = sp.GetService<Application.AI.Utilities.IDomainDetector>();
                 
-                // Get repositories for question/answer storage
-                var questionRepository = sp.GetService<IQuestionRepository>();
-                var llmRepository = sp.GetService<ILlmRepository>();
+                // Get repositories for question/answer storage. Withholding them when chat history
+                // is turned off is what disables the per-turn save — DashboardChatService already
+                // treats a missing repository as "nothing to persist". Other pages still resolve
+                // these from DI, so existing history stays readable; only new writes stop.
+                IQuestionRepository? questionRepository = saveChatHistory ? sp.GetService<IQuestionRepository>() : null;
+                ILlmRepository? llmRepository = saveChatHistory ? sp.GetService<ILlmRepository>() : null;
 
-                Console.WriteLine("[+] Chat service initialized");
+                Console.WriteLine(saveChatHistory
+                    ? "[+] Chat service initialized"
+                    : "[+] Chat service initialized (chat history saving disabled)");
                 return new DashboardChatService(
                     vectorMemory,
                     conversationMemory,
@@ -664,24 +683,33 @@ public static class Program
         // Initialize the goal-agent run history tables on startup (non-blocking, optional).
         // Kept out of the block above so a failure here can't stop the vector memory / LLM /
         // Question tables from being initialized — nothing else depends on run history.
-        Task.Run(async () =>
+        // Skipped entirely when run history is off: creating tables nothing will write to is the
+        // startup half of the same pointless round trip the switch exists to avoid.
+        if (saveRunHistory)
         {
-            using var scope = app.Services.CreateScope();
-            try
+            Task.Run(async () =>
             {
-                var agentRunRepository = scope.ServiceProvider.GetService<IAgentRunRepository>();
-                if (agentRunRepository != null)
+                using var scope = app.Services.CreateScope();
+                try
                 {
-                    await agentRunRepository.InitializeDatabaseAsync();
-                    Console.WriteLine("[+] Agent run history tables initialized");
+                    var agentRunRepository = scope.ServiceProvider.GetService<IAgentRunRepository>();
+                    if (agentRunRepository != null)
+                    {
+                        await agentRunRepository.InitializeDatabaseAsync();
+                        Console.WriteLine("[+] Agent run history tables initialized");
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[!] Warning: Failed to initialize agent run history tables: {ex.Message}");
-                Console.WriteLine("   Agent Mode runs will not be recorded in the history view");
-            }
-        });
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[!] Warning: Failed to initialize agent run history tables: {ex.Message}");
+                    Console.WriteLine("   Agent Mode runs will not be recorded in the history view");
+                }
+            });
+        }
+        else
+        {
+            Console.WriteLine("[!] Agent run history saving disabled (DatabaseConfig:SaveRunHistory=false)");
+        }
 
         // Initialize DomainDetector on startup (non-blocking, optional)
         Task.Run(async () =>
