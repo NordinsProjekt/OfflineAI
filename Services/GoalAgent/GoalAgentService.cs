@@ -1283,9 +1283,15 @@ public sealed class GoalAgentService : IGoalAgentService
         sb.Append("Om ett verktygskommando misslyckas är det ett fel i DITT kommando, inte en brist i arbetet — " +
                   "rätta kommandot och försök igen. Underkänn aldrig ett krav enbart för att du inte lyckades läsa en fil.\n");
 
+        // A graphics program cannot be run in a headless run at all: /qb64 says so and compiles it
+        // instead. Without this line the reviewer reads "kördes inte" as a shortcoming of the work
+        // and fails a correct program on a requirement that could never have been met by running it.
         if (qb64Available)
             sb.Append("Om kravet gäller att ett QBasic-program kompilerar eller fungerar: kontrollera med " +
-                      "/qb64-kompilera <fil.bas> (enbart kompilering) eller /qb64 <fil.bas> (kompilerar och kör programmet).\n");
+                      "/qb64-kompilera <fil.bas> (enbart kompilering) eller /qb64 <fil.bas> (kompilerar och kör programmet). " +
+                      "Ett grafikprogram (SCREEN utan $CONSOLE:ONLY) kan inte köras här — då kompilerar /qb64 det utan att " +
+                      "köra det, och en felfri kompilering är det bevis som går att få. Underkänn inte ett sådant krav enbart " +
+                      "för att programmet inte kördes.\n");
 
         // The verdict goes FIRST in the final reply so it survives even if the backend
         // truncates a long answer (low max-tokens settings cut from the end).

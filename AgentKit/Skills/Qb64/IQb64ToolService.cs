@@ -5,11 +5,16 @@ namespace AgentKit.Skills.Qb64;
 /// <summary>
 /// Handles the QB64 (QBasic) compiler slash commands:
 /// <list type="bullet">
-///   <item><c>/qb64 &lt;fil.bas&gt;</c> — compiles a .bas file from the active workspace with
-///     the configured QB64 compiler and runs the produced executable, capturing its console
-///     output so the agentic chat loop can feed it back to the LLM.</item>
+///   <item><c>/qb64 &lt;fil.bas&gt; [&lt;&lt;&lt; rad1|rad2]</c> — compiles a .bas file from the
+///     active workspace with the configured QB64 compiler and runs the produced executable,
+///     capturing its console output so the agentic chat loop can feed it back to the LLM. The
+///     optional <c>&lt;&lt;&lt;</c> payload is typed into the program's stdin, one line per
+///     <c>INPUT</c>, which is what lets an interactive console program be exercised at all in a
+///     run with nobody at the keyboard.</item>
 ///   <item><c>/qb64-kompilera &lt;fil.bas&gt;</c> — compiles without running, so the LLM can
-///     syntax-check programs (e.g. graphical ones) that cannot run unattended.</item>
+///     syntax-check programs (e.g. graphical ones) that cannot run unattended. A graphics
+///     program passed to <c>/qb64</c> is treated the same way: compiled, then reported without
+///     being run, since its window can be neither seen nor dismissed here.</item>
 /// </list>
 /// <para>
 /// The compiler path comes exclusively from <c>AppConfiguration.AgentTools.Qb64</c>; the LLM

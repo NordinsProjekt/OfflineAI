@@ -13,7 +13,9 @@ Preview package — not yet published anywhere, API may still change.
   to the model, up to a configurable round cap.
 - **`Skills.Files`** — `IFileAgentService`: create, read, and line-based edit text files in a
   workspace directory, plus PDF text extraction (via `UglyToad.PdfPig`).
-- **`Skills.Qb64`** — `IQb64ToolService`: compile and run QB64 (QBasic) `.bas` programs.
+- **`Skills.Qb64`** — `IQb64ToolService`: compile and run QB64 (QBasic) `.bas` programs, with
+  optional keyboard input typed into the running program; graphics programs are compiled but
+  never run, since their window cannot be seen or dismissed in a headless run.
 - **`Skills.Utility`** — `IUtilityToolsService`: named HTTP API calls the model can invoke by
   name from a configured allowlist.
 - **`Skills.External`** — `IExternalToolsService`: run named local executables from a configured

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using AgentKit.Skills.Files;
 using AgentKit.Skills.Utility;
 
@@ -19,6 +20,23 @@ public sealed class Qb64ToolService : IQb64ToolService
 
     private const string RunCommand = "/qb64";
     private const string CompileOnlyCommand = "/qb64-kompilera";
+
+    /// <summary>
+    /// Separates the filename from the keyboard input to feed the program: <c>&lt;&lt;&lt;</c>,
+    /// with two angle brackets accepted as well since a model that has seen one shell heredoc
+    /// will write both. Unambiguous against the filename in front of it — <c>&lt;</c> is not a
+    /// legal character in a Windows filename.
+    /// </summary>
+    private static readonly Regex StandardInputSeparatorRegex = new("<{2,3}", RegexOptions.Compiled);
+
+    /// <summary>Separates one input line from the next inside the <c>&lt;&lt;&lt;</c> payload.</summary>
+    private const char InputLineSeparator = '|';
+
+    /// <summary>The separator spelling taught to the LLM (parsing also accepts <c>&lt;&lt;</c>).</summary>
+    private const string InputSeparatorExample = "<<<";
+
+    /// <summary>The input part of the <c>/qb64</c> signature shown in the tool list.</summary>
+    private const string InputSyntaxHint = "<<< <rad1>|<rad2>";
 
     private readonly Qb64Options _options;
     private readonly IFileAgentService _fileAgent;
@@ -74,13 +92,16 @@ public sealed class Qb64ToolService : IQb64ToolService
 
         return new Dictionary<string, string>
         {
-            [$"{RunCommand} <fil.bas>"] =
+            [$"{RunCommand} <fil.bas> [{InputSyntaxHint}]"] =
                 "Kompilerar en QBasic-fil (QB64) från agentkatalogen och kör det färdiga programmet. " +
                 "Programmets textutdata skickas tillbaka till dig, så du kan kontrollera resultatet och " +
-                "rätta koden om något är fel. VIKTIGT: programmet körs utan människa vid tangentbordet — " +
-                "skriv $CONSOLE:ONLY som första rad i .bas-filen så att PRINT-utdata kan fångas, och " +
-                "undvik INPUT, SLEEP utan argument och andra kommandon som väntar på en användare " +
-                "(programmet avbryts annars efter en timeout).",
+                "rätta koden om något är fel. VIKTIGT: skriv $CONSOLE:ONLY som första rad i .bas-filen så " +
+                "att PRINT-utdata kan fångas. Programmet körs utan människa vid tangentbordet: behöver det " +
+                $"inmatning skickar du den själv efter {InputSeparatorExample}, en rad per INPUT, åtskilda med " +
+                $"{InputLineSeparator} (t.ex. \"{RunCommand} kalkyl.bas {InputSeparatorExample} 5{InputLineSeparator}7{InputLineSeparator}avsluta\"). " +
+                $"Utan {InputSeparatorExample} ser programmet filslut direkt, och ett program som väntar på fler rader " +
+                "än du skickat avbryts efter en timeout. Grafikprogram (SCREEN utan $CONSOLE:ONLY) kompileras " +
+                "men körs inte — grafikfönstret finns ingen som kan se.",
             [$"{CompileOnlyCommand} <fil.bas>"] =
                 "Kompilerar en QBasic-fil (QB64) från agentkatalogen utan att köra den — använd för att " +
                 "syntaxkontrollera t.ex. grafiska program eller spel som inte kan köras utan användare. " +
@@ -123,22 +144,40 @@ public sealed class Qb64ToolService : IQb64ToolService
             return UtilityToolResult.Failure(
                 $"⚠ QB64-kompilatorn hittades inte på den konfigurerade sökvägen: {Settings.CompilerPath}");
 
-        if (string.IsNullOrWhiteSpace(argument))
+        var (fileArgument, inputLines) = SplitStandardInput(argument);
+
+        if (compileOnly && inputLines is not null)
+            return UtilityToolResult.Failure(
+                $"⚠ Inmatning ({InputSeparatorExample}) fungerar bara med {RunCommand}, som kör programmet — " +
+                $"{CompileOnlyCommand} kompilerar bara filen.");
+
+        if (string.IsNullOrWhiteSpace(fileArgument))
             return UtilityToolResult.Failure(
                 $"Ange en .bas-fil, t.ex. \"{command} spel.bas\". Använd /lista för att se filerna i agentkatalogen.");
 
-        var sourcePath = ResolveSourcePath(argument, out var error);
+        var sourcePath = ResolveSourcePath(fileArgument, out var error);
         if (sourcePath is null)
             return UtilityToolResult.Failure(error!);
+
+        // Read the source once and use it for both static checks below — the file is small and
+        // this keeps the compile path down to a single read.
+        var source = await ReadSourceOrNullAsync(sourcePath);
 
         // Cheap, instant structural pre-check before spending a slow compiler invocation. Unlike
         // the real compiler — which stops at its first error — this reports every structural
         // problem it can find in one pass, so the LLM doesn't burn one iteration per latent bug.
-        var structuralIssues = await DescribeStructuralIssuesAsync(sourcePath);
+        var structuralIssues = source is null ? null : QBasicStructureLinter.DescribeIssues(source);
         if (structuralIssues is not null)
             return UtilityToolResult.Failure(
                 $"⚠ Strukturkontroll (innan kompilering) hittade problem i {Path.GetFileName(sourcePath)} — " +
                 $"rätta ALLA nedan och försök igen:\n{structuralIssues}");
+
+        // A program that switches to a graphics screen draws into a window nobody can see and
+        // waits at END for a key nobody can press, so running it can only end in the timeout.
+        // Detected here so the run is skipped rather than paid for — see QBasicProgramKind.
+        var graphicsScreen = source is not null && !QBasicProgramKind.IsConsoleOnly(source)
+            ? QBasicProgramKind.FindGraphicsScreen(source)
+            : null;
 
         var outputPath = Path.ChangeExtension(sourcePath, ".exe");
 
@@ -164,7 +203,59 @@ public sealed class Qb64ToolService : IQb64ToolService
                 $"✓ QB64: {Path.GetFileName(sourcePath)} kompilerade utan fel.",
                 $"Kompileringen av {Path.GetFileName(sourcePath)} lyckades utan fel. Programmet kördes inte ({command}).");
 
-        return await RunProgramAsync(sourcePath, outputPath);
+        if (graphicsScreen is not null)
+            return DescribeSkippedGraphicsRun(sourcePath, graphicsScreen);
+
+        return await RunProgramAsync(sourcePath, outputPath, inputLines);
+    }
+
+    /// <summary>
+    /// Splits an argument of the form <c>fil.bas &lt;&lt;&lt; rad1|rad2</c> into the filename and
+    /// the lines to feed the program's stdin. The line list is <c>null</c> when no separator was
+    /// present (the program then sees end-of-file immediately, as it always has); an empty
+    /// payload means a single empty line, i.e. a bare Enter — the answer a program waiting on
+    /// <c>INPUT "Tryck retur"; a$</c> needs.
+    /// </summary>
+    private static (string FileArgument, IReadOnlyList<string>? InputLines) SplitStandardInput(string argument)
+    {
+        var separator = StandardInputSeparatorRegex.Match(argument);
+        if (!separator.Success)
+            return (argument.Trim(), null);
+
+        var fileArgument = argument[..separator.Index].Trim();
+        var payload = argument[(separator.Index + separator.Length)..].Trim();
+
+        var lines = payload.Length == 0
+            ? new[] { string.Empty }
+            : payload.Split(InputLineSeparator).Select(line => line.Trim()).ToArray();
+
+        return (fileArgument, lines);
+    }
+
+    /// <summary>
+    /// Reports a successful compile of a graphics program that was deliberately not run, and
+    /// tells the LLM why — so it stops paying a run timeout (and a wasted goal-agent iteration)
+    /// for a program that is perfectly correct but cannot be observed in a headless run.
+    /// </summary>
+    private static UtilityToolResult DescribeSkippedGraphicsRun(string sourcePath, QBasicGraphicsScreen graphicsScreen)
+    {
+        var sourceName = Path.GetFileName(sourcePath);
+
+        var context = new StringBuilder();
+        context.AppendLine($"Kompileringen av {sourceName} lyckades utan fel.");
+        context.AppendLine(
+            $"Programmet kördes INTE: rad {graphicsScreen.Line} växlar till ett grafikläge " +
+            $"(\"{graphicsScreen.Statement}\") och filen saknar $CONSOLE:ONLY, så programmet ritar i ett " +
+            "fönster. Här finns ingen som kan se fönstret eller trycka på tangenten QB64 väntar på när " +
+            "programmet är klart — en körning skulle bara sluta med timeout.");
+        context.AppendLine(
+            "Felfri kompilering är därför den kontroll som går att göra på ett grafikprogram: använd " +
+            $"{CompileOnlyCommand} direkt nästa gång. Ska programmet lämna ett mätbart resultat, låt det " +
+            "skriva till en textfil i arbetsytan och läs filen med /läs.");
+
+        return UtilityToolResult.Success(
+            $"✓ QB64: {sourceName} kompilerade utan fel (grafikprogram — kördes inte).",
+            context.ToString());
     }
 
     /// <summary>
@@ -215,23 +306,20 @@ public sealed class Qb64ToolService : IQb64ToolService
     }
 
     /// <summary>
-    /// Runs <see cref="QBasicStructureLinter"/> over the source file and returns its formatted
-    /// issue list, or <c>null</c> when the file is unreadable (left for the real compiler to
-    /// report) or has no detected structural issues.
+    /// Reads the source file for the static pre-checks, or returns <c>null</c> when it cannot be
+    /// read — in which case every check that needs the text is skipped and the real compiler gets
+    /// to report the problem.
     /// </summary>
-    private static async Task<string?> DescribeStructuralIssuesAsync(string sourcePath)
+    private static async Task<string?> ReadSourceOrNullAsync(string sourcePath)
     {
-        string source;
         try
         {
-            source = await File.ReadAllTextAsync(sourcePath);
+            return await File.ReadAllTextAsync(sourcePath);
         }
         catch (Exception)
         {
             return null;
         }
-
-        return QBasicStructureLinter.DescribeIssues(source);
     }
 
     /// <summary>
@@ -279,11 +367,14 @@ public sealed class Qb64ToolService : IQb64ToolService
 
     /// <summary>
     /// Runs the compiled program with the workspace as working directory and returns its console
-    /// output as LLM-facing context. A program that does not terminate within the run timeout is
-    /// killed, but any output captured up to that point is still returned — that partial output
-    /// is often exactly what the LLM needs to diagnose an infinite loop or a blocking INPUT.
+    /// output as LLM-facing context. <paramref name="inputLines"/> is typed on the program's
+    /// stdin before it is closed, so a program built around <c>INPUT</c> can be exercised for
+    /// real. A program that does not terminate within the run timeout is killed, but any output
+    /// captured up to that point is still returned — that partial output is often exactly what
+    /// the LLM needs to diagnose an infinite loop or an unanswered INPUT.
     /// </summary>
-    private async Task<UtilityToolResult> RunProgramAsync(string sourcePath, string outputPath)
+    private async Task<UtilityToolResult> RunProgramAsync(
+        string sourcePath, string outputPath, IReadOnlyList<string>? inputLines)
     {
         var sourceName = Path.GetFileName(sourcePath);
         var timeoutMs = Settings.RunTimeoutMs > 0 ? Settings.RunTimeoutMs : 30_000;
@@ -296,7 +387,7 @@ public sealed class Qb64ToolService : IQb64ToolService
                 arguments: string.Empty,
                 workingDirectory: Path.GetDirectoryName(sourcePath) ?? string.Empty,
                 timeoutMs,
-                closeStandardInput: true);
+                standardInputLines: inputLines ?? Array.Empty<string>());
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
@@ -305,6 +396,7 @@ public sealed class Qb64ToolService : IQb64ToolService
         }
 
         var output = TruncateKeepingHead(run.CombinedOutput, MaxOutputLength);
+        var sentInput = DescribeSentInput(inputLines);
 
         if (run.TimedOut)
         {
@@ -314,6 +406,13 @@ public sealed class Qb64ToolService : IQb64ToolService
                 "Troliga orsaker: programmet väntar på inmatning (INPUT/SLEEP/tangenttryckning) eller " +
                 "innehåller en oändlig loop. Kom ihåg $CONSOLE:ONLY överst i filen och låt programmet " +
                 "avslutas av sig självt.");
+            if (inputLines is not null)
+                context.AppendLine(
+                    $"{sentInput} Väntar programmet på fler rader än så, skicka dem också — " +
+                    $"annars står det kvar vid sin INPUT tills timeouten slår till.");
+            else
+                context.AppendLine(
+                    $"Behöver programmet inmatning kan du skicka den: {RunCommand} {sourceName} {InputSeparatorExample} <rad1>{InputLineSeparator}<rad2>");
             context.AppendLine();
             context.Append(output.Length > 0 ? $"Utdata fram till avbrottet:\n{output}" : "(ingen utdata fångades)");
             return UtilityToolResult.Failure(
@@ -322,6 +421,8 @@ public sealed class Qb64ToolService : IQb64ToolService
 
         var resultContext = new StringBuilder();
         resultContext.AppendLine($"Programmet {sourceName} kompilerade och kördes (avslutningskod {run.ExitCode}).");
+        if (inputLines is not null)
+            resultContext.AppendLine(sentInput);
         resultContext.AppendLine("Programmets utdata:");
         if (output.Length > 0)
             resultContext.Append(output);
@@ -340,6 +441,21 @@ public sealed class Qb64ToolService : IQb64ToolService
 
     private int MaxOutputLength => Settings.MaxOutputLength > 0 ? Settings.MaxOutputLength : 4000;
 
+    /// <summary>
+    /// Spells out the keyboard input that was typed into the program, so the LLM can read its
+    /// output against the answers it gave rather than having to remember them. Empty when no
+    /// input was supplied.
+    /// </summary>
+    private static string DescribeSentInput(IReadOnlyList<string>? inputLines)
+    {
+        if (inputLines is null)
+            return string.Empty;
+
+        var quoted = string.Join(" ⏎ ", inputLines.Select(line => $"\"{line}\""));
+        return $"Inmatning som skickades till programmet: {quoted} " +
+               $"({inputLines.Count} rad(er), därefter filslut).";
+    }
+
     /// <summary>Outcome of one captured process run. Streams are fully drained even after a timeout kill.</summary>
     private sealed record ProcessRunResult(int ExitCode, string Stdout, string Stderr, bool TimedOut)
     {
@@ -356,16 +472,18 @@ public sealed class Qb64ToolService : IQb64ToolService
 
     /// <summary>
     /// Starts a process with redirected output and waits for exit with a timeout, killing the
-    /// entire process tree when exceeded. With <paramref name="closeStandardInput"/> the child's
-    /// stdin is redirected and closed immediately, so console programs that read input see
-    /// end-of-file instead of waiting forever on a keyboard no one is typing at.
+    /// entire process tree when exceeded. When <paramref name="standardInputLines"/> is non-null
+    /// the child's stdin is redirected, those lines are typed into it and it is then closed — an
+    /// empty list therefore means "end-of-file straight away", so console programs that read
+    /// input never wait forever on a keyboard no one is typing at. <c>null</c> leaves stdin
+    /// alone (used for the compiler, which reads none).
     /// </summary>
     private static async Task<ProcessRunResult> RunProcessAsync(
         string fileName,
         string arguments,
         string workingDirectory,
         int timeoutMs,
-        bool closeStandardInput = false)
+        IReadOnlyList<string>? standardInputLines = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -375,25 +493,27 @@ public sealed class Qb64ToolService : IQb64ToolService
             UseShellExecute        = false,
             RedirectStandardOutput = true,
             RedirectStandardError  = true,
-            RedirectStandardInput  = closeStandardInput,
+            RedirectStandardInput  = standardInputLines is not null,
             CreateNoWindow         = true,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding  = Encoding.UTF8
         };
 
+        using var cts = new CancellationTokenSource(timeoutMs);
         using var process = new Process { StartInfo = psi };
         process.Start();
 
-        if (closeStandardInput)
-            process.StandardInput.Close();
-
         // Read both streams concurrently while waiting, so a process that fills the stderr pipe
         // buffer can't deadlock against our stdout read (same pattern as ExternalToolsService).
+        // Started before anything is written to stdin for the same reason: a program that is
+        // blocked writing output must not be able to block our write.
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
 
+        if (standardInputLines is not null)
+            await WriteStandardInputAsync(process, standardInputLines, cts.Token);
+
         var timedOut = false;
-        using var cts = new CancellationTokenSource(timeoutMs);
         try
         {
             await process.WaitForExitAsync(cts.Token);
@@ -410,6 +530,32 @@ public sealed class Qb64ToolService : IQb64ToolService
         var exitCode = timedOut ? -1 : process.ExitCode;
 
         return new ProcessRunResult(exitCode, stdout, stderr, timedOut);
+    }
+
+    /// <summary>
+    /// Types the given lines into the program's stdin and closes it, so whatever it reads next
+    /// hits end-of-file instead of blocking. Never throws: a program that exits before reading
+    /// (broken pipe) or never drains its input at all (write cancelled by the run timeout) is a
+    /// normal outcome here, and the timeout handling in the caller already covers it.
+    /// </summary>
+    private static async Task WriteStandardInputAsync(
+        Process process, IReadOnlyList<string> lines, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var payload = lines.Count == 0
+                ? string.Empty
+                : string.Concat(lines.Select(line => line + Environment.NewLine));
+
+            if (payload.Length > 0)
+                await process.StandardInput.WriteAsync(payload.AsMemory(), cancellationToken);
+
+            process.StandardInput.Close();
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
+        {
+            // Program already gone, or too busy to read — either way the run result speaks for itself.
+        }
     }
 
     /// <summary>Keeps the start of the text (program output — the beginning shows what happened first).</summary>
