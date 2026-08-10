@@ -479,7 +479,11 @@ public static class QBasicGraphicsReference
 
             - $CONSOLE:ONLY och grafik går inte ihop. Metakommandot gör programmet konsollöst, så
               ett program som kör SCREEN 13 ska inte ha det. Regeln "$CONSOLE:ONLY överst i filen"
-              gäller textprogram vars utdata ska läsas tillbaka.
+              gäller textprogram vars utdata ska läsas tillbaka. Blandas de ändå går all PRINT-
+              utdata till en osynlig grafikskärm och konsolen förblir svart.
+            - Ett konsolprogram ($CONSOLE:ONLY) måste sluta med SYSTEM. END avslutar inte
+              programmet — QB64 väntar då på en tangenttryckning som aldrig kommer, tills
+              timeouten dödar programmet. Det gäller även utan END: programslutet väntar likadant.
             - Verifiera grafikprogram med /qb64-kompilera. Kompileringen kontrollerar koden, och det
               är den enda kontroll som går att göra: /qb64 upptäcker att programmet växlar skärmläge
               och kompilerar det utan att köra det, eftersom fönstret ändå inte kan visas här.
@@ -492,7 +496,7 @@ public static class QBasicGraphicsReference
                 PRINT #1, "poäng:"; poäng
                 CLOSE #1
             - Ska en animation ändå kunna köras klart: räkna bildrutor och avsluta själv
-              (FOR-loop + _LIMIT 30 + END), aldrig DO...LOOP utan avbrottsvillkor.
+              (FOR-loop + _LIMIT 30 + SYSTEM), aldrig DO...LOOP utan avbrottsvillkor.
             - Klassiska nyckelord skrivs UTAN inledande understreck: LINE, CIRCLE, PSET, PAINT,
               PALETTE, GET, PUT, INKEY$. Sätter du understreck framför ett av dem finns nyckelordet
               inte alls och kompileringen stannar på den raden. Understrecket är reserverat för

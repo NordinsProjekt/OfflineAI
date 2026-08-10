@@ -114,4 +114,80 @@ public sealed class QBasicProgramKindTests
         statement.Should().EndWith("…");
         statement.Length.Should().Be(61); // 60 characters plus the ellipsis
     }
+
+    // ── DescribeRunHazards ───────────────────────────────────────────────────
+
+    [Fact]
+    public void DescribeRunHazards_ConsoleOnlyWithoutSystem_RecommendsSystem()
+    {
+        // Verified QB64PE behaviour: END (and the implicit program end) waits for a keypress,
+        // so a console program without SYSTEM always ends a headless run in the timeout.
+        var hazards = QBasicProgramKind.DescribeRunHazards("$CONSOLE:ONLY\nPRINT \"HEJ\"\nEND\n");
+
+        hazards.Should().NotBeNull();
+        hazards.Should().Contain("SYSTEM");
+    }
+
+    [Fact]
+    public void DescribeRunHazards_ConsoleOnlyImplicitEnd_RecommendsSystem()
+    {
+        QBasicProgramKind.DescribeRunHazards("$CONSOLE:ONLY\nPRINT \"HEJ\"\n")
+            .Should().Contain("SYSTEM");
+    }
+
+    [Theory]
+    [InlineData("$CONSOLE:ONLY\nPRINT \"HEJ\"\nSYSTEM\n")]
+    [InlineData("$CONSOLE:ONLY\nIF x = 1 THEN SYSTEM\nSYSTEM\n")]
+    [InlineData("$CONSOLE:ONLY\nPRINT \"klart\": SYSTEM\n")]  // colon-separated statement position
+    public void DescribeRunHazards_ConsoleOnlyWithSystem_ReturnsNull(string source)
+    {
+        QBasicProgramKind.DescribeRunHazards(source).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("$CONSOLE:ONLY\nPRINT \"SYSTEM\"\nEND\n")]  // in a string literal
+    [InlineData("$CONSOLE:ONLY\n' SYSTEM\nEND\n")]          // in a comment
+    [InlineData("$CONSOLE:ONLY\nsystemx = 1\nEND\n")]       // prefix of a longer identifier
+    public void DescribeRunHazards_SystemNotAtStatementPosition_DoesNotCount(string source)
+    {
+        QBasicProgramKind.DescribeRunHazards(source).Should().Contain("SYSTEM");
+    }
+
+    [Fact]
+    public void DescribeRunHazards_ConsoleOnlyWithGraphicsScreen_NamesTheContradictionAndLine()
+    {
+        // The fantasy.exe failure mode: $CONSOLE:ONLY + SCREEN 13 leaves a black console because
+        // every PRINT goes to an invisible graphics screen.
+        var hazards = QBasicProgramKind.DescribeRunHazards("$CONSOLE:ONLY\nSCREEN 13\nPRINT \"HEJ\"\nSYSTEM\n");
+
+        hazards.Should().NotBeNull();
+        hazards.Should().Contain("Rad 2");
+        hazards.Should().Contain("SCREEN 13");
+        hazards.Should().Contain("$CONSOLE:ONLY");
+    }
+
+    [Fact]
+    public void DescribeRunHazards_GraphicsProgramWithoutConsoleOnly_ReturnsNull()
+    {
+        // A graphics program legitimately ends with END to keep its window open — and /qb64
+        // compiles it instead of running it, so there is no run to hazard-check.
+        QBasicProgramKind.DescribeRunHazards("SCREEN 12\nCIRCLE (320, 240), 100, 15\nEND\n")
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void DescribeRunHazards_ConsoleOnlyWithScreen0_DoesNotFlagTextMode()
+    {
+        QBasicProgramKind.DescribeRunHazards("$CONSOLE:ONLY\nSCREEN 0\nPRINT \"HEJ\"\nSYSTEM\n")
+            .Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("PRINT \"inget konsolprogram\"\nEND\n")]
+    public void DescribeRunHazards_NotConsoleOnly_ReturnsNull(string? source)
+    {
+        QBasicProgramKind.DescribeRunHazards(source).Should().BeNull();
+    }
 }

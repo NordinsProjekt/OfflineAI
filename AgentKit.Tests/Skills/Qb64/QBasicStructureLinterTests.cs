@@ -404,6 +404,39 @@ public class QBasicStructureLinterTests
     }
 
     [Fact]
+    public void DescribeIssuesAfterWrite_ConsoleOnlyWithoutSystem_ReportsRunHazard()
+    {
+        // The file compiles, so this is not a "structure" finding — but a console program
+        // without SYSTEM can never finish a headless /qb64 run, and write time is the cheapest
+        // moment to say so.
+        var feedback = QBasicStructureLinter.DescribeIssuesAfterWrite(
+            "kalkyl.bas", "$CONSOLE:ONLY\nPRINT 1 + 1\nEND");
+
+        feedback.Should().NotBeNull();
+        feedback!.Should().Contain("kalkyl.bas").And.Contain("SYSTEM");
+        feedback.Should().NotContain("Strukturkontroll", "a run hazard is not a compile error");
+    }
+
+    [Fact]
+    public void DescribeIssuesAfterWrite_StructuralIssueAndRunHazard_ReportsBothSections()
+    {
+        var feedback = QBasicStructureLinter.DescribeIssuesAfterWrite(
+            "spel.bas", "$CONSOLE:ONLY\nFOR i = 1 TO 3\nPRINT i\nEND");
+
+        feedback.Should().NotBeNull();
+        feedback!.Should().Contain("Strukturkontroll");   // the unclosed FOR
+        feedback.Should().Contain("SYSTEM");              // and the missing exit
+    }
+
+    [Fact]
+    public void DescribeIssuesAfterWrite_ConsoleOnlyWithSystem_ReturnsNull()
+    {
+        QBasicStructureLinter.DescribeIssuesAfterWrite(
+                "kalkyl.bas", "$CONSOLE:ONLY\nPRINT 1 + 1\nSYSTEM")
+            .Should().BeNull();
+    }
+
+    [Fact]
     public void DescribeIssues_NoIssues_ReturnsNull()
     {
         QBasicStructureLinter.DescribeIssues("PRINT \"hej\"").Should().BeNull();

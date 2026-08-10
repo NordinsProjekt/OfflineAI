@@ -96,7 +96,10 @@ public sealed class Qb64ToolService : IQb64ToolService
                 "Kompilerar en QBasic-fil (QB64) från agentkatalogen och kör det färdiga programmet. " +
                 "Programmets textutdata skickas tillbaka till dig, så du kan kontrollera resultatet och " +
                 "rätta koden om något är fel. VIKTIGT: skriv $CONSOLE:ONLY som första rad i .bas-filen så " +
-                "att PRINT-utdata kan fångas. Programmet körs utan människa vid tangentbordet: behöver det " +
+                "att PRINT-utdata kan fångas, och avsluta programmet med SYSTEM i stället för END — utan " +
+                "SYSTEM avslutas ett konsolprogram aldrig av sig självt. Använd ingen SCREEN-sats tillsammans " +
+                "med $CONSOLE:ONLY: PRINT-utdata hamnar då på en osynlig grafikskärm. " +
+                "Programmet körs utan människa vid tangentbordet: behöver det " +
                 $"inmatning skickar du den själv efter {InputSeparatorExample}, en rad per INPUT, åtskilda med " +
                 $"{InputLineSeparator} (t.ex. \"{RunCommand} kalkyl.bas {InputSeparatorExample} 5{InputLineSeparator}7{InputLineSeparator}avsluta\"). " +
                 $"Utan {InputSeparatorExample} ser programmet filslut direkt, och ett program som väntar på fler rader " +
@@ -171,6 +174,19 @@ public sealed class Qb64ToolService : IQb64ToolService
             return UtilityToolResult.Failure(
                 $"⚠ Strukturkontroll (innan kompilering) hittade problem i {Path.GetFileName(sourcePath)} — " +
                 $"rätta ALLA nedan och försök igen:\n{structuralIssues}");
+
+        // A console-only program with a graphics SCREEN, or without any SYSTEM statement, can
+        // only ever end in the run timeout (verified QB64PE behaviour: END and the implicit
+        // program end both wait for a keypress, and SCREEN redirects PRINT to an invisible
+        // screen). Refused before the compile so the LLM gets the exact fix immediately instead
+        // of paying RunTimeoutMs for a doomed run — see QBasicProgramKind.DescribeRunHazards.
+        if (!compileOnly && source is not null
+            && QBasicProgramKind.DescribeRunHazards(source) is { } runHazards)
+        {
+            return UtilityToolResult.Failure(
+                $"⚠ {Path.GetFileName(sourcePath)} kördes inte — programmet kan inte köras klart i en " +
+                $"huvudlös körning. Åtgärda följande och försök igen:\n{runHazards}");
+        }
 
         // A program that switches to a graphics screen draws into a window nobody can see and
         // waits at END for a key nobody can press, so running it can only end in the timeout.
@@ -404,8 +420,8 @@ public sealed class Qb64ToolService : IQb64ToolService
             context.AppendLine(
                 $"Programmet {sourceName} kompilerade, men avslutades inte inom {timeoutMs} ms och avbröts. " +
                 "Troliga orsaker: programmet väntar på inmatning (INPUT/SLEEP/tangenttryckning) eller " +
-                "innehåller en oändlig loop. Kom ihåg $CONSOLE:ONLY överst i filen och låt programmet " +
-                "avslutas av sig självt.");
+                "innehåller en oändlig loop. Kom ihåg $CONSOLE:ONLY överst i filen och avsluta programmet " +
+                "med SYSTEM — END väntar på en tangenttryckning i stället för att avsluta.");
             if (inputLines is not null)
                 context.AppendLine(
                     $"{sentInput} Väntar programmet på fler rader än så, skicka dem också — " +

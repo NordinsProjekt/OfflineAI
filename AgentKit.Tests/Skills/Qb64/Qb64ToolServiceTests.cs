@@ -55,8 +55,10 @@ public sealed class Qb64ToolServiceTests : IDisposable
 
     private async Task<string> CreateBasFileAsync(string name = "spel.bas")
     {
+        // SYSTEM (not END) is what makes the program headless-runnable at all — without it the
+        // run path refuses up front, see ExecuteAsync_RunConsoleProgramWithoutSystem_IsRefused.
         var path = Path.Combine(_tempDir, name);
-        await File.WriteAllTextAsync(path, "$CONSOLE:ONLY\nPRINT \"HEJ\"\n");
+        await File.WriteAllTextAsync(path, "$CONSOLE:ONLY\nPRINT \"HEJ\"\nSYSTEM\n");
         return path;
     }
 
@@ -138,6 +140,7 @@ public sealed class Qb64ToolServiceTests : IDisposable
         descriptions.Should().ContainKey("/qb64-kompilera <fil.bas>");
         runCommand.Should().Contain("<<<");                        // the input syntax is in the signature
         descriptions[runCommand].Should().Contain("$CONSOLE:ONLY"); // the LLM must learn the capture rule
+        descriptions[runCommand].Should().Contain("SYSTEM");        // ...that only SYSTEM actually exits
         descriptions[runCommand].Should().Contain("Grafikprogram"); // ...and that graphics programs aren't run
     }
 
@@ -473,13 +476,59 @@ public sealed class Qb64ToolServiceTests : IDisposable
     {
         // SCREEN 0 is text mode, not a window: this must not be mistaken for a graphics program.
         var path = Path.Combine(_tempDir, "text.bas");
-        await File.WriteAllTextAsync(path, "$CONSOLE:ONLY\nSCREEN 0\nPRINT \"HEJ\"\n");
+        await File.WriteAllTextAsync(path, "$CONSOLE:ONLY\nSCREEN 0\nPRINT \"HEJ\"\nSYSTEM\n");
         var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
 
         var result = await sut.ExecuteAsync("/qb64 text.bas");
 
         result.IsSuccess.Should().BeTrue();
         result.InjectedContext.Should().Contain("Microsoft"); // cmd.exe's banner — the program really ran
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RunConsoleProgramWithoutSystem_IsRefusedWithSystemHint()
+    {
+        // A $CONSOLE:ONLY program without SYSTEM never exits (END waits for a keypress), so the
+        // run is refused before the compiler is even invoked — the model gets the fix for free.
+        var path = Path.Combine(_tempDir, "hang.bas");
+        await File.WriteAllTextAsync(path, "$CONSOLE:ONLY\nPRINT \"HEJ\"\nEND\n");
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64 hang.bas");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("SYSTEM");
+        File.Exists(Path.Combine(_tempDir, "hang.exe")).Should().BeFalse("the doomed run must not even compile");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_RunConsoleOnlyProgramWithGraphicsScreen_IsRefusedNamingTheContradiction()
+    {
+        // $CONSOLE:ONLY + SCREEN 13 sends every PRINT to an invisible graphics screen: the
+        // console stays black and empty. Running it can only mislead, so it is refused.
+        var path = Path.Combine(_tempDir, "svart.bas");
+        await File.WriteAllTextAsync(path, "$CONSOLE:ONLY\nSCREEN 13\nPRINT \"HEJ\"\nSYSTEM\n");
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64 svart.bas");
+
+        result.IsSuccess.Should().BeFalse();
+        result.Message.Should().Contain("SCREEN 13");
+        result.Message.Should().Contain("$CONSOLE:ONLY");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CompileOnly_IgnoresRunHazards()
+    {
+        // /qb64-kompilera only promises a compile check, and the file does compile — refusing
+        // here would block the one verification a not-yet-finished program can get.
+        var path = Path.Combine(_tempDir, "hang.bas");
+        await File.WriteAllTextAsync(path, "$CONSOLE:ONLY\nPRINT \"HEJ\"\nEND\n");
+        var sut = CreateSut(CmdExe, "/c copy /y \"%ComSpec%\" \"{output}\" > nul");
+
+        var result = await sut.ExecuteAsync("/qb64-kompilera hang.bas");
+
+        result.IsSuccess.Should().BeTrue();
     }
 
     [Fact]

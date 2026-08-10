@@ -1291,7 +1291,9 @@ public sealed class GoalAgentService : IGoalAgentService
                       "/qb64-kompilera <fil.bas> (enbart kompilering) eller /qb64 <fil.bas> (kompilerar och kör programmet). " +
                       "Ett grafikprogram (SCREEN utan $CONSOLE:ONLY) kan inte köras här — då kompilerar /qb64 det utan att " +
                       "köra det, och en felfri kompilering är det bevis som går att få. Underkänn inte ett sådant krav enbart " +
-                      "för att programmet inte kördes.\n");
+                      "för att programmet inte kördes. " +
+                      "Vägrar /qb64 att köra ett konsolprogram, eller slutar körningen i timeout, är det ett åtgärdbart fel " +
+                      "i programmet (t.ex. att SYSTEM saknas som avslutning) — ange den åtgärden i motiveringen.\n");
 
         // The verdict goes FIRST in the final reply so it survives even if the backend
         // truncates a long answer (low max-tokens settings cut from the end).
