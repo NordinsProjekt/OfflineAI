@@ -385,10 +385,24 @@ public static class QBasicStructureLinter
             return null;
 
         var issues = DescribeIssues(content ?? string.Empty);
-        return issues is null
-            ? null
-            : $"⚠ Strukturkontroll av {filename.Trim()} hittade problem som QB64 inte kan kompilera — " +
-              $"rätta ALLA nedan och spara filen igen:\n{issues}";
+
+        // Separate section with separate phrasing: run hazards are not compile errors — the file
+        // compiles fine — but a console-only program that can never finish a headless run wastes
+        // a /qb64 call and a whole verify iteration, so the author hears about it while the file
+        // is still in hand. See QBasicProgramKind.DescribeRunHazards for the verified behaviour.
+        var runHazards = QBasicProgramKind.DescribeRunHazards(content);
+
+        var sections = new List<string>(2);
+        if (issues is not null)
+            sections.Add(
+                $"⚠ Strukturkontroll av {filename.Trim()} hittade problem som QB64 inte kan kompilera — " +
+                $"rätta ALLA nedan och spara filen igen:\n{issues}");
+        if (runHazards is not null)
+            sections.Add(
+                $"⚠ Körbarhetskontroll av {filename.Trim()}: programmet kommer inte att kunna köras klart " +
+                $"av /qb64 — åtgärda och spara filen igen:\n{runHazards}");
+
+        return sections.Count == 0 ? null : string.Join("\n\n", sections);
     }
 
     private static bool TopIs(List<BlockFrame> stack, string kind) =>

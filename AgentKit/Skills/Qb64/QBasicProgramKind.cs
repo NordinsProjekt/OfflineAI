@@ -54,12 +54,72 @@ public static class QBasicProgramKind
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
+    /// Matches a <c>SYSTEM</c> statement at statement position (start of a colon-separated
+    /// segment, or straight after <c>THEN</c>/<c>ELSE</c> on a single-line <c>IF</c>).
+    /// </summary>
+    private static readonly Regex SystemStatementRegex = new(
+        @"(?:^|\bTHEN\s+|\bELSE\s+)SYSTEM\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
     /// True when the source declares <c>$CONSOLE:ONLY</c>, i.e. the program runs without a window
     /// and its <c>PRINT</c> output can be captured from stdout (and its <c>INPUT</c> read from
     /// stdin).
     /// </summary>
     public static bool IsConsoleOnly(string? source) =>
         !string.IsNullOrEmpty(source) && ConsoleOnlyRegex.IsMatch(source);
+
+    /// <summary>
+    /// Describes why a <c>$CONSOLE:ONLY</c> program still cannot run to completion in a headless
+    /// run, as a numbered list ready to feed back to the LLM — or <c>null</c> when the program is
+    /// runnable (or is not console-only at all; graphics programs are handled separately by the
+    /// compile-instead-of-run path and legitimately use <c>END</c> to keep their window open).
+    /// <para>
+    /// Both hazards are verified QB64PE behaviour, not style preferences. A console program never
+    /// exits on its own: <c>END</c> — and equally the implicit end of the program — waits for a
+    /// keypress that never comes in a headless run, so anything but <c>SYSTEM</c> ends in the run
+    /// timeout. And a <c>SCREEN</c> graphics statement inside a console-only program silently
+    /// redirects every <c>PRINT</c> to an invisible graphics screen, leaving stdout (and the
+    /// visible console) completely empty. A real agent run burned seventeen iterations on the
+    /// combination — a black console, "no output captured", and a timeout on every verify pass.
+    /// </para>
+    /// </summary>
+    public static string? DescribeRunHazards(string? source)
+    {
+        if (!IsConsoleOnly(source))
+            return null;
+
+        var hazards = new List<string>(2);
+
+        var graphicsScreen = FindGraphicsScreen(source);
+        if (graphicsScreen is not null)
+            hazards.Add(
+                $"Rad {graphicsScreen.Line}: \"{graphicsScreen.Statement}\" i ett $CONSOLE:ONLY-program skickar " +
+                "all PRINT-utdata till en osynlig grafikskärm — konsolen förblir svart och tom. Ta bort " +
+                "$CONSOLE:ONLY om programmet ska visa grafik, eller ta bort SCREEN-satsen om det är ett konsolprogram.");
+
+        if (!HasSystemStatement(source!))
+            hazards.Add(
+                "Programmet saknar SYSTEM. Ett QB64-konsolprogram avslutas aldrig av sig självt — vid END eller " +
+                "programslutet väntar det på en tangenttryckning som aldrig kommer i en huvudlös körning. " +
+                "Avsluta programmet med SYSTEM (i stället för END).");
+
+        return hazards.Count == 0
+            ? null
+            : string.Join("\n", hazards.Select((hazard, i) => $"{i + 1}. {hazard}"));
+    }
+
+    /// <summary>
+    /// True when the source contains a <c>SYSTEM</c> statement — the only way a QB64 program
+    /// actually exits without a keypress. Scanned per statement so <c>SYSTEM</c> inside a string
+    /// or comment does not count.
+    /// </summary>
+    private static bool HasSystemStatement(string source) =>
+        source.Replace("\r\n", "\n").Split('\n')
+            .Select(QBasicStructureLinter.StripStringsAndComments)
+            .Where(codeOnly => !string.IsNullOrWhiteSpace(codeOnly) && !codeOnly.TrimStart().StartsWith('$'))
+            .SelectMany(codeOnly => codeOnly.Split(':'))
+            .Any(segment => SystemStatementRegex.IsMatch(segment.Trim()));
 
     /// <summary>
     /// Returns the first graphics-mode <c>SCREEN</c> statement in <paramref name="source"/>, or
