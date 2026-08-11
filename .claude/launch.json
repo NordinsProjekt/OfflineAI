@@ -12,6 +12,15 @@
       "runtimeExecutable": "dotnet",
       "runtimeArgs": ["run", "--project", "AgentKit.Api/AgentKit.Api.csproj", "--urls", "http://localhost:5119"],
       "port": 5119
+    },
+    {
+      "name": "offlineai-dashboard",
+      "runtimeExecutable": "C:\\Users\\belfe\\Desktop\\OfflineAIDashboard\\AiDashboard.exe",
+      "runtimeArgs": [
+        "--urls", "http://localhost:5000",
+        "--contentRoot", "C:\\Users\\belfe\\Desktop\\OfflineAIDashboard"
+      ],
+      "port": 5000
     }
   ]
 }
